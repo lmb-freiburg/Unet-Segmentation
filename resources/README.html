@@ -1,0 +1,337 @@
+<html>
+  <head>
+    <title>U-Net Segmentation README</title>
+  </head>
+  <body>
+    <h1>Important Notes and Disclaimer</h1>
+    <p>
+      All code is provided <b>as is</b> and without any warranty of functionality or fitness for a given task.
+    </p>
+    <p>
+      The framework is based on caffe (<a href="http://bvlc.eecs.berkeley.edu">http://bvlc.eecs.berkeley.edu</a>). The caffe framework can run entirely on the CPU or use GPU acceleration. If available, it is highly recommended to use GPU acceleration. By using GPU acceleration the computation times are drastically reduced by a factor of 20-100 (i.e. computations take minutes instead of hours).
+    </p>
+    <p>
+      Please file bug reports to <a href="mailto:maid@informatik.uni-freiburg.de">maid@informatik.uni-freiburg.de</a> including information about your system and hardware.
+    </p>
+
+    <hr />
+    
+    <h1>Content</h1>
+    <ul>
+      <li><a href="#installation">Installation</a></li>
+      <ul>
+	<li><a href="#installation-prerequisites">Prerequisites</a></li>
+	<li><a href="#installation-backend">Backend (Server) Setup</a></li>
+	<li><a href="#installation-client">Frontend (Client) Setup</a></li>
+	</ul>
+      <li><a href="#usage">Using the FiJi U-Net plugin with the pretrained 2D Cell Net</a></li>
+      <ul>
+	<li><a href="#usage-walkthrough">Walk-through example</a></li>
+	<li><a href="#usage-parameters">U-Net Segmentation parameters</a></li>
+      </ul>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ul>
+
+    <hr />
+    
+    <h1 id="installation">Installation Instructions</h1>
+    
+    <h2 id="installation-prerequisites">Prerequisites</h2>
+    <p>
+      You need a computer for runnning the backend (Cell Net) and a computer for running the frontend (ImageJ with our U-Net plugin). You can run the frontend on the same computer as the backend if desired.
+    </p>
+    <p>
+      Backend (Server) requirements:
+      <ul>
+        <li>Ubuntu Linux 14.04 or 16.04</li>
+        <li><i>(optional)</i> NVIDIA GPU (e.g. TitanX, GTX1080, GTX980 or similar) for faster runtimes; Requires CUDA 8.0</li>
+        <li><i>(optional)</i> Mathworks MATLAB (TM) R2015a or newer for fine-tuning the Cell Net to new datasets</li>
+      </ul>
+    </p>
+    <p>
+      Frontend (Client) requirements:
+      <ul>
+        <li>Linux, MacOS or Windows</li>
+      </ul>
+    </p>
+    
+    <h2 id="installation-backend">Backend (Cell Net) Setup</h2>
+
+    <h3 id="installation-backend-cloud">Setup on Public Cloud</h3>
+    <p>
+      This option is well suited to test-drive Cell Net for your specific images as it allows to make predictions with a minimal financial (about one USD) and minimal time (about one hour) investment, while fully benefiting from GPU accelerated code execution.
+    </p>
+    <p>
+      The proposed setup is reasonably safe. The authentication happens through an RSA key and communication between your local client PC and the AWS cloud instance is encrypted. However, be aware that you will transmit your images to an external location, possibly located outside your country. Be sure to comply with your organizational data storage rules.
+    </p>
+    <p>
+      The Amazon Machine Image (AMI) that includes the operating system and additional software is provided by Amazon. Note, that with the proposed procedure you are at no point required to enter a password, except to access the Amazon AWS web page.
+    </p>
+
+    <h4 id="installation-backend-cloud-aws">Setup Amazon AWS</h4>
+    <p>
+      Setting up an AWS account requires a valid credit card and a callable phone number. The cloud instances (i.e. the virtual servers) are bound to a <b>region</b>. Not every region provides the same infrastructure. During the setup process you will be asked to generate a <b>key pair</b>. This <b>key pair</b> is specific to a region and since we later are going to reserve resources that are not available in all regions, make sure you create the key in the region <b>eu-west-1</b>.
+    </p>
+    <p>
+      Follow all instructions under this link and select region <b>eu-west-1</b> when creating the key pair: <a href="http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/get-set-up-for-amazon-ec2.html">http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/get-set-up-for-amazon-ec2.html</a>.
+    </p>
+
+    <h4>Run a virtual machine with GPU</h4>
+    <p>
+      Bare in mind that as soon as an instance is running, you will be charged an hourly cost. Typically, the hourly cost will be below 1 USD per hour. Make sure to terminate your session(s) when done. The virtual machine with GPU will play the role of the CellNet <i>server</i>.
+    </p>
+    <p>
+      We will use a <i>spot instance</i>, which is a temporary instance that will be at your disposal as long as the market price is below a threshold set by you. Unlike <i>spot instances</i>, the regular <i>on-demand instances</i> have a fixed price and can be paused. However, no <i>on-demand instances</i> are available to new AWS users, thus we use <i>spot instances</i> for this procedure. Follow the instructions in the link: <a href="http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-requests.html#using-spot-instances-request">http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-requests.html#using-spot-instances-request</a> to launch a spot instance. First, change to region EU (Ireland). Choose <b>g2.2xlarge</b> as instance type and <b>ami-0d77397e</b> (Ubuntu 16.04) as root image. Note, that above AMI will only work in region <b>eu-west-1</b>.
+    </p>
+
+    <h4>Connect to your EC2 instance</h4>
+    <p>
+      Once the spot instance is running, log on to the instance as described at <a href="http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html#ec2-connect-to-instance-linux">http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html#ec2-connect-to-instance-linux</a> and copy the IP address of your running EC2 instance to your clipboard or write it down. The username is <i>ubuntu</i> and the authentication is done by the saved key. The way to connect depends on your operating system.
+    </p>
+
+    <h4>Run Cell Net setup</h4>
+    <p>
+      Once you are logged in, run following commands:
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;"pre>
+      cd ~<br />
+      wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_8.0.44-1_amd64.deb<br />
+      sudo dpkg -i cuda-repo-ubuntu1604_8.0.44-1_amd64.deb<br />
+      sudo apt-get update<br />
+      sudo apt-get install -y cuda unzip<br />
+      sudo apt-get clean<br />
+      wget --user ***** --password ***** http://lmb.informatik.uni-freiburg.de/people/maid/cellnet_supplemental/caffe_unet_package_16.04_gpu_no_cuDNN.zip<br />
+      unzip caffe_unet_package_16.04_gpu_no_cuDNN.zip<br />
+      echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/ubuntu/caffe_unet_package_16.04_gpu_no_cuDNN/libs" | cat - ~/.bashrc &gt; tmp<br />
+      echo "export PATH=$PATH:/home/ubuntu/caffe_unet_package_16.04_gpu_no_cuDNN/bin" | cat - tmp &gt; ~/.bashrc<br />
+      echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-8.0/lib64" | cat - ~/.bashrc &gt; tmp<br />
+      mv tmp ~/.bashrc<br />
+    </p>
+
+    <h4>Use CellNet Client</h4>
+    <p>
+      While the EC2 instance is running, follow the section <a href="#installation-client">Frontend (Client) Setup</a> further below. On your local <i>client</i> computer enter the IP address of your EC2 instance, choose <i>ubuntu</i> as user name and choose the private RSA key specified earlier.
+    </p>
+
+    <h4>Save Snapshot for Future Use <i>(Optional)</i></h4>
+    <p>
+      <b>IMPORTANT NOTE:</b> Storing a snapshot of your image will cost approximately 0.05 dollars per month per GB. The proposed image has a size of 16GB, thus will cost 0.4 dollars per month to be stored. Saving a snapshot allows to re-start the Cell Net <i>server</i> instance later and skip the configuration steps. Here is a link describing how to save a snapshot: <a href="http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-creating-snapshot.html">http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-creating-snapshot.html</a>.
+    </p>
+    <p>
+      In order to start an instance based on a snapshot, it needs to be converted to an AMI (subsection <a href="http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/creating-an-ami-ebs.html">Creating a Linux AMI from a Snapshot</a>).
+    </p>
+
+    <h4>Terminate instance</h4>
+    <p>
+      <b>IMPORTANT NOTE:</b> You will be charged for each hour that your instance is running, regardless whether you are interacting with it or not. To terminate the instance follow the instruction in <a href="http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/terminating-instances.html">http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/terminating-instances.html</a>.
+    </p>
+
+    <h3>On-Premise Setup</h3>
+    <p>
+      We recommend using the current Ubuntu 16.04 on a computer with a compatible GPU with at least 4GB of vRAM. The tutorial will assume the use of Ubuntu 16.04. If you use the older Ubuntu 14.04 release, replace the string "16.04" everywhere with "14.04". If you don't have a gpu replace "gpu" with "cpu" and skip the installation of CUDA.
+    </p>
+    <p>
+      We describe the setup process for the fictional user "maid" who wants to install the caffe U-Net backend in the directory "/home/maid/cellnet" on the host with IP "192.168.0.10" and hostname "backendserver". He runs both backend and frontend on the same machine with ubuntu 16.04 and a GTX 980M GPU with 8GB. Installing and Plugin usage instructions are also provided as a video tutorial.
+    </p>
+    <h4>Installation of CUDA 8.0</h4>
+    <p>
+      Download the CUDA 8.0 library:
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      cd /tmp<br />
+      wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_8.0.44-1_amd64.deb<br />
+      sudo dpkg -i cuda-repo-ubuntu1604_8.0.44-1_amd64.deb<br />
+      sudo apt-get update<br />
+      sudo apt-get install -y cuda unzip<br />
+      sudo apt-get clean<br />
+      rm cuda-repo-ubuntu1604_8.0.44-1_amd64.deb<br />
+      cd ~<br />
+    </p>
+    <p>
+      Set the environment by adding the following line to the <i>top</i> of your .bashrc
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-8.0/lib64/
+    </p>
+
+    <h4>Installation of the Cell Net package</h4>
+    <p>
+      Download caffe_unet_package_16.04.zip and caffe_models_2d.zip to /home/maid/cellnet.
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      cd /home/maid/cellnet<br />
+      unzip caffe_unet_package_16.04_gpu_no_cuDNN.zip<br />
+      unzip caffe_models_2d.zip<br />
+    </p>
+    <p>
+      Edit your ~/.bashrc file to set up the environment for the caffe U-Net software (You can combine the LD_LIBRARY_PATH statement below with the one above):
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/maid/cellnet/unet_package_16.04_gpu/libs<br />
+      export PATH=$PATH:/home/maid/cellnet/unet_package_16.04_gpu/bin<br />
+    </p>
+    <p>
+      Test, if it works: start a new shell and execute
+    </p>      
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      caffe<br />
+    </p>
+    <p>
+      A usage message should appear on the screen.
+    </p>
+    <p>
+      Test whether execution over ssh works:
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      ssh localhost caffe<br />
+    </p>
+    <p>
+      A usage message should appear on the screen.
+    </p>
+    
+    <h2 id="installation-client">Frontend (Client) Setup</h2>
+    
+    <p>
+      <ol>
+        <li><i>(optional)</i> Check, if you can connect to the server and execute a program there:
+          <ul>
+            <li>install <b>ssh</b> and a terminal program if you don't have one</li>
+            <li>open the terminal program</li>
+            <li>type "ssh maid@192.168.0.10 caffe" where you replace 192.168.0.10 with the IP-Address or name of your server</li>
+            <li>it should ask you for your password</li>
+            <li>a usage message should appear</li>
+          </ul>
+        </li>
+        <li>Installation of the Fiji U-Net plugin.
+          <ul>
+            <li>Install Fiji from <a href="http://www.fiji.sc">http://www.fiji.sc</a>.</li>
+            <li>Start FiJi and go to Help->Update...->Manage update sites</li> 
+            <li>Select "U-Net Segmentation" update site</li>
+            <li>Add update site -> Close -> Apply Changes (then restart FiJi)</li>
+          </ul>
+        </li>
+      </ol>
+      <p>
+        The plugin needs to be installed on the client computers only. It has no included segmentation capabilities, instead it interfaces existing caffe installations on the local machine or a backend server that is accessible via secure shell (ssh) and secure file transfer (sftp).
+      </p>
+    </p>
+
+    <hr />
+    
+    <h1 id="usage">Using the FiJi U-Net plugin with the pretrained 2D Cell Net</h1>
+    
+    <h2 id="usage-walkthrough">Walk-through example</h2>
+    
+    <ol>
+      <li>Open a gray valued image, e.g. /home/maid/cellnet/caffe_unet_package_16.04_gpu/2dcellnet_finetune/valdata_rbc/48hr-003-DIC.tif</li>
+      <li>Use Image->Properties... to set the pixel extents<br />
+	<table>
+	  <tbody>
+	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Unit:</th><td>micrometer</td></tr>
+	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Pixel width:</th><td>0.45</td></tr>
+ 	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Pixel height:</th><td>0.45</td></tr>
+	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Voxel depth:</th><td>1</td></tr>
+	  </tbody>
+	</table>
+	<p>
+ 	  (For different images exchange width and height values by the actual pixel-size of your image)
+	</p>
+      </li>
+      <li>Setup a new segmentation with Plugins->U-Net->U-Net Segmentation Manager->New Segmentation<br />
+	<table>
+	  <tbody>
+	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Model:</th><td>2D Cell Net v0<sup>*</sup></td></tr>
+	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Weight file:</th><td>/home/maid/cellnet/caffe_models_2d/2d_cell_net_v0_snapshot_iter_150000.caffemodel.h5</td></tr>
+	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Process Folder:</th><td>/home/maid/cellnet</td></tr>
+ 	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Use GPU:</th><td>GPU0</td></tr>
+ 	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Memory (MB):</th><td>8000</td></tr>
+ 	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Host:</th><td>192.168.0.10</td></tr>
+ 	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Port:</th><td>22</td></tr>
+	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Username:</th><td>maid</td></tr>
+ 	    <tr style="vertical-align:baseline;"><th style="text-align:right;">Password:</th><td>********</td></tr>
+	  </tbody>
+	</table>
+	<p>
+	  <sup>*</sup>see below how to select the Folder to chose Model from
+	</p>
+      </li>
+      <li>Click "OK"</li>
+    </ol>
+
+    <p>Segmentation progress will be shown in a new row of the job table. After the caffe_unet binary on the backend server has finished the "Cancel" button on the right will change to "Show". Click it to show the segmentation result.</p>
+
+    <h2 id="usage-parameters">U-Net Segmentation parameters</h2>
+
+    <dl>
+      <dt style="font-weight:bold;">Model:</dt>
+      <dd>Use the "Select folder" icon on the right of the "Model:"-line to select the local folder containing the Cell net model (2D or 3D) (e.g. /home/maid/cellnet/caffe_models_2d). Then select the model you want to use for segmentation in the combo box.</dd>
+      <dt><span style="font-weight:bold;">Weight file:</span> (Path on the backend server)</dt>
+      <dd>The weight file contains the weights of the trained Cell Net. The weights file must be available via the given path on the backend (server) running caffe_unet.</dd>
+      <dt><span style="font-weight:bold;">Process folder:</span> (Path on the backend server)</dt>
+	<dd>During the segmentation process intermediate files will be created and stored in the given folder on the backend server running caffe_unet. These files are: the model definition, the normalized image data, and the segmentation result. After closing Fiji, these temporary files will be removed.</dd>
+      <dt style="font-weight:bold;">Use GPU:</dt>
+      <dd>Select the GPU that is used for the segmentation. In CPU-only mode, select "None".</dd>
+      <dt style="font-weight:bold;">Tiling Layout:</dt>
+      <dd>Depending on the selected model, there are various options of defining the tiling layout. If available (which is the case for 2D Cell Net) we recommend to use the "Memory (MB)" option with which you can define the available amount of memory on the GPU. The options "Tile shape (px)" and "Grid (tiles)" are always available and let you define the maximum tile size or the tiling layout. The given values are upper bounds and will be adjusted to appropriate network input sizes. "#Tiles" uses the given amount of tiles and automatically defines the tile shape for optimal performance. "#Pixels/Tile" let's you set the number of input pixels of each tile. See also "caffe_unet --help" for further details.</dd>
+      <dt style="font-weight:bold;">Use remote host:</dt>
+      <dd>Check this to use a backend server for segmentation. If you want to use the local machine for segmentation, please uncheck.</dd>
+      <dt style="font-weight:bold;">Host:</dt>
+      <dd>The hostname of the backend server on which caffe_unet is installed.</dd>
+      <dt style="font-weight:bold;">Port:</dt>
+      <dd>The SSH port of the backend server (Default is 22).</dd>
+      <dt style="font-weight:bold;">Username:</dt>
+      <dd>Your username on the backend server.</dd>
+      <dt style="font-weight:bold;">Password:/RSA key:</dt>
+      <dd>Your SSH password on the backend server.</dd>
+      <dt style="font-weight:bold;">Keep original:</dt>
+      <dd>If checked, the original image is retained, otherwise it is replaced by the normalized image in processing resolution.</dd>
+      <dt style="font-weight:bold;">Output scores:</dt>
+      <dd>If checked, the output scores of the network are output instead of the binary segmentation masks. The output scores contain as many channels as there are classes. The segmentation can be obtained through the scores via a pixel-wise arg max operation over the channels. Scores are especially useful during training and fine-tuning to get an idea of the training progress.</dd>
+    </dl>
+
+    <h1 id="troubleshooting">Troubleshooting</h1>
+
+    <p>
+      If using GPU acceleration, make sure the graphics card is being recognized. Execution of
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      nvidia-smi
+    </p>
+    <p>
+      should show a table indicating the NVIDIA GPUs installed on the system.
+    </p>
+    <p>
+      When logging in to the server, the command
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      caffe_unet
+    </p>
+    <p>
+      should display a usage message by caffe. If not, make sure the $PATH and $LD_LIBRARY_PATH environment variables are set correctly. The same usage message must also appear when you run the command with a non interactive shell from a remote server:
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      ssh user@backendserver caffe_unet
+    </p>
+    <p>
+      If .bashrc contains an expression such as
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      case $- in</br >
+      <span style="padding-left:10px;">*i*);;</span><br />
+      <span style="padding-left:10px;">*) return;;</span><br />
+      esac<br />
+    </p>
+    <p>
+      or
+    </p>
+    <p style="font-family:monospace;padding-left:10px;padding-top:10px;padding-bottom:10px;background-color:#e0e0e0;">
+      [ -z "$PS1" ] && return
+    </p>
+    <p>
+      all instructions after that line will be ignored, thus the specification of the environment variables must be placed before this expression. Ensure that no outputs to standard output are generated in your .bashrc in non-interactive mode, otherwise file upload/download via sftp fails!
+    </p>
+    <p>
+      The selected model file is uploaded to the backend server when starting the segmentation. The weights must already reside on the backend server at the given location. The process folder is created on the backend server on demand given sufficient user rights.
+    </p>
+  </body>
+</html>
