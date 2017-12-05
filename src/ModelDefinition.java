@@ -18,7 +18,7 @@ import ch.systemsx.cisd.hdf5.IHDF5Reader;
 import ch.systemsx.cisd.hdf5.HDF5DataSetInformation;
 import ch.systemsx.cisd.base.mdarray.MDFloatArray;
 
-public class ModelDefinition 
+public class ModelDefinition
 {
 
   public File file = null;
@@ -38,8 +38,8 @@ public class ModelDefinition
   public int[][] memoryMap = null;
 
   public String weightFile = null;
-  
-  public JComboBox tileModeSelector = new JComboBox();
+
+  public JComboBox<String> tileModeSelector = new JComboBox<String>();
   public JPanel tileModePanel = new JPanel(new CardLayout());
 
   private static final String NTILES = "# Tiles:";
@@ -47,7 +47,7 @@ public class ModelDefinition
   private static final String SHAPE = "Tile shape (px):";
   private static final String NPIXELSPERTILE = "# Pixels/Tile:";
   private static final String MEMORY = "Memory (MB):";
-  
+
   private JSpinner _nTilesSpinner = null;
   private JSpinner _shapeXSpinner = null;
   private JSpinner _shapeYSpinner = null;
@@ -57,7 +57,7 @@ public class ModelDefinition
   private JSpinner _gridZSpinner = null;
   private JSpinner _nPixelsPerTileSpinner = null;
   private JSpinner _gpuMemSpinner = null;
-  
+
   public ModelDefinition()
         {
           // Prepare empty GUI elements for this model
@@ -81,7 +81,7 @@ public class ModelDefinition
         {
           return file != null;
         }
-  
+
   private void createTileShapeCard()
         {
           JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
@@ -109,7 +109,7 @@ public class ModelDefinition
                     (int)Prefs.get(
                         "unet_segmentation." + id + ".tileShapeZ", 100), 1,
                     (int)Integer.MAX_VALUE, 1));
-            panel.add(_shapeZSpinner);           
+            panel.add(_shapeZSpinner);
           }
           tileModePanel.add(panel, SHAPE);
           tileModeSelector.addItem(SHAPE);
@@ -152,7 +152,7 @@ public class ModelDefinition
                     (int)Prefs.get(
                         "unet_segmentation." + id + ".tileGridZ", 5), 1,
                     (int)Integer.MAX_VALUE, 1));
-            panel.add(_gridZSpinner);           
+            panel.add(_gridZSpinner);
           }
           tileModePanel.add(panel, GRID);
           tileModeSelector.addItem(GRID);
@@ -222,7 +222,7 @@ public class ModelDefinition
             createNPixelsPerTileCard();
           }
           if (memoryMap != null) createMemoryCard();
-          
+
           tileModeSelector.setSelectedItem(
               (String)Prefs.get(
                   "unet_segmentation." + id + ".tilingOption",
@@ -262,7 +262,7 @@ public class ModelDefinition
           if (memoryMap != null && memoryMap.length == 2)
               writer.int32().writeMatrix(
                   "/unet_param/mapInputNumPxGPUMemMB", memoryMap);
-          writer.close();        
+          writer.close();
         }
 
   public void save() throws HDF5Exception
@@ -412,7 +412,7 @@ public class ModelDefinition
                       (Integer)_shapeYSpinner.getValue());
             if (elementSizeUm.length == 3)
                 Prefs.set("unet_segmentation." + id + ".tileShapeZ",
-                          (Integer)_shapeZSpinner.getValue());            
+                          (Integer)_shapeZSpinner.getValue());
             return;
           }
 
@@ -420,7 +420,7 @@ public class ModelDefinition
                   NPIXELSPERTILE))
           {
             Prefs.set("unet_segmentation." + id + ".nPixelsPerTile",
-                      (Integer)_nPixelsPerTileSpinner.getValue());            
+                      (Integer)_nPixelsPerTileSpinner.getValue());
             return;
           }
 
@@ -435,7 +435,7 @@ public class ModelDefinition
               "Cannot handle unknown tiling mode '" +
               (String)tileModeSelector.getSelectedItem() + "'");
         }
-  
+
   @Override
   public String toString()
         {

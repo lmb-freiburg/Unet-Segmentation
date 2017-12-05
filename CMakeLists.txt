@@ -33,7 +33,7 @@ find_jar(JSCH_JAR "${JSCH_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the
 
 set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR})
 
-add_jar(Unet_Segmentation src/Unet_Segmentation_Manager.java src/UnetJobTableModel.java src/UnetJob.java src/UnetTools.java src/MyUserInfo.java src/MySftpProgressMonitor.java src/ModelDefinition.java src/ProcessResult.java src/TaskStatus.java COPYING.txt plugins.config resources/README.html)
+add_jar(Unet_Segmentation src/Unet_Segmentation_Manager.java src/UnetJobTableModel.java src/HostConfigurationPanel.java src/UnetJob.java src/UnetTools.java src/MyUserInfo.java src/MySftpProgressMonitor.java src/ModelDefinition.java src/ProcessResult.java src/TaskStatus.java COPYING.txt plugins.config resources/README.html)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)
 
