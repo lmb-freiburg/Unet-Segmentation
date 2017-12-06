@@ -24,153 +24,49 @@ import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
 import ch.systemsx.cisd.hdf5.HDF5Factory;
 import ch.systemsx.cisd.hdf5.IHDF5Reader;
 
-public class UnetJob extends Thread implements PlugIn {
+public class UnetSegmentationJob extends UnetJob {
 
-  protected boolean _isInteractive = true;
-  protected boolean _finished = false;
+  private File _localTmpFile = null;
 
-  protected final String _jobId = "unet-" + UUID.randomUUID().toString();
+  private ImagePlus _imp = null;
+  private String _impName = null;
+  private int[] _impShape = {0, 0, 0, 0, 0};
+  private Calibration _impCalibration = null;
 
-  protected UnetJobTableModel _jobTableModel = null;
+  private JCheckBox _keepOriginalCheckBox = new JCheckBox(
+      "Keep original", Prefs.get("unet_segmentation.keepOriginal", false));
+  private JCheckBox _outputScoresCheckBox = new JCheckBox(
+      "Output scores", Prefs.get("unet_segmentation.outputScores", false));
 
-  private TaskStatus _taskStatus = new TaskStatus();
-  private long _taskProgressMin = 0;
-  private long _taskProgressMax = 0;
-  private long _jobProgress = 0;
-  protected JButton _readyCancelButton = new JButton("Cancel");
-
-  protected JDialog _parametersDialog = null;
-  protected GroupLayout _dialogLayout = null;
-
-
-  protected JComboBox<ModelDefinition> _modelComboBox =
-      new JComboBox<ModelDefinition>();
-  protected JTextField _weightsFileTextField = new JTextField("", 20);
-  protected JTextField _processFolderTextField = new JTextField(
-      Prefs.get("unet_segmentation.processfolder", ""), 20);
-  private final String[] gpuList = {
-      "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
-      "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
-  protected JComboBox<String> _useGPUComboBox = new JComboBox<>(gpuList);
-
-  protected HostConfigurationPanel _hostConfiguration = null;
-
-  protected Session _sshSession;
-
-  protected Vector<String> _createdRemoteFolders = new Vector<String>();
-  protected Vector<String> _createdRemoteFiles = new Vector<String>();
-
-  protected File _modelFolder = null;
-
-  public String id() {
-    return _jobId;
-  }
-
-  public void setJobTableModel(UnetJobTableModel jobTableModel) {
-    _jobTableModel = jobTableModel;
-  }
-
-  public ModelDefinition model() {
-    if (_modelComboBox.getSelectedItem() instanceof ModelDefinition)
-        return (ModelDefinition)_modelComboBox.getSelectedItem();
-    else return null;
-  }
-
-  public String weightsFileName() {
-    return _weightsFileTextField.getText();
-  }
-
-  public String hostname() {
-    if (_sshSession != null) return _sshSession.getHost();
-    else return "localhost";
-  }
-
-  public void setTaskProgress(String status, long progress, long maxProgress) {
-    _taskStatus.name = status;
-    _taskStatus.progress = progress;
-    _taskStatus.maxProgress = maxProgress;
-    _taskStatus.isIndeterminate = (maxProgress == 0);
-    if (_jobTableModel != null) {
-      SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              _jobTableModel.updateJobStatus(_jobId);
-            }});
-    }
-    else IJ.showStatus(_taskStatus.name);
-    IJ.log(status);
-  }
-
-  public TaskStatus status() {
-    return _taskStatus;
-  }
-
-  public void setTaskProgress(long progress, long maxProgress) {
-    _taskStatus.progress = progress;
-    _taskStatus.maxProgress = maxProgress;
-    _taskStatus.isIndeterminate = (maxProgress == 0);
-    if (_jobTableModel != null) {
-      SwingUtilities.invokeLater(
-          new Runnable() {
-            @Override
-            public void run() {
-              _jobTableModel.updateJobStatus(_jobId);
-            }});
+  public void setImagePlus(ImagePlus imp) {
+    _imp = imp;
+    if (_imp != null) {
+      _impName = _imp.getTitle();
+      _impShape = _imp.getDimensions();
+      _impCalibration = _imp.getCalibration().copy();
     }
   }
 
-  public void setTaskProgressRange(long min, long max) {
-    _taskProgressMin = min;
-    _taskProgressMax = max;
+  public String imageName() {
+    return _impName;
   }
 
-  public void setTaskProgressMin(long min) {
-    _taskProgressMin = min;
+  public int[] imageShape() {
+    return _impShape;
   }
 
-  public long getTaskProgressMin() {
-    return _taskProgressMin;
+  public Calibration imageCalibration() {
+    return _impCalibration;
   }
 
-  public void setTaskProgressMax(long max) {
-    _taskProgressMax = max;
-  }
-
-  public long getTaskProgressMax() {
-    return _taskProgressMax;
-  }
-
-  public long progress() {
-    return _jobProgress;
-  }
-
-  public void setProgress(long progress, long progressMax) {
-    _jobProgress = (100 * progress) / progressMax;
-    if (_jobTableModel != null) {
-      SwingUtilities.invokeLater(
-          new Runnable() {
-            @Override
-            public void run() {
-              _jobTableModel.updateJobProgress(_jobId);
-            }});
-    }
-    else IJ.showProgress(_jobProgress / 100.0);
-  }
-
-  public void setProgress(long progress) {
-    setProgress(progress, 100);
-  }
-
-  public JButton readyCancelButton() {
-    return _readyCancelButton;
-  }
-
+  @override
   public boolean ready() {
-    return _readyCancelButton.getText().equals("Ready");
+    return _readyCancelButton.getText().equals("Show");
   }
 
+  @override
   protected void setReady(boolean ready) {
-    _readyCancelButton.setText("Ready");
+    _readyCancelButton.setText("Show");
     if (_jobTableModel == null) return;
     SwingUtilities.invokeLater(
         new Runnable() {
@@ -180,130 +76,51 @@ public class UnetJob extends Thread implements PlugIn {
           }});
   }
 
+  @override
   public void finish() {
     if (_finished) return;
-    cleanUp();
-  }
-
-  private void searchModels() {
-    _modelComboBox.removeAllItems();
-    if (_modelFolder != null && _modelFolder.isDirectory()) {
-      File[] files = _modelFolder.listFiles(
-          new FileFilter() {
-            @Override public boolean accept(File file) {
-              return file.getName().matches(".*[.]h5$");
-            }});
-      for (int i = 0; i < files.length; i++) {
-        try {
-          ModelDefinition model = UnetTools.loadModel(files[i]);
-          if (model != null) _modelComboBox.addItem(model);
+    try {
+      UnetTools.loadSegmentationToImagePlus(
+          _localTmpFile, this, _outputScoresCheckBox.isSelected());
+      cleanUp();
+      if (Recorder.record) {
+        Recorder.setCommand(null);
+        String command = "call('UnetJob.segmentHyperStack', " +
+            "'modelFilename=" + model().file.getAbsolutePath() +
+            ",weightsFilename=" + _weightsFileTextField.getText() +
+            "," + model().getTilingParameterString() +
+            ",gpuId=" + (String)_useGPUComboBox.getSelectedItem() +
+            ",useRemoteHost=" + String.valueOf(_sshSession != null);
+        if (_sshSession != null) {
+          command +=
+              ",hostname=" + _sshSession.getHost() +
+              ",port=" + String.valueOf(_sshSession.getPort()) +
+              ",username=" + _sshSession.getUserName();
+          if (_hostConfiguration.authRSAKey())
+              command += ",RSAKeyfile=" + _hostConfiguration.rsaKeyFile();
         }
-        catch (HDF5Exception e) {}
-      }
-      if (_modelComboBox.getItemCount() == 0)
-          _modelComboBox.addItem(new ModelDefinition());
-      else {
-        String modelName = Prefs.get("unet_segmentation.modelName", "");
-        for (int i = 0; i < _modelComboBox.getItemCount(); i++) {
-          if (_modelComboBox.getItemAt(i).name.equals(modelName)) {
-            _modelComboBox.setSelectedIndex(i);
-            break;
-          }
-        }
-        Prefs.set("unet_segmentation.modelDefinitionFolder",
-                  _modelFolder.getAbsolutePath());
+        command +=
+            ",processFolder=" + _processFolderTextField.getText() +
+            ",keepOriginal=" + String.valueOf(
+                _keepOriginalCheckBox.isSelected()) +
+            ",outputScores=" + String.valueOf(
+                _outputScoresCheckBox.isSelected()) + "');";
+        Recorder.recordString(command);
       }
     }
-    _parametersDialog.invalidate();
-    _parametersDialog.pack();
-    _parametersDialog.setMinimumSize(_parametersDialog.getPreferredSize());
-    _parametersDialog.setMaximumSize(
-        new Dimension(_parametersDialog.getMaximumSize().width,
-                      _parametersDialog.getPreferredSize().height));
-    _parametersDialog.validate();
+    catch (IOException e) {
+      IJ.error(e.toString());
+    }
+    catch (Exception e) {
+      IJ.error(e.toString());
+    }
   }
 
   public void prepareParametersDialog() {
-    /*******************************************************************
-     * Generate the GUI layout without logic
-     *******************************************************************/
 
-    // Host configuration
-    _hostConfiguration = new HostConfigurationPanel();
-
-    // Model selection
-    final JLabel modelLabel = new JLabel("Model:");
-    _modelComboBox.setToolTipText("Select a caffe model.");
-    final JButton modelFolderChooseButton;
-    if (UIManager.get("FileView.directoryIcon") instanceof Icon)
-        modelFolderChooseButton = new JButton(
-            (Icon)UIManager.get("FileView.directoryIcon"));
-    else modelFolderChooseButton = new JButton("...");
-    int marginTop = (int) Math.ceil(
-        (modelFolderChooseButton.getPreferredSize().getHeight() -
-         _modelComboBox.getPreferredSize().getHeight()) / 2.0);
-    int marginBottom = (int) Math.floor(
-        (modelFolderChooseButton.getPreferredSize().getHeight() -
-         _modelComboBox.getPreferredSize().getHeight()) / 2.0);
-    Insets insets = modelFolderChooseButton.getMargin();
-    insets.top -= marginTop;
-    insets.left = 1;
-    insets.bottom -= marginBottom;
-    insets.right = 1;
-    modelFolderChooseButton.setMargin(insets);
-    modelFolderChooseButton.setToolTipText(
-        "Select local model definition folder");
-
-    // Weights
-    final JLabel weightsFileLabel = new JLabel("Weight file:");
-    _weightsFileTextField.setToolTipText(
-        "Location of the file containing the trained network weights " +
-        "on the backend server.\nIf not yet on the server, on-the-fly " +
-        "file upload will be offered.");
-    final JButton weightsFileChooseButton =
-        _hostConfiguration.weightsFileChooseButton();
-    marginTop = (int) Math.ceil(
-        (weightsFileChooseButton.getPreferredSize().getHeight() -
-         _weightsFileTextField.getPreferredSize().getHeight()) / 2.0);
-    marginBottom = (int) Math.floor(
-        (weightsFileChooseButton.getPreferredSize().getHeight() -
-         _weightsFileTextField.getPreferredSize().getHeight()) / 2.0);
-    insets = weightsFileChooseButton.getMargin();
-    insets.top -= marginTop;
-    insets.left = 1;
-    insets.bottom -= marginBottom;
-    insets.right = 1;
-    weightsFileChooseButton.setMargin(insets);
-    weightsFileChooseButton.setToolTipText(
-        "Choose the file containing the trained network weights.");
-
-    // Processing environment
-    final JLabel processFolderLabel = new JLabel("Process Folder:");
-    _processFolderTextField.setToolTipText(
-        "Folder for temporary files on the backend server.");
-    final JButton processFolderChooseButton =
-        _hostConfiguration.processFolderChooseButton();
-    marginTop = (int) Math.ceil(
-        (processFolderChooseButton.getPreferredSize().getHeight() -
-         _processFolderTextField.getPreferredSize().getHeight()) / 2.0);
-    marginBottom = (int) Math.floor(
-        (processFolderChooseButton.getPreferredSize().getHeight() -
-         _processFolderTextField.getPreferredSize().getHeight()) / 2.0);
-    insets = processFolderChooseButton.getMargin();
-    insets.top -= marginTop;
-    insets.left = 1;
-    insets.bottom -= marginBottom;
-    insets.right = 1;
-    processFolderChooseButton.setMargin(insets);
-    processFolderChooseButton.setToolTipText(
-        "Select the folder to store temporary files.");
-
-    // GPU parameters
-    final JLabel useGPULabel = new JLabel("Use GPU:");
-    _useGPUComboBox.setToolTipText(
-        "Select the GPU id to use. Select CPU if you don't have any " +
-        "CUDA capable GPU available on the compute host. Select " +
-        "<autodetect> to leave the choice to caffe.");
+    // Testing parameters
+    final JPanel tilingModeSelectorPanel = new JPanel(new BorderLayout());
+    final JPanel tilingParametersPanel = new JPanel(new BorderLayout());
 
     // Create Parameters Panel
     final JPanel dialogPanel = new JPanel();
@@ -612,7 +429,7 @@ public class UnetJob extends Thread implements PlugIn {
       }
 
       try {
-        _sshSession = _hostConfiguration.sshSession();
+        _sshSession = _hostConfiguration.sshSession(this);
       }
       catch (JSchException e) {
         IJ.log("SSH connection to '" + _hostConfiguration.hostname() +
