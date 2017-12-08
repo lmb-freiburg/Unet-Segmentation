@@ -27,7 +27,7 @@ public class UnetTools
 {
 
 /*======================================================================*/
-/*! 
+/*!
  *   Remove the file with given path from the remote host via sftp.
  *
  *   \param path The absolute file path on the remote host
@@ -62,7 +62,7 @@ public class UnetTools
         }
 
 /*======================================================================*/
-/*! 
+/*!
  *   Remove the folder with given path from the remote host via sftp.
  *   The folder must be empty before it can be removed.
  *
@@ -98,7 +98,7 @@ public class UnetTools
         }
 
 /*======================================================================*/
-/*! 
+/*!
  *   Upload the given local file to the remote host via sftp. Required
  *   folders on the remote host will be created and returned in reverse
  *   creation order to allow to easily clean up again later.
@@ -189,12 +189,12 @@ public class UnetTools
           }
           channel.disconnect();
           if (job != null) job.setTaskProgress(1, 1);
-          
+
           return createdFolders;
         }
 
 /*======================================================================*/
-/*! 
+/*!
  *   Fetch the remote file with given path via sftp. The file will be marked
  *   for deletion (deleteOnExit()) on Java virtual machine shutdown. So if
  *   you want to keep it you have to explicitly remove this flag from the
@@ -268,9 +268,9 @@ public class UnetTools
           channel.disconnect();
           if (job != null) job.setTaskProgress(1, 1);
         }
-  
+
 /*======================================================================*/
-/*! 
+/*!
  *   If the given ImagePlus is a color image (stack), a new ImagePlus will be
  *   created with color components split to individual channels.
  *   For grayscale images calling this method is a noop and a reference to
@@ -287,7 +287,7 @@ public class UnetTools
         {
           if (imp.getType() != ImagePlus.COLOR_256 &&
               imp.getType() != ImagePlus.COLOR_RGB) return imp;
-          
+
           job.setTaskProgress("Splitting color channels", 0, 0);
           ImagePlus out = CompositeConverter.makeComposite(imp);
           out.setTitle(imp.getTitle() + " - composite");
@@ -296,7 +296,7 @@ public class UnetTools
         }
 
 /*======================================================================*/
-/*! 
+/*!
  *   If the given ImagePlus is not 32Bit, a new ImagePlus will be
  *   created with the content of the given ImagePlus to 32Bit float.
  *   For 32Bit images calling this method is a noop and a reference to
@@ -313,7 +313,7 @@ public class UnetTools
       throws InterruptedException
         {
           if (imp.getBitDepth() == 32) return imp;
-          
+
           job.setTaskProgress(
               "Converting hyperstack to float", 0, imp.getImageStackSize());
           ImagePlus out = IJ.createHyperStack(
@@ -327,7 +327,7 @@ public class UnetTools
             job.setTaskProgress(1, 1);
             return out;
           }
-          
+
           for (int i = 1; i <= imp.getImageStackSize(); i++)
           {
             if (job.interrupted())
@@ -340,7 +340,7 @@ public class UnetTools
         }
 
 /*======================================================================*/
-/*! 
+/*!
  *   If the model definition of the given UnetJob requires 2-D data, both
  *   time and z will be interpreted as time. The stack layout is changed
  *   accordingly. For 3-D models or if the image only contains one slice
@@ -365,7 +365,7 @@ public class UnetTools
                   "requires 2-D Input.\n" +
                   "Applying 2-D segmentation to all slices."))
               throw new InterruptedException();
-          
+
           ImagePlus out = IJ.createHyperStack(
               imp.getTitle() + " - reordered", imp.getWidth(), imp.getHeight(),
               imp.getNChannels(), 1, imp.getNSlices() * imp.getNFrames(), 32);
@@ -392,7 +392,7 @@ public class UnetTools
           int offs = (job.model().elementSizeUm.length == 2) ? 0 : 1;
           cal.pixelHeight = job.model().elementSizeUm[offs];
           cal.pixelWidth = job.model().elementSizeUm[offs + 1];
-          
+
           float[] scales = new float[2];
           scales[0] = (float)(imp.getCalibration().pixelHeight /
                               cal.pixelHeight);
@@ -407,9 +407,9 @@ public class UnetTools
                  imp.getCalibration().pixelHeight + ", " +
                  imp.getCalibration().pixelWidth + "] to [" +
                  cal.pixelDepth + ", " +
-                 cal.pixelHeight + ", " + 
+                 cal.pixelHeight + ", " +
                  cal.pixelWidth + "]");
-          
+
           ImagePlus out = IJ.createHyperStack(
               imp.getTitle() + " - rescaled (xy)",
               (int)(imp.getWidth() * scales[1]),
@@ -426,7 +426,7 @@ public class UnetTools
             job.setTaskProgress(1, 1);
             return out;
           }
-          
+
           for (int i = 1; i <= imp.getImageStackSize(); ++i)
           {
             if (job.interrupted())
@@ -450,7 +450,7 @@ public class UnetTools
               job.model().elementSizeUm[0];
           if (scale == 1) return imp;
 
-          Calibration cal = imp.getCalibration().copy();          
+          Calibration cal = imp.getCalibration().copy();
           cal.pixelDepth = job.model().elementSizeUm[0];
           ImagePlus out = IJ.createHyperStack(
               imp.getTitle() + " - rescaled (z)",
@@ -531,7 +531,7 @@ public class UnetTools
               float maxValue = Float.NEGATIVE_INFINITY;
               for (int z = 1; z <= imp.getNSlices(); ++z)
               {
-                for (int c = 1; c <= imp.getNChannels(); ++c) 
+                for (int c = 1; c <= imp.getNChannels(); ++c)
                 {
                   if (job.interrupted())
                       throw new InterruptedException("Aborted by user");
@@ -557,7 +557,7 @@ public class UnetTools
               float sum = 0;
               for (int z = 1; z <= imp.getNSlices(); ++z)
               {
-                for (int c = 1; c <= imp.getNChannels(); ++c) 
+                for (int c = 1; c <= imp.getNChannels(); ++c)
                 {
                   if (job.interrupted())
                       throw new InterruptedException("Aborted by user");
@@ -576,7 +576,7 @@ public class UnetTools
               sum = 0;
               for (int z = 1; z <= imp.getNSlices(); ++z)
               {
-                for (int c = 1; c <= imp.getNChannels(); ++c) 
+                for (int c = 1; c <= imp.getNChannels(); ++c)
                 {
                   if (job.interrupted())
                       throw new InterruptedException("Aborted by user");
@@ -603,7 +603,7 @@ public class UnetTools
               {
                 float[] sqrNorm = new float[imp.getHeight() * imp.getWidth()];
                 Arrays.fill(sqrNorm, 0);
-                for (int c = 1; c <= imp.getNChannels(); ++c) 
+                for (int c = 1; c <= imp.getNChannels(); ++c)
                 {
                   if (job.interrupted())
                       throw new InterruptedException("Aborted by user");
@@ -617,7 +617,7 @@ public class UnetTools
                       sqrNorm[i] += values[i] * values[i];
                 }
                 for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
-                    if (sqrNorm[i] > maxSqrNorm) maxSqrNorm = sqrNorm[i];  
+                    if (sqrNorm[i] > maxSqrNorm) maxSqrNorm = sqrNorm[i];
               }
               offsets[t - 1] = 0;
               scales[t - 1] = (float)(1.0 / Math.sqrt(maxSqrNorm));
@@ -687,7 +687,7 @@ public class UnetTools
         }
 
 /*======================================================================*/
-/*! 
+/*!
  *   Convert the given ImagePlus to comply to the given unet model. If the
  *   unet model is 2D, both, time and z dimension are treated as time
  *   leading to slicewise segmentation. If the given ImagePlus already
@@ -725,10 +725,10 @@ public class UnetTools
               job);
 
           if (imp != out)
-          { 
+          {
             if (!keepOriginal)
             {
-              imp.changes = false; 
+              imp.changes = false;
               imp.close();
             }
             out.resetDisplayRange();
@@ -746,7 +746,7 @@ public class UnetTools
             IJ.error("Cannot save HDF5 blob without associated unet model");
             throw new InterruptedException("No active unet job");
           }
-          
+
           String dsName = "/data";
 
           IJ.log(
@@ -803,11 +803,11 @@ public class UnetTools
             int[] blockDims =
                 { 1, 1, impScaled.getHeight(), impScaled.getWidth() };
             long[] blockIdx = { 0, 0, 0, 0 };
-            
+
             writer.float32().createMDArray(
                 dsName, dims, blockDims,
                 HDF5FloatStorageFeatures.createDeflation(3));
-            
+
             for (int t = 0; t < impScaled.getNFrames(); ++t)
             {
               for (int z = 0; z < impScaled.getNSlices(); ++z)
@@ -818,24 +818,24 @@ public class UnetTools
                   if (job.interrupted())
                       throw new InterruptedException("Aborted by user");
                   blockIdx[1] = c;
-                  
+
                   // Create HDF5 Multi-dimensional Array (memory space)
                   MDFloatArray data = new MDFloatArray(blockDims);
                   float[] dataFlat = data.getAsFlatArray();
-                  
+
                   // Get IJ index to processed slice
                   ImageStack stack = impScaled.getStack();
                   int stackIndex = impScaled.getStackIndex(c + 1, z + 1, t + 1);
-                  
+
                   System.arraycopy(
                       stack.getPixels(stackIndex), 0, dataFlat, 0,
                       impScaled.getHeight() * impScaled.getWidth());
-                  
+
                   job.setTaskProgress(
                       "Saving t=" + t + ", z=" + z + ", c=" + c,
                       imp.getStackIndex(c, z, t), imp.getImageStackSize());
-                  
-                  // save it 
+
+                  // save it
                   writer.float32().writeMDArrayBlock(dsName, data, blockIdx);
                 }
               }
@@ -854,7 +854,7 @@ public class UnetTools
             writer.float32().createMDArray(
                 dsName, dims, blockDims,
                 HDF5FloatStorageFeatures.createDeflation(3));
-            
+
             for (int t = 0; t < impScaled.getNFrames(); ++t)
             {
               blockIdx[0] = t;
@@ -866,24 +866,24 @@ public class UnetTools
                   blockIdx[1] = c;
                   if (job.interrupted())
                       throw new InterruptedException("Aborted by user");
-                  
+
                   // Create HDF5 Multi-dimensional Array (memory space)
                   MDFloatArray data = new MDFloatArray(blockDims);
                   float[] dataFlat = data.getAsFlatArray();
-                  
+
                   // Get IJ index to processed slice
                   ImageStack stack = impScaled.getStack();
                   int stackIndex = impScaled.getStackIndex(c + 1, z + 1, t + 1);
-                  
+
                   System.arraycopy(
                       stack.getPixels(stackIndex), 0, dataFlat, 0,
                       impScaled.getHeight() * impScaled.getWidth());
-                  
+
                   job.setTaskProgress(
                       "Saving t=" + t + ", z=" + z + ", c=" + c,
                       imp.getStackIndex(c, z, t), imp.getImageStackSize());
-                  
-                  // save it 
+
+                  // save it
                   writer.float32().writeMDArrayBlock(dsName, data, blockIdx);
                 }
               }
@@ -925,7 +925,14 @@ public class UnetTools
           {
             try
             {
+              // Read output on the fly to avoid BufferedReader overflow
+              while (stdOutput.ready())
+                  res.cout += stdOutput.readLine() + "\n";
+              while (stdError.ready()) res.cerr += stdError.readLine() + "\n";
+
               res.exitStatus = p.exitValue();
+
+              // Read residual output after process finished
               while (stdOutput.ready())
                   res.cout += stdOutput.readLine() + "\n";
               while (stdError.ready()) res.cerr += stdError.readLine() + "\n";
@@ -978,7 +985,7 @@ public class UnetTools
             if (channel.isClosed())
             {
               if (stdOutput.available() > 0 || stdError.available() > 0)
-                  continue; 
+                  continue;
               res.exitStatus = channel.getExitStatus();
               if (job != null) job.setTaskProgress(1, 1);
               return res;
@@ -992,7 +999,7 @@ public class UnetTools
           if (!modelFile.exists()) return null;
           ModelDefinition model = new ModelDefinition();
           model.file = modelFile;
-          model.load();          
+          model.load();
           return model;
         }
 
@@ -1004,23 +1011,23 @@ public class UnetTools
               HDF5Factory.configureForReading(file.getAbsolutePath()).reader();
           List<String> outputs = reader.getGroupMembers("/");
           for (String dsName : outputs)
-          {          
+          {
             IJ.showStatus("Creating visualization for output " + dsName);
 
             HDF5DataSetInformation dsInfo =
                 reader.object().getDataSetInformation(dsName);
             boolean is2D = dsInfo.getDimensions().length == 4;
-          
+
             String title = dsName;
             int nFrames, nChannels, nLevs, nRows, nCols;
-            
+
             title = job.imageName() + " - " + title;
             nFrames   = (int)dsInfo.getDimensions()[0];
             nChannels = (int)dsInfo.getDimensions()[1];
             nLevs     = (is2D) ? 1 : (int)dsInfo.getDimensions()[2];
             nRows     = (int)dsInfo.getDimensions()[2 + ((is2D) ? 0 : 1)];
             nCols     = (int)dsInfo.getDimensions()[3 + ((is2D) ? 0 : 1)];
-          
+
             ImagePlus impNew;
             if (outputScores)
                 impNew = IJ.createHyperStack(
@@ -1028,7 +1035,7 @@ public class UnetTools
             else
                 impNew = IJ.createHyperStack(
                     title, nCols, nRows, 1, nLevs, nFrames, 16);
-            
+
             impNew.setDisplayMode(IJ.GRAYSCALE);
             impNew.getCalibration().pixelDepth =
                 job.imageCalibration().pixelDepth;
@@ -1037,12 +1044,12 @@ public class UnetTools
             impNew.getCalibration().pixelWidth =
                 job.imageCalibration().pixelWidth;
             impNew.getCalibration().setUnit("um");
-            
+
             if (is2D) // 2D
             {
               int[] blockDims = { 1, 1, nRows, nCols };
               long[] blockIdx = { 0, 0, 0, 0 };
-              
+
               for (int t = 0; t < nFrames; ++t)
               {
                 blockIdx[0] = t;
@@ -1096,7 +1103,7 @@ public class UnetTools
             {
               int[] blockDims = { 1, 1, 1, nRows, nCols };
               long[] blockIdx = { 0, 0, 0, 0, 0 };
-              
+
               for (int t = 0; t < nFrames; ++t)
               {
                 blockIdx[0] = t;
@@ -1160,8 +1167,8 @@ public class UnetTools
             }
             if (outputScores) impNew.setC(1);
             impNew.resetDisplayRange();
-            impNew.show();        
-          }         
+            impNew.show();
+          }
           reader.close();
         }
 
@@ -1174,7 +1181,7 @@ public class UnetTools
           //          -1
           if(b==0) return b;
           if(b==-1) return b;
-          
+
           if(b==1 || b==2)
           {
             StringBuffer sb=new StringBuffer();
@@ -1195,5 +1202,5 @@ public class UnetTools
           }
           return b;
         }
-          
+
 }
