@@ -3,6 +3,7 @@ import ij.*;
 import java.awt.*;
 import java.awt.event.*;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.event.*;
 
 import java.io.*;
@@ -70,11 +71,24 @@ public class HostConfigurationPanel extends JPanel {
             }}});
     _passwordField = new JPasswordField();
     _passwordField.setToolTipText("Enter your SSH password");
-    authParametersPanel.add(_passwordField, "Password:");
-    JPanel rsaKeyPanel = new JPanel(new BorderLayout());
+    JPanel passwordPanel = new JPanel();
+    GroupLayout passwordPanelLayout = new GroupLayout(passwordPanel);
+    passwordPanel.setLayout(passwordPanelLayout);
+    passwordPanelLayout.setAutoCreateGaps(true);
+    passwordPanelLayout.setAutoCreateContainerGaps(false);
+    passwordPanelLayout.setHorizontalGroup(
+        passwordPanelLayout.createSequentialGroup()
+        .addComponent(_passwordField));
+    passwordPanelLayout.setVerticalGroup(
+        passwordPanelLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+        .addComponent(_passwordField));
+    authParametersPanel.add(passwordPanel, "Password:");
+
+    JPanel rsaKeyPanel = new JPanel();
+    GroupLayout rsaPanelLayout = new GroupLayout(rsaKeyPanel);
+    rsaKeyPanel.setLayout(rsaPanelLayout);
     _rsaKeyTextField.setToolTipText(
         "Enter the path to your RSA private key");
-    rsaKeyPanel.add(_rsaKeyTextField, BorderLayout.CENTER);
     final JButton rsaKeyChooseButton;
     if (UIManager.get("FileView.directoryIcon") instanceof Icon)
         rsaKeyChooseButton = new JButton(
@@ -94,12 +108,20 @@ public class HostConfigurationPanel extends JPanel {
     rsaKeyChooseButton.setMargin(insets);
     rsaKeyChooseButton.setToolTipText(
         "Select your RSA private key file");
-    rsaKeyPanel.add(rsaKeyChooseButton, BorderLayout.EAST);
+    rsaPanelLayout.setAutoCreateGaps(true);
+    rsaPanelLayout.setAutoCreateContainerGaps(false);
+    rsaPanelLayout.setHorizontalGroup(
+        rsaPanelLayout.createSequentialGroup()
+        .addComponent(_rsaKeyTextField).addComponent(rsaKeyChooseButton));
+    rsaPanelLayout.setVerticalGroup(
+        rsaPanelLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+        .addComponent(_rsaKeyTextField).addComponent(rsaKeyChooseButton));
     authParametersPanel.add(rsaKeyPanel, "RSA key:");
 
     GroupLayout layout = new GroupLayout(this);
+    setLayout(layout);
     layout.setAutoCreateGaps(true);
-    layout.setAutoCreateContainerGaps(true);
+    layout.setAutoCreateContainerGaps(false);
     layout.setHorizontalGroup(
         layout.createParallelGroup(GroupLayout.Alignment.LEADING)
         .addGroup(

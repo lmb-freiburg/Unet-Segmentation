@@ -1,56 +1,68 @@
-import ij.*;
-import ij.plugin.*;
-import ij.plugin.frame.*;
-import ij.gui.*;
-import ij.process.*;
-import ij.measure.Calibration;
+import ij.Prefs;
+import ij.IJ;
+import ij.WindowManager;
 
-import java.lang.*;
-import java.util.*;
-
-import java.awt.*;
-import java.awt.event.*;
-import javax.swing.*;
-import javax.swing.event.*;
+import java.awt.Dimension;
+import java.awt.Insets;
+import java.awt.BorderLayout;
+import java.awt.event.ItemListener;
+import java.awt.event.ItemEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.ActionEvent;
+import javax.swing.JPanel;
+import javax.swing.JDialog;
+import javax.swing.Icon;
+import javax.swing.JLabel;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JTextField;
+import javax.swing.JFileChooser;
+import javax.swing.GroupLayout;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import javax.swing.BorderFactory;
+import javax.swing.event.DocumentListener;
+import javax.swing.event.DocumentEvent;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileFilter;
 import java.util.Vector;
 import java.util.UUID;
 
-import com.jcraft.jsch.*;
+import com.jcraft.jsch.Session;
+import com.jcraft.jsch.JSchException;
 
 import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
-import ch.systemsx.cisd.hdf5.HDF5Factory;
-import ch.systemsx.cisd.hdf5.IHDF5Reader;
 
-public class UnetJob extends Thread implements PlugIn {
+public class UnetJob extends Thread {
+
+  private final String _jobId = "unet-" + UUID.randomUUID().toString();
+
+  private final String[] gpuList = {
+      "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
+      "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
+
+  protected TaskStatus _taskStatus = new TaskStatus();
+  protected long _taskProgressMin = 0;
+  protected long _taskProgressMax = 0;
+  protected long _jobProgress = 0;
 
   protected boolean _isInteractive = true;
   protected boolean _finished = false;
-
-  protected final String _jobId = "unet-" + UUID.randomUUID().toString();
+  protected JButton _readyCancelButton = new JButton("Cancel");
 
   protected UnetJobTableModel _jobTableModel = null;
 
-  private TaskStatus _taskStatus = new TaskStatus();
-  private long _taskProgressMin = 0;
-  private long _taskProgressMax = 0;
-  private long _jobProgress = 0;
-  protected JButton _readyCancelButton = new JButton("Cancel");
-
   protected JDialog _parametersDialog = null;
   protected GroupLayout _dialogLayout = null;
-
+  protected JPanel _configPanel = new JPanel();
 
   protected JComboBox<ModelDefinition> _modelComboBox =
       new JComboBox<ModelDefinition>();
   protected JTextField _weightsFileTextField = new JTextField("", 20);
   protected JTextField _processFolderTextField = new JTextField(
       Prefs.get("unet_segmentation.processfolder", ""), 20);
-  private final String[] gpuList = {
-      "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
-      "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
   protected JComboBox<String> _useGPUComboBox = new JComboBox<>(gpuList);
 
   protected HostConfigurationPanel _hostConfiguration = null;
@@ -71,18 +83,24 @@ public class UnetJob extends Thread implements PlugIn {
   }
 
   public ModelDefinition model() {
-    if (_modelComboBox.getSelectedItem() instanceof ModelDefinition)
-        return (ModelDefinition)_modelComboBox.getSelectedItem();
-    else return null;
+    return (ModelDefinition)_modelComboBox.getSelectedItem();
   }
 
   public String weightsFileName() {
     return _weightsFileTextField.getText();
   }
 
+  public String processFolder() {
+    return _processFolderTextField.getText();
+  }
+
   public String hostname() {
     if (_sshSession != null) return _sshSession.getHost();
     else return "localhost";
+  }
+
+  public String imageName() {
+    return "all open images";
   }
 
   public void setTaskProgress(String status, long progress, long maxProgress) {
@@ -223,7 +241,16 @@ public class UnetJob extends Thread implements PlugIn {
     _parametersDialog.validate();
   }
 
-  public void prepareParametersDialog() {
+  public String caffeGPUParameter() {
+    String gpuParm = "";
+    String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
+    if (selectedGPU.contains("GPU "))
+        gpuParm = "-gpu " + selectedGPU.substring(selectedGPU.length() - 1);
+    else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
+    return gpuParm;
+  }
+
+  protected void prepareParametersDialog() {
     /*******************************************************************
      * Generate the GUI layout without logic
      *******************************************************************/
@@ -305,65 +332,69 @@ public class UnetJob extends Thread implements PlugIn {
         "CUDA capable GPU available on the compute host. Select " +
         "<autodetect> to leave the choice to caffe.");
 
+    final JPanel tilingModeSelectorPanel = new JPanel(new BorderLayout());
+    final JPanel tilingParametersPanel = new JPanel(new BorderLayout());
+
     // Create Parameters Panel
     final JPanel dialogPanel = new JPanel();
     dialogPanel.setBorder(BorderFactory.createEtchedBorder());
-    GroupLayout layout = new GroupLayout(dialogPanel);
-    dialogPanel.setLayout(layout);
-    layout.setAutoCreateGaps(true);
-    layout.setAutoCreateContainerGaps(true);
-    layout.setHorizontalGroup(
-        layout.createParallelGroup(GroupLayout.Alignment.LEADING)
+    _dialogLayout = new GroupLayout(dialogPanel);
+    dialogPanel.setLayout(_dialogLayout);
+    _dialogLayout.setAutoCreateGaps(true);
+    _dialogLayout.setAutoCreateContainerGaps(true);
+    _dialogLayout.setHorizontalGroup(
+        _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
         .addGroup(
-            layout.createSequentialGroup()
+            _dialogLayout.createSequentialGroup()
             .addGroup(
-                layout.createParallelGroup(GroupLayout.Alignment.LEADING)
+                _dialogLayout.createParallelGroup(
+                    GroupLayout.Alignment.TRAILING)
                 .addComponent(modelLabel)
                 .addComponent(weightsFileLabel)
                 .addComponent(processFolderLabel)
                 .addComponent(useGPULabel)
                 .addComponent(tilingModeSelectorPanel))
             .addGroup(
-                layout.createParallelGroup(GroupLayout.Alignment.LEADING)
+                _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
                 .addGroup(
-                    layout.createSequentialGroup()
+                    _dialogLayout.createSequentialGroup()
                     .addComponent(_modelComboBox)
                     .addComponent(modelFolderChooseButton))
                 .addGroup(
-                    layout.createSequentialGroup()
+                    _dialogLayout.createSequentialGroup()
                     .addComponent(_weightsFileTextField)
                     .addComponent(weightsFileChooseButton))
                 .addGroup(
-                    layout.createSequentialGroup()
+                    _dialogLayout.createSequentialGroup()
                     .addComponent(_processFolderTextField)
                     .addComponent(processFolderChooseButton))
                 .addComponent(_useGPUComboBox)
                 .addComponent(tilingParametersPanel)))
         .addComponent(_hostConfiguration));
 
-    layout.setVerticalGroup(
-        layout.createSequentialGroup()
+    _dialogLayout.setVerticalGroup(
+        _dialogLayout.createSequentialGroup()
         .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(modelLabel)
             .addComponent(_modelComboBox)
             .addComponent(modelFolderChooseButton))
         .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(weightsFileLabel)
             .addComponent(_weightsFileTextField)
             .addComponent(weightsFileChooseButton))
         .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(processFolderLabel)
             .addComponent(_processFolderTextField)
             .addComponent(processFolderChooseButton))
         .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(useGPULabel)
             .addComponent(_useGPUComboBox))
         .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.CENTER)
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.CENTER)
             .addComponent(
                 tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
                 GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)
@@ -375,11 +406,6 @@ public class UnetJob extends Thread implements PlugIn {
         new Dimension(
             Integer.MAX_VALUE, dialogPanel.getPreferredSize().height));
 
-    // Create config panel
-    final JPanel configPanel = new JPanel();
-    configPanel.add(_keepOriginalCheckBox);
-    configPanel.add(_outputScoresCheckBox);
-
     // OK/Cancel buttons
     final JButton okButton = new JButton("OK");
     final JButton cancelButton = new JButton("Cancel");
@@ -389,12 +415,12 @@ public class UnetJob extends Thread implements PlugIn {
 
     // Assemble button panel
     final JPanel buttonPanel = new JPanel(new BorderLayout());
-    buttonPanel.add(configPanel, BorderLayout.WEST);
+    buttonPanel.add(_configPanel, BorderLayout.WEST);
     buttonPanel.add(okCancelPanel, BorderLayout.EAST);
 
     // Assemble Dialog
     _parametersDialog = new JDialog(
-        _imp.getWindow(), "U-net segmentation", true);
+        WindowManager.getCurrentWindow(), "U-net segmentation", true);
     _parametersDialog.add(dialogPanel, BorderLayout.CENTER);
     _parametersDialog.add(buttonPanel, BorderLayout.SOUTH);
     _parametersDialog.getRootPane().setDefaultButton(okButton);
@@ -553,728 +579,43 @@ public class UnetJob extends Thread implements PlugIn {
     _useGPUComboBox.setSelectedItem(
         Prefs.get("unet_segmentation.gpuId", "none"));
 
-    // Finalize the dialog
-    _parametersDialog.pack();
-    _parametersDialog.setMinimumSize(
-        _parametersDialog.getPreferredSize());
-    _parametersDialog.setMaximumSize(
-        new Dimension(
-            Integer.MAX_VALUE,
-            _parametersDialog.getPreferredSize().height));
-    _parametersDialog.setLocationRelativeTo(_imp.getWindow());
-
     // Free all resources and make isDisplayable() return false to
     // distinguish dialog close from accept
     _parametersDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
   }
 
-  public boolean getParameters() {
-    if (_imp == null) setImagePlus(WindowManager.getCurrentImage());
-    if (_imp == null) {
-      IJ.showMessage(
-          "U-Net segmentation requires an open hyperstack to segment.");
+  public boolean checkParameters() {
+
+    Prefs.set("unet_segmentation.gpuId",
+              (String)_useGPUComboBox.getSelectedItem());
+
+    if (!model().isValid()) {
+      IJ.showMessage("Please select a model. Probably you first need " +
+                     "to select a folder containing models.");
       return false;
     }
 
-    boolean dialogOK = false;
-    while (!dialogOK) {
-      dialogOK = true;
-      _parametersDialog.setVisible(true);
-
-      // Dialog was cancelled
-      if (!_parametersDialog.isDisplayable()) {
-        cleanUp();
-        return false;
-      }
-
-      if (model() == null || model().file == null) {
-        dialogOK = false;
-        IJ.showMessage("Please select a model. Probably you first need " +
-                       "to select a folder containing models.");
-        continue;
-      }
-
-      if (!(model().nChannels == _imp.getNChannels() ||
-            (model().nChannels == 3 &&
-             (_imp.getType() == ImagePlus.COLOR_256 ||
-              _imp.getType() == ImagePlus.COLOR_RGB)))) {
-        dialogOK = false;
-        IJ.showMessage("The selected model cannot segment " +
-                       _imp.getNChannels() + "-channel images.");
-        continue;
-      }
-
-      if (_weightsFileTextField.getText() == "") {
-        dialogOK = false;
-        IJ.showMessage(
-            "Please enter the (remote) path to the trained weights.");
-        continue;
-      }
-
-      try {
-        _sshSession = _hostConfiguration.sshSession();
-      }
-      catch (JSchException e) {
-        IJ.log("SSH connection to '" + _hostConfiguration.hostname() +
-               "' failed.");
-        IJ.showMessage(
-            "Could not connect to remote host '" +
-            _hostConfiguration.hostname() + "'\n" +
-            "Please check your login credentials.\n" + e);
-        dialogOK = false;
-        continue;
-      }
-
-      // Check whether caffe binary exists and is executable
-      ProcessResult res = null;
-      if (_sshSession == null) {
-        try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
-          res = UnetTools.execute(cmd, this);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-        }
-      }
-      else {
-        try {
-          String cmd = Prefs.get("unet_segmentation.caffeBinary", "caffe_unet");
-          res = UnetTools.execute(cmd, _sshSession, this);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-        }
-      }
-
-      if (res.exitStatus != 0) {
-        dialogOK = false;
-        String caffePath = JOptionPane.showInputDialog(
-            _imp.getWindow(), "caffe was not found.\n" +
-            "Please specify your caffe binary\n",
-            Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
-        if (caffePath == null) {
-          cleanUp();
-          return false;
-        }
-        if (caffePath.equals(""))
-            Prefs.set("unet_segmentation.caffeBinary", "caffe_unet");
-        else Prefs.set("unet_segmentation.caffeBinary", caffePath);
-        continue;
-      }
-
-      // Check whether combination of model and weights can be used for
-      // segmentation
-      String gpuParm = null;
-      String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
-      if (selectedGPU.contains("GPU "))
-          gpuParm = "-gpu " + selectedGPU.substring(selectedGPU.length() - 1);
-      else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
-      if (_sshSession != null) {
-        model().remoteAbsolutePath =
-            _processFolderTextField.getText() + "/" + _jobId + "_model.h5";
-        try {
-          _createdRemoteFolders.addAll(
-              UnetTools.put(
-                  model().file, model().remoteAbsolutePath, _sshSession, this));
-          _createdRemoteFiles.add(model().remoteAbsolutePath);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (SftpException e) {
-          dialogOK = false;
-          IJ.showMessage(
-              "Model upload failed.\nDo you have sufficient " +
-              "permissions to create the processing folder on " +
-              "the remote host?");
-          continue;
-        }
-        catch (JSchException e) {
-          dialogOK = false;
-          IJ.showMessage(
-              "Model upload failed.\nDo you have sufficient " +
-              "permissions to create the processing folder on " +
-              "the remote host?");
-          continue;
-        }
-        catch (IOException e) {
-          dialogOK = false;
-          IJ.showMessage(
-              "Model upload failed. Could not read model file.");
-          continue;
-        }
-
-        try {
-          do {
-            String cmd =
-                Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
-                " check_model_and_weights_h5 -model \"" +
-                model().remoteAbsolutePath + "\" -weights \"" +
-                _weightsFileTextField.getText() + "\" " + gpuParm;
-            res = UnetTools.execute(cmd, _sshSession, this);
-            if (res.exitStatus != 0) {
-              int selectedOption = JOptionPane.showConfirmDialog(
-                  _imp.getWindow(), "No trained weights found at the " +
-                  "given location on the backend server.\nDo you want " +
-                  "to upload the weights now?", "Upload weights?",
-                  JOptionPane.YES_NO_CANCEL_OPTION,
-                  JOptionPane.QUESTION_MESSAGE);
-              switch (selectedOption) {
-              case JOptionPane.YES_OPTION: {
-                File startFile =
-                    (model() == null || model().file == null ||
-                     model().file.getParentFile() == null) ?
-                    new File(".") : model().file.getParentFile();
-                JFileChooser f = new JFileChooser(startFile);
-                f.setDialogTitle("Select trained U-net weights");
-                f.setFileFilter(
-                    new FileNameExtensionFilter(
-                        "HDF5 and prototxt files", "h5", "H5",
-                        "prototxt", "PROTOTXT", "caffemodel", "CAFFEMODEL"));
-                f.setMultiSelectionEnabled(false);
-                f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-                int res2 = f.showDialog(_imp.getWindow(), "Select");
-                if (res2 != JFileChooser.APPROVE_OPTION)
-                    throw new InterruptedException("Aborted by user");
-                try {
-                  UnetTools.put(
-                      f.getSelectedFile(), _weightsFileTextField.getText(),
-                      _sshSession, this);
-                }
-                catch (SftpException e) {
-                  res.exitStatus = 3;
-                  res.shortErrorString =
-                      "Upload failed.\nDo you have sufficient " +
-                      "permissions to create a file at the given " +
-                      "backend server path?";
-                  res.cerr = e.getMessage();
-                  break;
-                }
-                break;
-              }
-              case JOptionPane.NO_OPTION: {
-                res.exitStatus = 2;
-                res.shortErrorString = "Weight file selection required";
-                res.cerr = "Weight file " +
-                    _weightsFileTextField.getText() + " not found";
-                break;
-              }
-              case JOptionPane.CANCEL_OPTION:
-              case JOptionPane.CLOSED_OPTION:
-                throw new InterruptedException("Aborted by user");
-              }
-              if (res.exitStatus > 1) break;
-            }
-          }
-          while (res.exitStatus != 0);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "SSH connection error";
-          res.cerr = e.getMessage();
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
-        }
-      }
-      else {
-        try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
-          cmd.add("check_model_and_weights_h5");
-          cmd.add("-model");
-          cmd.add(model().file.getAbsolutePath());
-          cmd.add("-weights");
-          cmd.add(_weightsFileTextField.getText());
-          if (gpuParm != null) {
-            cmd.add(gpuParm.split(" ")[0]);
-            cmd.add(gpuParm.split(" ")[1]);
-          }
-          res = UnetTools.execute(cmd, this);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
-        }
-      }
-      if (res.exitStatus != 0) {
-        dialogOK = false;
-
-        // User decided to change weight file, so don't bother him with
-        // additional message boxes
-        if (res.exitStatus == 2) continue;
-
-        IJ.log(res.cerr);
-        IJ.showMessage(
-            "Model/Weight check failed:\n" + res.shortErrorString);
-        continue;
-      }
-    }
-
-    _parametersDialog.dispose();
-
-    // Save residual preferences
     Prefs.set("unet_segmentation.modelName", (String)model().name);
     model().savePreferences();
-    Prefs.set("unet_segmentation.gpuId",
-              (String)_useGPUComboBox.getSelectedItem());
-    Prefs.set("unet_segmentation.useRemoteHost", _sshSession != null);
-    Prefs.set("unet_segmentation.processfolder",
-              _processFolderTextField.getText());
-    Prefs.set("unet_segmentation.keepOriginal",
-              _keepOriginalCheckBox.isSelected());
-    Prefs.set("unet_segmentation.outputScores",
-              _outputScoresCheckBox.isSelected());
 
-    if (_jobTableModel != null) _jobTableModel.fireTableDataChanged();
+    if (_weightsFileTextField.getText() == "") {
+      IJ.showMessage("Please enter the (remote) path to the weights file.");
+      return false;
+    }
+
+    try {
+      _sshSession = _hostConfiguration.sshSession();
+    }
+    catch (JSchException e) {
+      IJ.log("SSH connection to '" + _hostConfiguration.hostname() +
+             "' failed: " + e);
+      IJ.showMessage(
+          "Could not connect to remote host '" + _hostConfiguration.hostname() +
+          "'\nPlease check your login credentials.\n" + e);
+      return false;
+    }
 
     return true;
-  }
-
-  public void runUnetSegmentation(
-      String fileName, Session session)
-      throws JSchException, IOException, InterruptedException {
-    _taskStatus.isIndeterminate = true;
-    setTaskProgress("Initializing U-Net", 0, 0);
-    String gpuParm = new String();
-    String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
-    if (selectedGPU.contains("GPU "))
-        gpuParm = "-gpu " + selectedGPU.substring(selectedGPU.length() - 1);
-    else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
-
-    String nTilesParm = model().getCaffeTilingParameter();
-
-    String commandString =
-        Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
-        " tiled_predict -infileH5 \"" + fileName +
-        "\" -outfileH5 \"" + fileName + "\" -model \"" +
-        model().remoteAbsolutePath + "\" -weights \"" +
-        _weightsFileTextField.getText() + "\" -iterations 0 " +
-        nTilesParm + " " + gpuParm;
-
-    IJ.log(commandString);
-
-    Channel channel = session.openChannel("exec");
-    ((ChannelExec)channel).setCommand(commandString);
-
-    InputStream stdError = ((ChannelExec)channel).getErrStream();
-    InputStream stdOutput = channel.getInputStream();
-
-    channel.connect();
-
-    byte[] buf = new byte[1024];
-    String errorMsg = new String();
-    String outMsg = new String();
-    int exitStatus = -1;
-    try {
-      while (true) {
-        while(stdOutput.available() > 0) {
-          int i = stdOutput.read(buf, 0, 1024);
-          if (i < 0) break;
-          outMsg += "\n" + new String(buf, 0, i);
-        }
-        while(stdError.available() > 0) {
-          int i = stdError.read(buf, 0, 1024);
-          if (i < 0) break;
-          errorMsg += "\n" + new String(buf, 0, i);
-        }
-        int idx = -1;
-        while ((idx = outMsg.indexOf('\n')) != -1) {
-          String line = outMsg.substring(0, idx);
-          outMsg = outMsg.substring(idx + 1);
-          if (line.regionMatches(0, "Processing batch ", 0, 17)) {
-            line = line.substring(17);
-            int sepPos = line.indexOf('/');
-            int batchIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            sepPos = line.indexOf(',');
-            int nBatches = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 7);
-            sepPos = line.indexOf('/');
-            int tileIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            int nTiles = Integer.parseInt(line);
-            setTaskProgress(
-                "Segmenting batch " + String.valueOf(batchIdx) + "/" +
-                String.valueOf(nBatches) + ", tile " +
-                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles),
-                (batchIdx - 1) * nTiles + tileIdx - 1, nBatches * nTiles);
-            setProgress(
-                (int) (_taskProgressMin +
-                       (float) ((batchIdx - 1) * nTiles + tileIdx - 1) /
-                       (float) (nBatches * nTiles) *
-                       (_taskProgressMax - _taskProgressMin)));
-          }
-        }
-        if (channel.isClosed()) {
-          if(stdOutput.available() > 0 || stdError.available() > 0) continue;
-          exitStatus = channel.getExitStatus();
-          break;
-        }
-        if (interrupted()) throw new InterruptedException();
-        Thread.sleep(100);
-      }
-    }
-    catch (InterruptedException e) {
-      _readyCancelButton.setText("Terminating...");
-      _readyCancelButton.setEnabled(false);
-      try {
-        channel.sendSignal("TERM");
-        int graceMilliSeconds = 10000;
-        int timeElapsedMilliSeconds = 0;
-        while (!channel.isClosed() &&
-               timeElapsedMilliSeconds <= graceMilliSeconds) {
-          timeElapsedMilliSeconds += 100;
-          try {
-            Thread.sleep(100);
-          }
-          catch (InterruptedException eInner) {}
-        }
-        if (!channel.isClosed()) channel.sendSignal("KILL");
-      }
-      catch (Exception eInner) {
-        IJ.log(
-            "Process could not be terminated using SIGTERM: " + eInner);
-      }
-      channel.disconnect();
-      throw e;
-    }
-    channel.disconnect();
-
-    if (exitStatus != 0) {
-      IJ.log(errorMsg);
-      throw new IOException(
-          "Error during segmentation: exit status " + exitStatus +
-          "\nSee log for further details");
-    }
-  }
-
-  public void runUnetSegmentation(File file)
-      throws IOException, InterruptedException {
-    setTaskProgress("Initializing U-Net", 0, 0);
-    String gpuAttribute = new String();
-    String gpuValue = new String();
-    String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
-    if (selectedGPU.contains("GPU ")) {
-      gpuAttribute = "-gpu";
-      gpuValue = selectedGPU.substring(selectedGPU.length() - 1);
-    }
-    else if (selectedGPU.contains("all")) {
-      gpuAttribute = "-gpu";
-      gpuValue = "all";
-    }
-
-    String[] parameters = model().getCaffeTilingParameter().split("\\s");
-    String nTilesAttribute = parameters[0];
-    String nTilesValue = parameters[1];
-
-    String commandString =
-        Prefs.get("unet_segmentation.caffeBinary", "caffe_unet");
-
-    IJ.log(
-        commandString + " tiled_predict -infileH5 \"" +
-        file.getAbsolutePath() + "\" -outfileH5 \"" +
-        file.getAbsolutePath() + "\" -model \"" +
-        model().file.getAbsolutePath() + "\" -weights \"" +
-        _weightsFileTextField.getText() + "\" -iterations 0 " +
-        nTilesAttribute + " " + nTilesValue + " " + gpuAttribute + " " +
-        gpuValue);
-    ProcessBuilder pb;
-    if (!gpuAttribute.equals(""))
-        pb = new ProcessBuilder(
-            commandString, "tiled_predict", "-infileH5",
-            file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-            "-model", model().file.getAbsolutePath(), "-weights",
-            _weightsFileTextField.getText(), "-iterations", "0",
-            nTilesAttribute, nTilesValue, gpuAttribute, gpuValue);
-    else
-        pb = new ProcessBuilder(
-            commandString, "tiled_predict", "-infileH5",
-            file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-            "-model", model().file.getAbsolutePath(), "-weights",
-            _weightsFileTextField.getText(), "-iterations", "0",
-            nTilesAttribute, nTilesValue);
-
-    Process p = pb.start();
-
-    BufferedReader stdOutput =
-        new BufferedReader(new InputStreamReader(p.getInputStream()));
-    BufferedReader stdError =
-        new BufferedReader(new InputStreamReader(p.getErrorStream()));
-
-    int exitStatus = -1;
-    String line;
-    String errorMsg = "";
-    try {
-      while (true) {
-        // Check for ready() to avoid thread blocking, then read
-        // all available lines from the buffer and update progress
-        while (stdOutput.ready()) {
-          line = stdOutput.readLine();
-          if (line.regionMatches(0, "Processing batch ", 0, 17)) {
-            line = line.substring(17);
-            int sepPos = line.indexOf('/');
-            int batchIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            sepPos = line.indexOf(',');
-            int nBatches = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 7);
-            sepPos = line.indexOf('/');
-            int tileIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            int nTiles = Integer.parseInt(line);
-            setTaskProgress(
-                "Segmenting batch " + String.valueOf(batchIdx) + "/" +
-                String.valueOf(nBatches) + ", tile " +
-                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles),
-                (batchIdx - 1) * nTiles + tileIdx - 1, nBatches * nTiles);
-            setProgress(
-                (int) (_taskProgressMin +
-                       (float) ((batchIdx - 1) * nTiles + tileIdx - 1) /
-                       (float) (nBatches * nTiles) *
-                       (_taskProgressMax - _taskProgressMin)));
-          }
-        }
-        // Also read error stream to avoid stream overflow that leads
-        // to process stalling
-        while (stdError.ready()) {
-          line = stdError.readLine();
-          errorMsg += line + "\n";
-        }
-
-        try {
-          exitStatus = p.exitValue();
-          break;
-        }
-        catch (IllegalThreadStateException e) {}
-        if (interrupted()) throw new InterruptedException();
-        Thread.sleep(100);
-      }
-    }
-    catch (InterruptedException e) {
-      _readyCancelButton.setText("Terminating...");
-      _readyCancelButton.setEnabled(false);
-      p.destroy();
-      throw e;
-    }
-
-    if (exitStatus != 0) {
-      IJ.log(errorMsg);
-      throw new IOException(
-          "Error during segmentation: exit status " + exitStatus +
-          "\nSee log for further details");
-    }
-
-    setTaskProgress(1, 1);
-  }
-
-  public static void segmentHyperStack(String params)
-      throws InterruptedException {
-    final UnetJob job = new UnetJob();
-    if (job._imp == null)
-        job.setImagePlus(WindowManager.getCurrentImage());
-    if (job._imp == null) {
-      IJ.error(
-          "U-Net Segmentation", "No image selected for segmentation.");
-      return;
-    }
-
-    String[] parameterStrings = params.split(",");
-    Map<String,String> parameters = new HashMap<String,String>();
-    for (int i = 0; i < parameterStrings.length; i++)
-        parameters.put(parameterStrings[i].split("=")[0],
-                       parameterStrings[i].split("=")[1]);
-    job._modelComboBox.removeAllItems();
-    ModelDefinition model = new ModelDefinition();
-    job._modelComboBox.addItem(model);
-    job._modelComboBox.setSelectedItem(model);
-    job.model().load(new File(parameters.get("modelFilename")));
-    job._weightsFileTextField.setText(parameters.get("weightsFilename"));
-    job.model().setFromTilingParameterString(parameterStrings[2]);
-    job._useGPUComboBox.setSelectedItem(parameters.get("gpuId"));
-    if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
-      try {
-        String hostname = parameters.get("hostname");
-        int port = Integer.valueOf(parameters.get("port"));
-        String username = parameters.get("username");
-        JSch jsch = new JSch();
-        jsch.setKnownHosts(
-            new File(System.getProperty("user.home") +
-                     "/.ssh/known_hosts").getAbsolutePath());
-        if (parameters.containsKey("RSAKeyfile"))
-            jsch.addIdentity(parameters.get("RSAKeyfile"));
-        job._sshSession = jsch.getSession(username, hostname, port);
-        job._sshSession.setUserInfo(new MyUserInfo());
-
-        if (!parameters.containsKey("RSAKeyfile")) {
-          final JDialog passwordDialog = new JDialog(
-              job._imp.getWindow(), "U-Net Segmentation", true);
-          JPanel mainPanel = new JPanel();
-          mainPanel.add(new JLabel("Password:"));
-          final JPasswordField passwordField = new JPasswordField(15);
-          mainPanel.add(passwordField);
-          passwordDialog.add(mainPanel, BorderLayout.CENTER);
-          JButton okButton = new JButton("OK");
-          okButton.addActionListener(
-              new ActionListener() {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                  char[] password = passwordField.getPassword();
-                  byte[] passwordAsBytes =
-                      HostConfigurationPanel.toBytes(password);
-                  job._sshSession.setPassword(passwordAsBytes);
-                  Arrays.fill(passwordAsBytes, (byte) 0);
-                  Arrays.fill(password, '\u0000');
-                  passwordField.setText("");
-                  passwordDialog.dispose();
-                }});
-          passwordDialog.add(okButton, BorderLayout.SOUTH);
-          passwordDialog.getRootPane().setDefaultButton(okButton);
-          passwordDialog.pack();
-          passwordDialog.setMinimumSize(passwordDialog.getPreferredSize());
-          passwordDialog.setMaximumSize(passwordDialog.getPreferredSize());
-          passwordDialog.setLocationRelativeTo(job._imp.getWindow());
-          passwordDialog.setVisible(true);
-        }
-
-        job._sshSession.connect();
-      }
-      catch (JSchException e) {
-        IJ.log("Macro call to UnetJob.segmentHyperStack aborted. " +
-               "Could not establish SSH connection.");
-        IJ.error("UnetJob.segmentHyperStack",
-                 "Could not establish SSH connection.");
-        return;
-      }
-    }
-    job._processFolderTextField.setText(parameters.get("processFolder"));
-    job._keepOriginalCheckBox.setSelected(
-        Boolean.valueOf(parameters.get("keepOriginal")));
-    job._outputScoresCheckBox.setSelected(
-        Boolean.valueOf(parameters.get("outputScores")));
-    job._isInteractive = false;
-
-    job.start();
-    job.join();
-    job.finish();
-  }
-
-  @Override
-  public void run(String arg) {
-    setImagePlus(WindowManager.getCurrentImage());
-    if (_imp == null) {
-      IJ.error(
-          "U-Net Segmentation", "No image selected for segmentation.");
-      return;
-    }
-    prepareParametersDialog();
-    try {
-      start();
-      join();
-      finish();
-    }
-    catch (InterruptedException e) {}
-    IJ.showProgress(1.0);
-  }
-
-  @Override
-  public void run() {
-    setProgress(0);
-    if (_isInteractive && !getParameters()) return;
-    try {
-      if (_sshSession != null) {
-        if (!_isInteractive) {
-          model().remoteAbsolutePath =
-              _processFolderTextField.getText() + "/" + _jobId + "_model.h5";
-          _createdRemoteFolders.addAll(
-              UnetTools.put(
-                  model().file, model().remoteAbsolutePath, _sshSession, this));
-          _createdRemoteFiles.add(model().remoteAbsolutePath);
-        }
-        setProgress(1);
-
-        _localTmpFile = File.createTempFile(_jobId, ".h5");
-        _localTmpFile.delete();
-
-        String remoteFileName = _processFolderTextField.getText() + "/" +
-            _jobId + ".h5";
-
-        setImagePlus(
-            UnetTools.saveHDF5Blob(
-                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected()));
-        _impShape = _imp.getDimensions();
-        if (interrupted()) throw new InterruptedException();
-        setProgress(2);
-
-        setTaskProgressRange(3, 10);
-        _createdRemoteFolders.addAll(
-            UnetTools.put(_localTmpFile, remoteFileName, _sshSession, this));
-        _createdRemoteFiles.add(remoteFileName);
-        if (interrupted()) throw new InterruptedException();
-        setProgress(10);
-
-        setTaskProgressRange(11, 90);
-        runUnetSegmentation(remoteFileName, _sshSession);
-        if (interrupted()) throw new InterruptedException();
-        setProgress(90);
-
-        setTaskProgressRange(91, 100);
-        UnetTools.get(remoteFileName, _localTmpFile, _sshSession, this);
-        if (interrupted()) throw new InterruptedException();
-        setProgress(100);
-      }
-      else {
-        _localTmpFile = new File(
-            _processFolderTextField.getText() + "/" + _jobId + ".h5");
-
-        setImagePlus(
-            UnetTools.saveHDF5Blob(
-                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected()));
-        _impShape = _imp.getDimensions();
-        if (interrupted()) throw new InterruptedException();
-        setProgress(2);
-
-        setTaskProgressRange(3, 100);
-        runUnetSegmentation(_localTmpFile);
-        if (interrupted()) throw new InterruptedException();
-        setProgress(100);
-      }
-      setReady(true);
-    }
-    catch (InterruptedException e) {
-      IJ.showMessage("Job " + _jobId + " canceled. Cleaning up.");
-      cleanUp();
-      if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-    }
-    catch (Exception e) {
-      IJ.error(e.toString());
-      cleanUp();
-      if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-    }
   }
 
   public void cleanUp() {

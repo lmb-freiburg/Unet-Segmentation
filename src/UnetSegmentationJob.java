@@ -1,30 +1,44 @@
-import ij.*;
-import ij.plugin.*;
-import ij.plugin.frame.*;
-import ij.gui.*;
-import ij.process.*;
+import ij.IJ;
+import ij.Prefs;
+import ij.WindowManager;
+import ij.ImagePlus;
+import ij.plugin.PlugIn;
+import ij.plugin.frame.Recorder;
 import ij.measure.Calibration;
 
-import java.lang.*;
-import java.util.*;
-
-import java.awt.*;
-import java.awt.event.*;
-import javax.swing.*;
-import javax.swing.event.*;
+import java.awt.Dimension;
+import java.awt.BorderLayout;
+import java.awt.event.ActionListener;
+import java.awt.event.ActionEvent;
+import javax.swing.JPanel;
+import javax.swing.JLabel;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JPasswordField;
+import javax.swing.SwingUtilities;
+import javax.swing.JOptionPane;
+import javax.swing.JFileChooser;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.JDialog;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.BufferedReader;
 import java.util.Vector;
-import java.util.UUID;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Arrays;
 
-import com.jcraft.jsch.*;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.Session;
+import com.jcraft.jsch.Channel;
+import com.jcraft.jsch.ChannelExec;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.SftpException;
 
-import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
-import ch.systemsx.cisd.hdf5.HDF5Factory;
-import ch.systemsx.cisd.hdf5.IHDF5Reader;
-
-public class UnetSegmentationJob extends UnetJob {
+public class UnetSegmentationJob extends UnetJob implements PlugIn {
 
   private File _localTmpFile = null;
 
@@ -47,6 +61,7 @@ public class UnetSegmentationJob extends UnetJob {
     }
   }
 
+  @Override
   public String imageName() {
     return _impName;
   }
@@ -59,12 +74,12 @@ public class UnetSegmentationJob extends UnetJob {
     return _impCalibration;
   }
 
-  @override
+  @Override
   public boolean ready() {
     return _readyCancelButton.getText().equals("Show");
   }
 
-  @override
+  @Override
   protected void setReady(boolean ready) {
     _readyCancelButton.setText("Show");
     if (_jobTableModel == null) return;
@@ -72,11 +87,11 @@ public class UnetSegmentationJob extends UnetJob {
         new Runnable() {
           @Override
           public void run() {
-            _jobTableModel.updateJobDownloadEnabled(_jobId);
+            _jobTableModel.updateJobDownloadEnabled(id());
           }});
   }
 
-  @override
+  @Override
   public void finish() {
     if (_finished) return;
     try {
@@ -85,9 +100,9 @@ public class UnetSegmentationJob extends UnetJob {
       cleanUp();
       if (Recorder.record) {
         Recorder.setCommand(null);
-        String command = "call('UnetJob.segmentHyperStack', " +
+        String command = "call('UnetSegmentationJob.segmentHyperStack', " +
             "'modelFilename=" + model().file.getAbsolutePath() +
-            ",weightsFilename=" + _weightsFileTextField.getText() +
+            ",weightsFilename=" + weightsFileName() +
             "," + model().getTilingParameterString() +
             ",gpuId=" + (String)_useGPUComboBox.getSelectedItem() +
             ",useRemoteHost=" + String.valueOf(_sshSession != null);
@@ -116,259 +131,14 @@ public class UnetSegmentationJob extends UnetJob {
     }
   }
 
+  @Override
   public void prepareParametersDialog() {
 
-    // Testing parameters
-    final JPanel tilingModeSelectorPanel = new JPanel(new BorderLayout());
-    final JPanel tilingParametersPanel = new JPanel(new BorderLayout());
-
-    // Create Parameters Panel
-    final JPanel dialogPanel = new JPanel();
-    dialogPanel.setBorder(BorderFactory.createEtchedBorder());
-    GroupLayout layout = new GroupLayout(dialogPanel);
-    dialogPanel.setLayout(layout);
-    layout.setAutoCreateGaps(true);
-    layout.setAutoCreateContainerGaps(true);
-    layout.setHorizontalGroup(
-        layout.createParallelGroup(GroupLayout.Alignment.LEADING)
-        .addGroup(
-            layout.createSequentialGroup()
-            .addGroup(
-                layout.createParallelGroup(GroupLayout.Alignment.LEADING)
-                .addComponent(modelLabel)
-                .addComponent(weightsFileLabel)
-                .addComponent(processFolderLabel)
-                .addComponent(useGPULabel)
-                .addComponent(tilingModeSelectorPanel))
-            .addGroup(
-                layout.createParallelGroup(GroupLayout.Alignment.LEADING)
-                .addGroup(
-                    layout.createSequentialGroup()
-                    .addComponent(_modelComboBox)
-                    .addComponent(modelFolderChooseButton))
-                .addGroup(
-                    layout.createSequentialGroup()
-                    .addComponent(_weightsFileTextField)
-                    .addComponent(weightsFileChooseButton))
-                .addGroup(
-                    layout.createSequentialGroup()
-                    .addComponent(_processFolderTextField)
-                    .addComponent(processFolderChooseButton))
-                .addComponent(_useGPUComboBox)
-                .addComponent(tilingParametersPanel)))
-        .addComponent(_hostConfiguration));
-
-    layout.setVerticalGroup(
-        layout.createSequentialGroup()
-        .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(modelLabel)
-            .addComponent(_modelComboBox)
-            .addComponent(modelFolderChooseButton))
-        .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(weightsFileLabel)
-            .addComponent(_weightsFileTextField)
-            .addComponent(weightsFileChooseButton))
-        .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(processFolderLabel)
-            .addComponent(_processFolderTextField)
-            .addComponent(processFolderChooseButton))
-        .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(useGPULabel)
-            .addComponent(_useGPUComboBox))
-        .addGroup(
-            layout.createParallelGroup(GroupLayout.Alignment.CENTER)
-            .addComponent(
-                tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
-                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)
-            .addComponent(
-                tilingParametersPanel, GroupLayout.PREFERRED_SIZE,
-                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE))
-        .addComponent(_hostConfiguration));
-    dialogPanel.setMaximumSize(
-        new Dimension(
-            Integer.MAX_VALUE, dialogPanel.getPreferredSize().height));
+    super.prepareParametersDialog();
 
     // Create config panel
-    final JPanel configPanel = new JPanel();
-    configPanel.add(_keepOriginalCheckBox);
-    configPanel.add(_outputScoresCheckBox);
-
-    // OK/Cancel buttons
-    final JButton okButton = new JButton("OK");
-    final JButton cancelButton = new JButton("Cancel");
-    final JPanel okCancelPanel = new JPanel();
-    okCancelPanel.add(okButton);
-    okCancelPanel.add(cancelButton);
-
-    // Assemble button panel
-    final JPanel buttonPanel = new JPanel(new BorderLayout());
-    buttonPanel.add(configPanel, BorderLayout.WEST);
-    buttonPanel.add(okCancelPanel, BorderLayout.EAST);
-
-    // Assemble Dialog
-    _parametersDialog = new JDialog(
-        _imp.getWindow(), "U-net segmentation", true);
-    _parametersDialog.add(dialogPanel, BorderLayout.CENTER);
-    _parametersDialog.add(buttonPanel, BorderLayout.SOUTH);
-    _parametersDialog.getRootPane().setDefaultButton(okButton);
-
-    /*******************************************************************
-     * Wire controls inner to outer before setting values so that
-     * value changes trigger all required updates
-     *******************************************************************/
-    // Model selection affects weightFileTextField, tileModeSelector and
-    // tilingParameters (critical)
-    _modelComboBox.addItemListener(
-        new ItemListener() {
-          @Override
-          public void itemStateChanged(ItemEvent e) {
-            if (e.getStateChange() == ItemEvent.SELECTED) {
-              tilingModeSelectorPanel.removeAll();
-              tilingParametersPanel.removeAll();
-              if (model() != null) {
-                _weightsFileTextField.setText(model().weightFile);
-                tilingModeSelectorPanel.add(model().tileModeSelector);
-                tilingModeSelectorPanel.setMinimumSize(
-                    model().tileModeSelector.getPreferredSize());
-                tilingModeSelectorPanel.setMaximumSize(
-                    model().tileModeSelector.getPreferredSize());
-                tilingParametersPanel.add(model().tileModePanel);
-                tilingParametersPanel.setMinimumSize(
-                    model().tileModePanel.getMinimumSize());
-                tilingParametersPanel.setMaximumSize(
-                    new Dimension(
-                        Integer.MAX_VALUE,
-                        model().tileModeSelector.getPreferredSize().height));
-              }
-              dialogPanel.setMaximumSize(
-                  new Dimension(
-                      Integer.MAX_VALUE,
-                      dialogPanel.getPreferredSize().height));
-              _parametersDialog.invalidate();
-              _parametersDialog.setMinimumSize(
-                  _parametersDialog.getPreferredSize());
-              _parametersDialog.setMaximumSize(
-                  new Dimension(
-                      Integer.MAX_VALUE,
-                      _parametersDialog.getPreferredSize().height));
-              _parametersDialog.validate();
-            }
-          }});
-
-    // Model folder selection affects ModelComboBox (critical)
-    modelFolderChooseButton.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            File startFolder =
-                (model() == null || model().file == null ||
-                 model().file.getParentFile() == null) ?
-                new File(".") : model().file.getParentFile();
-            JFileChooser f = new JFileChooser(startFolder);
-            f.setDialogTitle("Select U-net model folder");
-            f.setMultiSelectionEnabled(false);
-            f.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            int res = f.showDialog(_parametersDialog, "Select");
-            if (res != JFileChooser.APPROVE_OPTION) return;
-            _modelFolder = f.getSelectedFile();
-            // This also updates the Prefs if the folder contains valid models
-            searchModels();
-          }});
-
-    // WeightsFileTextField affects model.weightFile (not critical)
-    _weightsFileTextField.getDocument().addDocumentListener(
-        new DocumentListener() {
-          @Override
-          public void insertUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
-          }
-          @Override
-          public void removeUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
-          }
-          @Override
-          public void changedUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
-          }
-        });
-
-    // WeightsFileChooser affects WeightsFileTextField (not critical)
-    weightsFileChooseButton.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            File startFile = new File(_weightsFileTextField.getText());
-            JFileChooser f = new JFileChooser(startFile);
-            f.setDialogTitle("Select trained U-net weights");
-            f.setFileFilter(
-                new FileNameExtensionFilter(
-                    "HDF5 and prototxt files", "h5", "H5",
-                    "prototxt", "PROTOTXT", "caffemodel",
-                    "CAFFEMODEL"));
-            f.setMultiSelectionEnabled(false);
-            f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-            int res = f.showDialog(_parametersDialog, "Select");
-            if (res != JFileChooser.APPROVE_OPTION) return;
-            _weightsFileTextField.setText(
-                f.getSelectedFile().getAbsolutePath());
-            model().weightFile = _weightsFileTextField.getText();
-          }});
-
-    // ProcessFolderChooser affects ProcessFolderTextField (not critical)
-    processFolderChooseButton.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            File startFolder = new File(_processFolderTextField.getText());
-            JFileChooser f = new JFileChooser(startFolder);
-            f.setDialogTitle("Select (remote) processing folder");
-            f.setMultiSelectionEnabled(false);
-            f.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            int res = f.showDialog(_parametersDialog, "Select");
-            if (res != JFileChooser.APPROVE_OPTION) return;
-            _processFolderTextField.setText(
-                f.getSelectedFile().getAbsolutePath());
-          }});
-
-    okButton.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            // When accepted the dialog is only hidden. Don't
-            // dispose it here, because isDisplayable() is used
-            // to find out that OK was pressed!
-            _parametersDialog.setVisible(false);
-          }});
-
-    cancelButton.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            // When cancelled the dialog is disposed (which is
-            // also done when the dialog is closed). It must be
-            // disposed here, because isDisplayable() is used
-            // to find out that the Dialog was cancelled!
-            _parametersDialog.dispose();
-            cleanUp();
-          }});
-
-    // Search models in currently selected model folder. This
-    // populates the model combobox and sets _model if a model was
-    // found. This should also implicitly update the tiling fields.
-    _modelFolder = new File(
-        Prefs.get("unet_segmentation.modelDefinitionFolder", "."));
-    searchModels();
-
-    // Set uncritical fields
-    _useGPUComboBox.setSelectedItem(
-        Prefs.get("unet_segmentation.gpuId", "none"));
+    _configPanel.add(_keepOriginalCheckBox);
+    _configPanel.add(_outputScoresCheckBox);
 
     // Finalize the dialog
     _parametersDialog.pack();
@@ -379,10 +149,6 @@ public class UnetSegmentationJob extends UnetJob {
             Integer.MAX_VALUE,
             _parametersDialog.getPreferredSize().height));
     _parametersDialog.setLocationRelativeTo(_imp.getWindow());
-
-    // Free all resources and make isDisplayable() return false to
-    // distinguish dialog close from accept
-    _parametersDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
   }
 
   public boolean getParameters() {
@@ -404,50 +170,25 @@ public class UnetSegmentationJob extends UnetJob {
         return false;
       }
 
-      if (model() == null || model().file == null) {
-        dialogOK = false;
-        IJ.showMessage("Please select a model. Probably you first need " +
-                       "to select a folder containing models.");
-        continue;
-      }
+      dialogOK = checkParameters();
+      if (!dialogOK) continue;
 
       if (!(model().nChannels == _imp.getNChannels() ||
             (model().nChannels == 3 &&
              (_imp.getType() == ImagePlus.COLOR_256 ||
               _imp.getType() == ImagePlus.COLOR_RGB)))) {
-        dialogOK = false;
         IJ.showMessage("The selected model cannot segment " +
                        _imp.getNChannels() + "-channel images.");
-        continue;
-      }
-
-      if (_weightsFileTextField.getText() == "") {
-        dialogOK = false;
-        IJ.showMessage(
-            "Please enter the (remote) path to the trained weights.");
-        continue;
-      }
-
-      try {
-        _sshSession = _hostConfiguration.sshSession(this);
-      }
-      catch (JSchException e) {
-        IJ.log("SSH connection to '" + _hostConfiguration.hostname() +
-               "' failed.");
-        IJ.showMessage(
-            "Could not connect to remote host '" +
-            _hostConfiguration.hostname() + "'\n" +
-            "Please check your login credentials.\n" + e);
         dialogOK = false;
         continue;
       }
 
-      // Check whether caffe binary exists and is executable
+      // Check whether caffe unet binary exists and is executable
       ProcessResult res = null;
       if (_sshSession == null) {
         try {
           Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
+          cmd.add(Prefs.get("unet_segmentation.caffeUnetBinary", "caffe_unet"));
           res = UnetTools.execute(cmd, this);
         }
         catch (InterruptedException e) {
@@ -460,7 +201,8 @@ public class UnetSegmentationJob extends UnetJob {
       }
       else {
         try {
-          String cmd = Prefs.get("unet_segmentation.caffeBinary", "caffe_unet");
+          String cmd = Prefs.get(
+              "unet_segmentation.caffeUnetBinary", "caffe_unet");
           res = UnetTools.execute(cmd, _sshSession, this);
         }
         catch (InterruptedException e) {
@@ -474,38 +216,32 @@ public class UnetSegmentationJob extends UnetJob {
           res.exitStatus = 1;
         }
       }
-
       if (res.exitStatus != 0) {
-        dialogOK = false;
         String caffePath = JOptionPane.showInputDialog(
-            _imp.getWindow(), "caffe was not found.\n" +
-            "Please specify your caffe binary\n",
-            Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
+            _imp.getWindow(), "caffe_unet was not found.\n" +
+            "Please specify your caffe_unet binary\n",
+            Prefs.get("unet_segmentation.caffeUnetBinary", "caffe_unet"));
         if (caffePath == null) {
           cleanUp();
           return false;
         }
         if (caffePath.equals(""))
-            Prefs.set("unet_segmentation.caffeBinary", "caffe_unet");
-        else Prefs.set("unet_segmentation.caffeBinary", caffePath);
+            Prefs.set("unet_segmentation.caffeUnetBinary", "caffe_unet");
+        else Prefs.set("unet_segmentation.caffeUnetBinary", caffePath);
+        dialogOK = false;
         continue;
       }
 
       // Check whether combination of model and weights can be used for
       // segmentation
-      String gpuParm = null;
-      String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
-      if (selectedGPU.contains("GPU "))
-          gpuParm = "-gpu " + selectedGPU.substring(selectedGPU.length() - 1);
-      else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
       if (_sshSession != null) {
-        model().remoteAbsolutePath =
-            _processFolderTextField.getText() + "/" + _jobId + "_model.h5";
+        model().remoteAbsolutePath = processFolder() + "/" + id() + "_model.h5";
         try {
           _createdRemoteFolders.addAll(
               UnetTools.put(
                   model().file, model().remoteAbsolutePath, _sshSession, this));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
+          Prefs.set("unet_segmentation.processfolder", processFolder());
         }
         catch (InterruptedException e) {
           cleanUp();
@@ -529,8 +265,7 @@ public class UnetSegmentationJob extends UnetJob {
         }
         catch (IOException e) {
           dialogOK = false;
-          IJ.showMessage(
-              "Model upload failed. Could not read model file.");
+          IJ.showMessage("Model upload failed. Could not read model file.");
           continue;
         }
 
@@ -540,7 +275,7 @@ public class UnetSegmentationJob extends UnetJob {
                 Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
                 " check_model_and_weights_h5 -model \"" +
                 model().remoteAbsolutePath + "\" -weights \"" +
-                _weightsFileTextField.getText() + "\" " + gpuParm;
+                weightsFileName() + "\" " + caffeGPUParameter();
             res = UnetTools.execute(cmd, _sshSession, this);
             if (res.exitStatus != 0) {
               int selectedOption = JOptionPane.showConfirmDialog(
@@ -568,7 +303,7 @@ public class UnetSegmentationJob extends UnetJob {
                     throw new InterruptedException("Aborted by user");
                 try {
                   UnetTools.put(
-                      f.getSelectedFile(), _weightsFileTextField.getText(),
+                      f.getSelectedFile(), weightsFileName(),
                       _sshSession, this);
                 }
                 catch (SftpException e) {
@@ -586,7 +321,7 @@ public class UnetSegmentationJob extends UnetJob {
                 res.exitStatus = 2;
                 res.shortErrorString = "Weight file selection required";
                 res.cerr = "Weight file " +
-                    _weightsFileTextField.getText() + " not found";
+                    weightsFileName() + " not found";
                 break;
               }
               case JOptionPane.CANCEL_OPTION:
@@ -621,10 +356,10 @@ public class UnetSegmentationJob extends UnetJob {
           cmd.add("-model");
           cmd.add(model().file.getAbsolutePath());
           cmd.add("-weights");
-          cmd.add(_weightsFileTextField.getText());
-          if (gpuParm != null) {
-            cmd.add(gpuParm.split(" ")[0]);
-            cmd.add(gpuParm.split(" ")[1]);
+          cmd.add(weightsFileName());
+          if (!caffeGPUParameter().equals("")) {
+            cmd.add(caffeGPUParameter().split(" ")[0]);
+            cmd.add(caffeGPUParameter().split(" ")[1]);
           }
           res = UnetTools.execute(cmd, this);
         }
@@ -646,26 +381,17 @@ public class UnetSegmentationJob extends UnetJob {
         if (res.exitStatus == 2) continue;
 
         IJ.log(res.cerr);
-        IJ.showMessage(
-            "Model/Weight check failed:\n" + res.shortErrorString);
+        IJ.showMessage("Model/Weight check failed:\n" + res.shortErrorString);
         continue;
       }
     }
 
-    _parametersDialog.dispose();
-
-    // Save residual preferences
-    Prefs.set("unet_segmentation.modelName", (String)model().name);
-    model().savePreferences();
-    Prefs.set("unet_segmentation.gpuId",
-              (String)_useGPUComboBox.getSelectedItem());
-    Prefs.set("unet_segmentation.useRemoteHost", _sshSession != null);
-    Prefs.set("unet_segmentation.processfolder",
-              _processFolderTextField.getText());
     Prefs.set("unet_segmentation.keepOriginal",
               _keepOriginalCheckBox.isSelected());
     Prefs.set("unet_segmentation.outputScores",
               _outputScoresCheckBox.isSelected());
+
+    _parametersDialog.dispose();
 
     if (_jobTableModel != null) _jobTableModel.fireTableDataChanged();
 
@@ -690,7 +416,7 @@ public class UnetSegmentationJob extends UnetJob {
         " tiled_predict -infileH5 \"" + fileName +
         "\" -outfileH5 \"" + fileName + "\" -model \"" +
         model().remoteAbsolutePath + "\" -weights \"" +
-        _weightsFileTextField.getText() + "\" -iterations 0 " +
+        weightsFileName() + "\" -iterations 0 " +
         nTilesParm + " " + gpuParm;
 
     IJ.log(commandString);
@@ -817,7 +543,7 @@ public class UnetSegmentationJob extends UnetJob {
         file.getAbsolutePath() + "\" -outfileH5 \"" +
         file.getAbsolutePath() + "\" -model \"" +
         model().file.getAbsolutePath() + "\" -weights \"" +
-        _weightsFileTextField.getText() + "\" -iterations 0 " +
+        weightsFileName() + "\" -iterations 0 " +
         nTilesAttribute + " " + nTilesValue + " " + gpuAttribute + " " +
         gpuValue);
     ProcessBuilder pb;
@@ -826,14 +552,14 @@ public class UnetSegmentationJob extends UnetJob {
             commandString, "tiled_predict", "-infileH5",
             file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
             "-model", model().file.getAbsolutePath(), "-weights",
-            _weightsFileTextField.getText(), "-iterations", "0",
+            weightsFileName(), "-iterations", "0",
             nTilesAttribute, nTilesValue, gpuAttribute, gpuValue);
     else
         pb = new ProcessBuilder(
             commandString, "tiled_predict", "-infileH5",
             file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
             "-model", model().file.getAbsolutePath(), "-weights",
-            _weightsFileTextField.getText(), "-iterations", "0",
+            weightsFileName(), "-iterations", "0",
             nTilesAttribute, nTilesValue);
 
     Process p = pb.start();
@@ -911,7 +637,7 @@ public class UnetSegmentationJob extends UnetJob {
 
   public static void segmentHyperStack(String params)
       throws InterruptedException {
-    final UnetJob job = new UnetJob();
+    final UnetSegmentationJob job = new UnetSegmentationJob();
     if (job._imp == null)
         job.setImagePlus(WindowManager.getCurrentImage());
     if (job._imp == null) {
@@ -1026,7 +752,7 @@ public class UnetSegmentationJob extends UnetJob {
       if (_sshSession != null) {
         if (!_isInteractive) {
           model().remoteAbsolutePath =
-              _processFolderTextField.getText() + "/" + _jobId + "_model.h5";
+              _processFolderTextField.getText() + "/" + id() + "_model.h5";
           _createdRemoteFolders.addAll(
               UnetTools.put(
                   model().file, model().remoteAbsolutePath, _sshSession, this));
@@ -1034,11 +760,11 @@ public class UnetSegmentationJob extends UnetJob {
         }
         setProgress(1);
 
-        _localTmpFile = File.createTempFile(_jobId, ".h5");
+        _localTmpFile = File.createTempFile(id(), ".h5");
         _localTmpFile.delete();
 
         String remoteFileName = _processFolderTextField.getText() + "/" +
-            _jobId + ".h5";
+            id() + ".h5";
 
         setImagePlus(
             UnetTools.saveHDF5Blob(
@@ -1066,7 +792,7 @@ public class UnetSegmentationJob extends UnetJob {
       }
       else {
         _localTmpFile = new File(
-            _processFolderTextField.getText() + "/" + _jobId + ".h5");
+            _processFolderTextField.getText() + "/" + id() + ".h5");
 
         setImagePlus(
             UnetTools.saveHDF5Blob(
@@ -1083,7 +809,7 @@ public class UnetSegmentationJob extends UnetJob {
       setReady(true);
     }
     catch (InterruptedException e) {
-      IJ.showMessage("Job " + _jobId + " canceled. Cleaning up.");
+      IJ.showMessage("Job " + id() + " canceled. Cleaning up.");
       cleanUp();
       if (_jobTableModel != null) _jobTableModel.deleteJob(this);
     }
@@ -1092,33 +818,6 @@ public class UnetSegmentationJob extends UnetJob {
       cleanUp();
       if (_jobTableModel != null) _jobTableModel.deleteJob(this);
     }
-  }
-
-  public void cleanUp() {
-    for (int i = 0; i < _createdRemoteFiles.size(); i++) {
-      try {
-        UnetTools.removeFile(
-            _createdRemoteFiles.get(i), _sshSession, this);
-      }
-      catch (Exception e) {
-        IJ.log("Could not remove temporary file " +
-               _createdRemoteFiles.get(i) + ": " + e);
-      }
-    }
-    for (int i = 0; i < _createdRemoteFolders.size(); i++) {
-      try {
-        UnetTools.removeFolder(
-            _createdRemoteFolders.get(i), _sshSession, this);
-      }
-      catch (Exception e) {
-        IJ.log("Could not remove temporary folder " +
-               _createdRemoteFolders.get(i) + ": " + e);
-      }
-    }
-    if (_sshSession != null) _sshSession.disconnect();
-    _finished = true;
-    if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-    IJ.log("Unet_Segmentation finished");
   }
 
 };
