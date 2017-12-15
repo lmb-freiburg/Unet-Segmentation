@@ -85,15 +85,15 @@ public class Unet_Segmentation_Manager extends PlugInFrame {
                 WindowManager.getCurrentImage());
           }});
 
-    // JButton newFinetuneJobButton = new JButton("Finetuning");
-    // newFinetuneJobButton.setToolTipText(
-    //     "Finetune U-Net model to new data");
-    // newFinetuneJobButton.addActionListener(
-    //     new ActionListener() {
-    //       @Override
-    //       public void actionPerformed(ActionEvent e) {
-    //         _unetJobTableModel.createFinetuneJob();
-    //       }});
+    JButton newFinetuneJobButton = new JButton("Finetuning");
+    newFinetuneJobButton.setToolTipText(
+        "Finetune U-Net model to new data");
+    newFinetuneJobButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            _unetJobTableModel.createFinetuneJob();
+          }});
 
     JButton helpButton = new JButton("Help");
     helpButton.setToolTipText("Show README");
@@ -153,8 +153,8 @@ public class Unet_Segmentation_Manager extends PlugInFrame {
     c.gridwidth = 1;
     c.anchor = GridBagConstraints.LAST_LINE_START;
     add(newSegmentationJobButton, c);
-    // c.gridx = 1;
-    // add(newFinetuneJobButton, c);
+    c.gridx = 1;
+    add(newFinetuneJobButton, c);
     c.gridx = 2;
     c.gridy = 1;
     c.anchor = GridBagConstraints.LAST_LINE_END;

@@ -173,22 +173,12 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       dialogOK = checkParameters();
       if (!dialogOK) continue;
 
-      if (!(model().nChannels == _imp.getNChannels() ||
-            (model().nChannels == 3 &&
-             (_imp.getType() == ImagePlus.COLOR_256 ||
-              _imp.getType() == ImagePlus.COLOR_RGB)))) {
-        IJ.showMessage("The selected model cannot segment " +
-                       _imp.getNChannels() + "-channel images.");
-        dialogOK = false;
-        continue;
-      }
-
       // Check whether caffe unet binary exists and is executable
       ProcessResult res = null;
       if (_sshSession == null) {
         try {
           Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_segmentation.caffeUnetBinary", "caffe_unet"));
+          cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
           res = UnetTools.execute(cmd, this);
         }
         catch (InterruptedException e) {
@@ -202,7 +192,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       else {
         try {
           String cmd = Prefs.get(
-              "unet_segmentation.caffeUnetBinary", "caffe_unet");
+              "unet_segmentation.caffeBinary", "caffe_unet");
           res = UnetTools.execute(cmd, _sshSession, this);
         }
         catch (InterruptedException e) {
@@ -220,20 +210,24 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
         String caffePath = JOptionPane.showInputDialog(
             _imp.getWindow(), "caffe_unet was not found.\n" +
             "Please specify your caffe_unet binary\n",
-            Prefs.get("unet_segmentation.caffeUnetBinary", "caffe_unet"));
+            Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
         if (caffePath == null) {
           cleanUp();
           return false;
         }
         if (caffePath.equals(""))
-            Prefs.set("unet_segmentation.caffeUnetBinary", "caffe_unet");
-        else Prefs.set("unet_segmentation.caffeUnetBinary", caffePath);
+            Prefs.set("unet_segmentation.caffeBinary", "caffe_unet");
+        else Prefs.set("unet_segmentation.caffeBinary", caffePath);
         dialogOK = false;
         continue;
       }
 
       // Check whether combination of model and weights can be used for
       // segmentation
+      int nChannels =
+          (_imp.getType() == ImagePlus.COLOR_256 ||
+           _imp.getType() == ImagePlus.COLOR_RGB) ? 3 : _imp.getNChannels();
+
       if (_sshSession != null) {
         model().remoteAbsolutePath = processFolder() + "/" + id() + "_model.h5";
         try {
@@ -275,14 +269,15 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
                 Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
                 " check_model_and_weights_h5 -model \"" +
                 model().remoteAbsolutePath + "\" -weights \"" +
-                weightsFileName() + "\" " + caffeGPUParameter();
+                weightsFileName() + "\" -n_channels " + nChannels + " " +
+                caffeGPUParameter();
             res = UnetTools.execute(cmd, _sshSession, this);
             if (res.exitStatus != 0) {
               int selectedOption = JOptionPane.showConfirmDialog(
-                  _imp.getWindow(), "No trained weights found at the " +
+                  _imp.getWindow(), "No compatible weights found at the " +
                   "given location on the backend server.\nDo you want " +
-                  "to upload the weights now?", "Upload weights?",
-                  JOptionPane.YES_NO_CANCEL_OPTION,
+                  "to upload weights from the local machine now?",
+                  "Upload weights?", JOptionPane.YES_NO_CANCEL_OPTION,
                   JOptionPane.QUESTION_MESSAGE);
               switch (selectedOption) {
               case JOptionPane.YES_OPTION: {
@@ -357,6 +352,8 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
           cmd.add(model().file.getAbsolutePath());
           cmd.add("-weights");
           cmd.add(weightsFileName());
+          cmd.add("-n_channels");
+          cmd.add(new Integer(nChannels).toString());
           if (!caffeGPUParameter().equals("")) {
             cmd.add(caffeGPUParameter().split(" ")[0]);
             cmd.add(caffeGPUParameter().split(" ")[1]);

@@ -25,19 +25,26 @@ public class ModelDefinition {
 
   public File file = null;
   public String remoteAbsolutePath = null;
+  public String modelPrototxtAbsolutePath = null;
+  public String solverPrototxtAbsolutePath = null;
   public String id = "Select model folder ==>";
   public String name = "Select model folder ==>";
   public String description = "Select model folder ==>";
   public String inputBlobName = null;
-  public String prototxt = null;
+  public String inputDatasetName = "data";
+  public String solverPrototxt = null;
+  public String modelPrototxt = null;
   public String padding = null;
-  public int nChannels = 0;
   public int normalizationType = 0;
   public int[] downsampleFactor = null;
   public int[] padInput = null;
   public int[] padOutput = null;
   public float[] elementSizeUm = null;
   public int[][] memoryMap = null;
+  public float borderWeightFactor = 50.0f;
+  public float borderWeightSigmaUm = 3.0f;
+  public float foregroundBackgroundRatio = 0.1f;
+  public float sigma1Um = 5.0f;
 
   public String weightFile = null;
 
@@ -197,14 +204,29 @@ public class ModelDefinition {
     name = reader.string().read("/unet_param/name");
     description = reader.string().read("/unet_param/description");
     inputBlobName = reader.string().read("/unet_param/input_blob_name");
-    prototxt = reader.string().read("/model_prototxt");
+    try {
+      inputDatasetName = reader.string().read("/unet_param/input_dataset_name");
+    }
+    catch (HDF5Exception e) {}
+    solverPrototxt = reader.string().read("/solver_prototxt");
+    modelPrototxt = reader.string().read("/model_prototxt");
     padding = reader.string().read("/unet_param/padding");
-    nChannels = reader.int32().read("/unet_param/input_num_channels");
     normalizationType = reader.int32().read("/unet_param/normalization_type");
     downsampleFactor = reader.int32().readArray("/unet_param/downsampleFactor");
     padInput = reader.int32().readArray("/unet_param/padInput");
     padOutput = reader.int32().readArray("/unet_param/padOutput");
     elementSizeUm = reader.float32().readArray("/unet_param/element_size_um");
+    try {
+      borderWeightFactor = reader.float32().read(
+          "/unet_param/pixelwise_loss_weights/borderWeightFactor");
+      borderWeightSigmaUm = reader.float32().read(
+          "/unet_param/pixelwise_loss_weights/borderWeightSigmaUm");
+      foregroundBackgroundRatio = reader.float32().read(
+          "/unet_param/pixelwise_loss_weights/foregroundBackgroundRatio");
+      sigma1Um = reader.float32().read(
+          "/unet_param/pixelwise_loss_weights/sigma1_um");
+    }
+    catch (HDF5Exception e) {}
 
     // Convert scalar parameters to vectors
     if (downsampleFactor.length == 1) {
@@ -264,6 +286,18 @@ public class ModelDefinition {
     load(file);
   }
 
+  public void saveModelPrototxt(File f) throws IOException {
+    BufferedWriter writer = new BufferedWriter(new FileWriter(f));
+    writer.write(modelPrototxt);
+    writer.flush();
+  }
+
+  public void saveSolverPrototxt(File f) throws IOException {
+    BufferedWriter writer = new BufferedWriter(new FileWriter(f));
+    writer.write(solverPrototxt);
+    writer.flush();
+  }
+
   public void save(File outputFile) throws HDF5Exception {
     IHDF5Writer writer =
         HDF5Factory.configure(outputFile).
@@ -275,14 +309,26 @@ public class ModelDefinition {
     writer.string().write("/unet_param/name", name);
     writer.string().write("/unet_param/description", description);
     writer.string().write("/unet_param/input_blob_name", inputBlobName);
-    writer.string().write("/model_prototxt", prototxt);
+    writer.string().write("/unet_param/input_dataset_name", inputDatasetName);
+    writer.string().write("/solver_prototxt", solverPrototxt);
+    writer.string().write("/model_prototxt", modelPrototxt);
     writer.string().write("/unet_param/padding", padding);
-    writer.int32().write("/unet_param/input_num_channels", nChannels);
     writer.int32().write("/unet_param/normalization_type", normalizationType);
     writer.int32().writeArray("/unet_param/downsampleFactor", downsampleFactor);
     writer.int32().writeArray("/unet_param/padInput", padInput);
     writer.int32().writeArray("/unet_param/padOutput", padOutput);
     writer.float32().writeArray("/unet_param/element_size_um", elementSizeUm);
+    writer.float32().write(
+        "/unet_param/pixelwise_loss_weights/borderWeightFactor",
+        borderWeightFactor);
+    writer.float32().write(
+          "/unet_param/pixelwise_loss_weights/borderWeightSigmaUm",
+          borderWeightSigmaUm);
+    writer.float32().write(
+        "/unet_param/pixelwise_loss_weights/foregroundBackgroundRatio",
+        foregroundBackgroundRatio);
+    writer.float32().write(
+        "/unet_param/pixelwise_loss_weights/sigma1_um", sigma1Um);
     if (memoryMap != null && memoryMap.length == 2)
         writer.int32().writeMatrix(
             "/unet_param/mapInputNumPxGPUMemMB", memoryMap);
@@ -388,6 +434,20 @@ public class ModelDefinition {
             ("nz: " + (Integer)_shapeZSpinner.getValue()) + " " : "") +
         "ny: " + (Integer)_shapeYSpinner.getValue() +
         " nx: " + (Integer)_shapeXSpinner.getValue();
+  }
+
+  public int[] getTileShape() {
+    int[] res = new int[elementSizeUm.length];
+    if (elementSizeUm.length == 3) {
+      res[0] = (Integer)_shapeZSpinner.getValue();
+      res[1] = (Integer)_shapeYSpinner.getValue();
+      res[2] = (Integer)_shapeXSpinner.getValue();
+    }
+    else {
+      res[0] = (Integer)_shapeYSpinner.getValue();
+      res[1] = (Integer)_shapeXSpinner.getValue();
+    }
+    return res;
   }
 
   public void savePreferences() {

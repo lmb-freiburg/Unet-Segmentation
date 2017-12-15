@@ -82,14 +82,14 @@ public class UnetJobTableModel extends AbstractTableModel {
     fireTableRowsDeleted(jobIdx, jobIdx);
   }
 
-  // public void createFinetuneJob() {
-  //   UnetFinetuneJob job = new UnetFinetuneJob();
-  //   job.setJobTableModel(this);
-  //   job.prepareParametersDialog();
-  //   _jobs.add(job);
-  //   job.start();
-  //   fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
-  // }
+  public void createFinetuneJob() {
+    UnetFinetuneJob job = new UnetFinetuneJob();
+    job.setJobTableModel(this);
+    job.prepareParametersDialog();
+    _jobs.add(job);
+    job.start();
+    fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
+  }
 
   public void createSegmentationJob(ImagePlus imp) {
     if (imp == null) {

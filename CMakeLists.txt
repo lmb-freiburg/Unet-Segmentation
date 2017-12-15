@@ -7,7 +7,8 @@ project(Unet_Segmentation Java)
 
 set(CMAKE_JAVA_COMPILE_FLAGS "-Xlint:unchecked" "-deprecation")
 
-find_program(FIJI_BIN ImageJ-linux64)
+find_program(FIJI_BIN ImageJ-linux64 DOC "The Fiji binary")
+find_program(PROTOBUF_COMPILER protoc DOC "Google Protobuf compiler")
 get_filename_component(FIJI_DIR ${FIJI_BIN} DIRECTORY)
 
 # Get current version of ij.jar
@@ -31,16 +32,20 @@ get_filename_component(JSCH_JAR_FILENAME ${JSCH_JAR_ABSPATH} NAME)
 string(REGEX REPLACE "[.]jar.*" "" JSCH_JAR_BASENAME ${JSCH_JAR_FILENAME})
 find_jar(JSCH_JAR "${JSCH_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the Java Secure Shell library jsch-<version>.jar")
 
-set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR})
+set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROJECT_SOURCE_DIR}/protobuf-java-2.6.1.jar)
 
-add_jar(Unet_Segmentation src/Unet_Segmentation_Manager.java src/UnetJobTableModel.java src/HostConfigurationPanel.java src/UnetJob.java src/UnetSegmentationJob.java src/UnetTools.java src/MyUserInfo.java src/MySftpProgressMonitor.java src/ModelDefinition.java src/ProcessResult.java src/TaskStatus.java COPYING.txt plugins.config resources/README.html)
+add_jar(Unet_Segmentation src/Unet_Segmentation_Manager.java src/UnetJobTableModel.java src/HostConfigurationPanel.java src/UnetJob.java src/UnetSegmentationJob.java src/UnetFinetuneJob.java src/UnetTools.java src/MyUserInfo.java src/MySftpProgressMonitor.java src/ModelDefinition.java src/ProcessResult.java src/TaskStatus.java src/ImagePlusListView.java src/NotImplementedException.java caffe/Caffe.java src/caffe.proto COPYING.txt plugins.config resources/README.html INCLUDE_JARS protobuf-java-2.6.1.jar)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)
 
 add_custom_command(TARGET Unet_Segmentation
-        POST_BUILD
-        # workaround to add sources
-        COMMAND jar uMf ${UNET_SEGMENTATION_JAR_ABSPATH} -C ${PROJECT_SOURCE_DIR} src
-)
+  POST_BUILD
+  # workaround to add sources
+  COMMAND jar uMf ${UNET_SEGMENTATION_JAR_ABSPATH} -C ${PROJECT_SOURCE_DIR} src
+  )
+
+add_custom_command(OUTPUT ${PROJECT_SOURCE_DIR}/caffe/Caffe.java
+  COMMAND ${PROTOBUF_COMPILER} -I${PROJECT_SOURCE_DIR}/src --java_out=${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src/caffe.proto
+  )
 
 install_jar(Unet_Segmentation ${CMAKE_INSTALL_PREFIX})

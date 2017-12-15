@@ -18,6 +18,7 @@ import javax.swing.JComboBox;
 import javax.swing.JTextField;
 import javax.swing.JFileChooser;
 import javax.swing.GroupLayout;
+import javax.swing.GroupLayout.Group;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.BorderFactory;
@@ -56,6 +57,8 @@ public class UnetJob extends Thread {
 
   protected JDialog _parametersDialog = null;
   protected GroupLayout _dialogLayout = null;
+  protected Group _horizontalDialogLayoutGroup = null;
+  protected Group _verticalDialogLayoutGroup = null;
   protected JPanel _configPanel = new JPanel();
 
   protected JComboBox<ModelDefinition> _modelComboBox =
@@ -342,8 +345,12 @@ public class UnetJob extends Thread {
     dialogPanel.setLayout(_dialogLayout);
     _dialogLayout.setAutoCreateGaps(true);
     _dialogLayout.setAutoCreateContainerGaps(true);
+    _horizontalDialogLayoutGroup =
+        _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING);
+    _verticalDialogLayoutGroup = _dialogLayout.createSequentialGroup();
+
     _dialogLayout.setHorizontalGroup(
-        _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
+        _horizontalDialogLayoutGroup
         .addGroup(
             _dialogLayout.createSequentialGroup()
             .addGroup(
@@ -373,7 +380,7 @@ public class UnetJob extends Thread {
         .addComponent(_hostConfiguration));
 
     _dialogLayout.setVerticalGroup(
-        _dialogLayout.createSequentialGroup()
+        _verticalDialogLayoutGroup
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(modelLabel)
