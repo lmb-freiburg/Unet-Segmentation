@@ -1,8 +1,10 @@
 import ij.IJ;
 import ij.Prefs;
 import ij.WindowManager;
+import ij.process.ImageProcessor;
 import ij.ImagePlus;
 import ij.plugin.PlugIn;
+import ij.gui.Plot;
 
 import java.awt.Dimension;
 import java.awt.BorderLayout;
@@ -473,152 +475,50 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     return true;
   }
 
-  public void runUnetFinetuning(Session session)
-      throws JSchException, IOException, InterruptedException {
-    _taskStatus.isIndeterminate = true;
-    setTaskProgress("Initializing U-Net", 0, 0);
-    String gpuParm = new String();
-    String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
-    if (selectedGPU.contains("GPU "))
-        gpuParm = "-gpu " + selectedGPU.substring(selectedGPU.length() - 1);
-    else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
-    String weightsParm = "";
-    if (!_trainFromScratch) weightsParm = "-weights " + weightsFileName();
-    String commandString =
-        Prefs.get("unet_finetuning.caffeBinary", "caffe") +
-        " train -solver " + model().solverPrototxtAbsolutePath + " " +
-        weightsParm + " " + gpuParm;
-    IJ.log(commandString);
-
-    Channel channel = session.openChannel("exec");
-    ((ChannelExec)channel).setCommand(commandString);
-
-    InputStream stdError = ((ChannelExec)channel).getErrStream();
-    InputStream stdOutput = channel.getInputStream();
-
-    channel.connect();
-
-    byte[] buf = new byte[1024];
-    String errorMsg = new String();
-    String errorMsgRecent = new String();
-    String outMsg = new String();
-    int exitStatus = -1;
-    int nIter = (Integer)_iterationsSpinner.getValue();
-    try {
-      while (true) {
-        while(stdOutput.available() > 0) {
-          int i = stdOutput.read(buf, 0, 1024);
-          if (i < 0) break;
-          outMsg += "\n" + new String(buf, 0, i);
-        }
-        while(stdError.available() > 0) {
-          int i = stdError.read(buf, 0, 1024);
-          if (i < 0) break;
-          errorMsg += "\n" + new String(buf, 0, i);
-          errorMsgRecent += "\n" + new String(buf, 0, i);
-        }
-        int idx = -1;
-        while ((idx = outMsg.indexOf('\n')) != -1) {
-          String line = outMsg.substring(0, idx);
-          outMsg = outMsg.substring(idx + 1);
-          if (line.matches("^.*Iteration [0-9]+, loss = .*$")) {
-            int iter = Integer.valueOf(
-                line.split("Iteration ")[1].split(",")[0]);
-            double loss = Double.valueOf(line.split("loss = ")[1]);
-            setTaskProgress(
-                "Finetuning iteration " + iter + "/" + nIter + " loss = " +
-                loss, iter, nIter);
-            setProgress(
-                (int) (_taskProgressMin + (float)iter / (float)nIter *
-                       (_taskProgressMax - _taskProgressMin)));
-          }
-        }
-        while ((idx = errorMsgRecent.indexOf('\n')) != -1) {
-          String line = errorMsgRecent.substring(0, idx);
-          errorMsgRecent = errorMsgRecent.substring(idx + 1);
-          if (line.matches("^.*Iteration [0-9]+, loss = .*$")) {
-            int iter = Integer.valueOf(
-                line.split("Iteration ")[1].split(",")[0]);
-            double loss = Double.valueOf(line.split("loss = ")[1]);
-            setTaskProgress(
-                "Finetuning iteration " + iter + "/" + nIter + " loss = " +
-                loss, iter, nIter);
-            setProgress(
-                (int) (_taskProgressMin + (float)iter / (float)nIter *
-                       (_taskProgressMax - _taskProgressMin)));
-          }
-        }
-        if (channel.isClosed()) {
-          if(stdOutput.available() > 0 || stdError.available() > 0) continue;
-          exitStatus = channel.getExitStatus();
-          break;
-        }
-        if (interrupted()) throw new InterruptedException();
-        Thread.sleep(100);
+  private void parseCaffeOutputString(
+      String msg, ImagePlus lossImage, double[] x, double[] yTrain,
+      double[] yValid) {
+    int idx = -1;
+    String line = null;
+    while (msg.length() > 0) {
+      if ((idx = msg.indexOf('\n')) != -1) {
+        line = msg.substring(0, idx);
+        msg = msg.substring(idx + 1);
       }
-    }
-    catch (InterruptedException e) {
-      _readyCancelButton.setText("Terminating...");
-      _readyCancelButton.setEnabled(false);
-      try {
-        channel.sendSignal("TERM");
-        int graceMilliSeconds = 10000;
-        int timeElapsedMilliSeconds = 0;
-        while (!channel.isClosed() &&
-               timeElapsedMilliSeconds <= graceMilliSeconds) {
-          timeElapsedMilliSeconds += 100;
-          try {
-            Thread.sleep(100);
-          }
-          catch (InterruptedException eInner) {}
-        }
-        if (!channel.isClosed()) channel.sendSignal("KILL");
+      else {
+        line = msg;
+        msg = "";
       }
-      catch (Exception eInner) {
-        IJ.log(
-            "Process could not be terminated using SIGTERM: " + eInner);
+      if (line.matches("^.*Iteration [0-9]+, loss = .*$")) {
+        int iter = Integer.valueOf(line.split("Iteration ")[1].split(",")[0]);
+        double loss = Double.valueOf(line.split("loss = ")[1]);
+
+        // Update loss plot
+        yTrain[iter] = loss;
+        Plot plot = new Plot(
+            "Finetuning Evolution", "Iteration", "Loss", x, yTrain);
+        plot.setLimits(0.0, (double)(x.length - 1), 0.0, Double.NaN);
+        ImageProcessor plotProcessor = plot.getProcessor();
+        lossImage.setProcessor(null, plotProcessor);
+        lossImage.updateAndDraw();
+
+        // Update progress
+        setTaskProgress(
+            "Finetuning iteration " + iter + "/" + (x.length - 1) + " loss = " +
+            loss, iter, x.length - 1);
+        setProgress(
+            (int) (_taskProgressMin + (float)(iter) / (float)(x.length - 1) *
+                   (_taskProgressMax - _taskProgressMin)));
       }
-      channel.disconnect();
-      throw e;
-    }
-    channel.disconnect();
-
-    if (exitStatus != 0) {
-      IJ.log(errorMsg);
-      throw new IOException(
-          "Error during finetuning: exit status " + exitStatus +
-          "\nSee log for further details");
-    }
-
-    try {
-      // Rename output file name and remove solverstate file
-      UnetTools.renameFile(
-          processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
-          ".caffemodel.h5", processFolder() + "/" + _outfileTextField.getText(),
-          session, this);
-    }
-    catch (SftpException e) {
-      IJ.showMessage(
-          "Could not rename weightsfile to " + processFolder() + "/" +
-          _outfileTextField.getText() + "\n" +
-          "The trained model can be found at " + processFolder() + "/" +
-          id() + "-snapshot_iter_" + nIter + ".caffemodel.h5");
-    }
-    try {
-      UnetTools.removeFile(
-          processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
-          ".solverstate.h5", session, this);
-    }
-    catch (SftpException e) {
-      IJ.showMessage(
-          "Could not delete solverstate " + processFolder() + "/" + id() +
-          "-snapshot_iter_" + nIter + ".solverstate.h5");
     }
   }
 
   public void runUnetFinetuning()
-      throws IOException, InterruptedException {
+      throws JSchException, IOException, InterruptedException {
+    _taskStatus.isIndeterminate = true;
     setTaskProgress("Initializing U-Net", 0, 0);
+
+    // Prepare caffe call
     String gpuAttribute = new String();
     String gpuValue = new String();
     String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
@@ -636,93 +536,116 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       weightsAttribute = "-weights";
       weightsValue = weightsFileName();
     }
-
     String commandString = Prefs.get("unet_finetuning.caffeBinary", "caffe");
-
     String commandLineString =
         commandString + " train -solver " +
         model().solverPrototxtAbsolutePath + " " + weightsAttribute + " " +
         weightsValue + " " + gpuAttribute + " " + gpuValue;
-    IJ.log(commandString);
+    IJ.log(commandLineString);
 
-    ProcessBuilder pb;
-    if (gpuAttribute.equals("")) {
-      if (weightsAttribute.equals(""))
-          pb = new ProcessBuilder(
-              commandString, "train",
-              "-solver", model().solverPrototxtAbsolutePath);
-      else
-          pb = new ProcessBuilder(
-              commandString, "train",
-              "-solver", model().solverPrototxtAbsolutePath,
-              weightsAttribute, weightsValue);
+    int nIter = (Integer)_iterationsSpinner.getValue();
+
+    // Set up ImagePlus for plotting the loss curves
+    ImagePlus plotImage = null;
+    double[] x = new double[nIter + 1];
+    double[] yTrain = new double[nIter + 1];
+    double[] yValid = new double[nIter + 1];
+    for (int i = 0; i <= nIter; i++) {
+      x[i] = i + 1;
+      yTrain[i] = Double.NaN;
+      yValid[i] = Double.NaN;
+    }
+    {
+      Plot plot = new Plot(
+          "Finetuning " + id(), "Iteration", "Loss", x, yTrain);
+      plot.setLimits(0.0, (double)nIter, 0.0, Double.NaN);
+      ImageProcessor plotProcessor = plot.getProcessor();
+      plotImage = new ImagePlus("Finetuning " + id(), plotProcessor);
+      plotImage.setProcessor(null, plotProcessor);
+      plotImage.show();
+    }
+
+    Channel channel = null;
+    Process p = null;
+    BufferedReader stdOutput = null;
+    BufferedReader stdError = null;
+    if (_sshSession == null)
+    {
+      ProcessBuilder pb = null;
+      if (gpuAttribute.equals("")) {
+        if (weightsAttribute.equals(""))
+            pb = new ProcessBuilder(
+                commandString, "train",
+                "-solver", model().solverPrototxtAbsolutePath);
+        else
+            pb = new ProcessBuilder(
+                commandString, "train",
+                "-solver", model().solverPrototxtAbsolutePath,
+                weightsAttribute, weightsValue);
+      }
+      else {
+        if (weightsAttribute.equals(""))
+            pb = new ProcessBuilder(
+                commandString, "train",
+                "-solver", model().solverPrototxtAbsolutePath,
+                gpuAttribute, gpuValue);
+        else
+            pb = new ProcessBuilder(
+                commandString, "train",
+                "-solver", model().solverPrototxtAbsolutePath,
+                weightsAttribute, weightsValue,
+                gpuAttribute, gpuValue);
+      }
+      p = pb.start();
+      stdOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
+      stdError = new BufferedReader(new InputStreamReader(p.getErrorStream()));
     }
     else {
-      if (weightsAttribute.equals(""))
-          pb = new ProcessBuilder(
-              commandString, "train",
-              "-solver", model().solverPrototxtAbsolutePath,
-              gpuAttribute, gpuValue);
-      else
-          pb = new ProcessBuilder(
-              commandString, "train",
-              "-solver", model().solverPrototxtAbsolutePath,
-              weightsAttribute, weightsValue,
-              gpuAttribute, gpuValue);
+      channel = _sshSession.openChannel("exec");
+      ((ChannelExec)channel).setCommand(commandLineString);
+      stdOutput =
+          new BufferedReader(new InputStreamReader(channel.getInputStream()));
+      stdError =
+          new BufferedReader(
+              new InputStreamReader(((ChannelExec)channel).getErrStream()));
+      channel.connect();
     }
 
-    Process p = pb.start();
-
-    BufferedReader stdOutput =
-        new BufferedReader(new InputStreamReader(p.getInputStream()));
-    BufferedReader stdError =
-        new BufferedReader(new InputStreamReader(p.getErrorStream()));
-
     int exitStatus = -1;
-    String line;
-    String errorMsg = "";
-    int nIter = (Integer)_iterationsSpinner.getValue();
+    String line = null;
+    String errorMsg = new String();
+
     try {
       while (true) {
+
         // Check for ready() to avoid thread blocking, then read
         // all available lines from the buffer and update progress
         while (stdOutput.ready()) {
           line = stdOutput.readLine();
-          if (line.matches("^.*Iteration [0-9]+, loss = .*$")) {
-            int iter = Integer.valueOf(
-                line.split("Iteration ")[1].split(",")[0]);
-            double loss = Double.valueOf(line.split("loss = ")[1]);
-            setTaskProgress(
-                "Finetuning iteration " + iter + "/" + nIter + " loss = " +
-                loss, iter, nIter);
-            setProgress(
-                (int) (_taskProgressMin + (float)iter / (float)nIter *
-                       (_taskProgressMax - _taskProgressMin)));
-          }
+          parseCaffeOutputString(line, plotImage, x, yTrain, yValid);
         }
         // Also read error stream to avoid stream overflow that leads
         // to process stalling
         while (stdError.ready()) {
           line = stdError.readLine();
-          if (line.matches("^.*Iteration [0-9]+, loss = .*$")) {
-            int iter = Integer.valueOf(
-                line.split("Iteration ")[1].split(",")[0]);
-            double loss = Double.valueOf(line.split("loss = ")[1]);
-            setTaskProgress(
-                "Finetuning iteration " + iter + "/" + nIter + " loss = " +
-                loss, iter, nIter);
-            setProgress(
-                (int) (_taskProgressMin + (float)iter / (float)nIter *
-                       (_taskProgressMax - _taskProgressMin)));
-          }
           errorMsg += line + "\n";
+          parseCaffeOutputString(line, plotImage, x, yTrain, yValid);
         }
 
-        try {
-          exitStatus = p.exitValue();
-          break;
+        if (_sshSession != null) {
+          if (channel.isClosed()) {
+            if(stdOutput.ready() || stdError.ready()) continue;
+            exitStatus = channel.getExitStatus();
+            break;
+          }
         }
-        catch (IllegalThreadStateException e) {}
+        else {
+          try {
+            exitStatus = p.exitValue();
+            break;
+          }
+          catch (IllegalThreadStateException e) {}
+        }
         if (interrupted()) throw new InterruptedException();
         Thread.sleep(100);
       }
@@ -730,9 +653,30 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     catch (InterruptedException e) {
       _readyCancelButton.setText("Terminating...");
       _readyCancelButton.setEnabled(false);
-      p.destroy();
+      if (_sshSession != null) {
+        try {
+          channel.sendSignal("TERM");
+          int graceMilliSeconds = 10000;
+          int timeElapsedMilliSeconds = 0;
+          while (!channel.isClosed() &&
+                 timeElapsedMilliSeconds <= graceMilliSeconds) {
+            timeElapsedMilliSeconds += 100;
+            try {
+              Thread.sleep(100);
+            }
+            catch (InterruptedException eInner) {}
+          }
+          if (!channel.isClosed()) channel.sendSignal("KILL");
+        }
+        catch (Exception eInner) {
+          IJ.log("Process could not be terminated using SIGTERM: " + eInner);
+        }
+        channel.disconnect();
+      }
+      else p.destroy();
       throw e;
     }
+    if (_sshSession != null) channel.disconnect();
 
     if (exitStatus != 0) {
       IJ.log(errorMsg);
@@ -741,23 +685,51 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           "\nSee log for further details");
     }
 
-    // Rename output file and remove solverstate
-    File outfile = new File(
-        processFolder() + "/" + _outfileTextField.getText());
-    File infile = new File(
-        processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
-        ".caffemodel.h5");
-    File solverstatefile = new File(
-        processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
-        ".solverstate.h5");
-    if (!infile.renameTo(outfile))
+    if (_sshSession != null)
+    {
+      try {
+        // Rename output file name and remove solverstate file
+        UnetTools.renameFile(
+            processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
+            ".caffemodel.h5", processFolder() + "/" +
+            _outfileTextField.getText(), _sshSession, this);
+      }
+      catch (SftpException e) {
         IJ.showMessage(
-            "Could not rename weightsfile to " + outfile.getPath() + "\n" +
-            "The trained model can be found at " + infile.getPath());
-    if (!solverstatefile.delete())
+            "Could not rename weightsfile to " + processFolder() + "/" +
+            _outfileTextField.getText() + "\n" +
+            "The trained model can be found at " + processFolder() + "/" +
+            id() + "-snapshot_iter_" + nIter + ".caffemodel.h5");
+      }
+      try {
+        UnetTools.removeFile(
+            processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
+            ".solverstate.h5", _sshSession, this);
+      }
+      catch (SftpException e) {
         IJ.showMessage(
-            "Could not delete solverstate " + solverstatefile.getPath());
-
+            "Could not delete solverstate " + processFolder() + "/" + id() +
+            "-snapshot_iter_" + nIter + ".solverstate.h5");
+      }
+    }
+    else {
+      // Rename output file and remove solverstate
+      File outfile = new File(
+          processFolder() + "/" + _outfileTextField.getText());
+      File infile = new File(
+          processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
+          ".caffemodel.h5");
+      File solverstatefile = new File(
+          processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
+          ".solverstate.h5");
+      if (!infile.renameTo(outfile))
+          IJ.showMessage(
+              "Could not rename weightsfile to " + outfile.getPath() + "\n" +
+              "The trained model can be found at " + infile.getPath());
+      if (!solverstatefile.delete())
+          IJ.showMessage(
+              "Could not delete solverstate " + solverstatefile.getPath());
+    }
     setTaskProgress(1, 1);
   }
 
@@ -804,29 +776,118 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       String validFileListAbsolutePath =
           processFolder() + "/" + id() + "-validfilelist.txt";
 
-      String[] trainBlobFileNames =
-          new String[_trainFileList.getModel().getSize()];
-      String[] validBlobFileNames =
-          new String[_validFileList.getModel().getSize()];
-      String[] allBlobFileNames =
-          new String[trainBlobFileNames.length + validBlobFileNames.length];
-      ImagePlus[] allImages = new ImagePlus[
-          trainBlobFileNames.length + validBlobFileNames.length];
-      for (int i = 0; i < trainBlobFileNames.length; i++) {
-        allImages[i] =
-            ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i);
-        trainBlobFileNames[i] =
-            _processFolderTextField.getText() + "/" + id() + "_" + i + ".h5";
-        allBlobFileNames[i] = trainBlobFileNames[i];
+      int nTrainImages = _trainFileList.getModel().getSize();
+      int nValidImages = _validFileList.getModel().getSize();
+      int nImages = nTrainImages + nValidImages;
+
+      String[] trainBlobFileNames = new String[nTrainImages];
+      Vector<String> validBlobFileNames = new Vector<String>();
+
+      // Convert and upload caffe blobs
+      try {
+        File outfile = null;
+        if (_sshSession != null)
+        {
+          outfile = File.createTempFile(id(), ".h5");
+          outfile.delete();
+        }
+
+        // Process train files
+        for (int i = 0; i < nTrainImages; i++) {
+          setProgress((10 * i) / nImages);
+          setTaskProgressRange(
+              (int)(10 * i) / nImages,
+              (int)(10 * (i + ((_sshSession != null) ? 0.5 : 1))) / nImages);
+          trainBlobFileNames[i] =
+              processFolder() + "/" + id() + "_train_" + i + ".h5";
+          if (_sshSession == null) outfile = new File(trainBlobFileNames[i]);
+          UnetTools.saveHDF5Blob(
+              ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i),
+              outfile, this, true);
+          if (interrupted()) throw new InterruptedException();
+          if (_sshSession != null) {
+            setTaskProgressRange(
+                (int)(10 * (i + 0.5)) / nImages, (int)(10 * (i + 1)) / nImages);
+            _createdRemoteFolders.addAll(
+                UnetTools.put(
+                    outfile, trainBlobFileNames[i], _sshSession, this));
+            _createdRemoteFiles.add(trainBlobFileNames[i]);
+            if (interrupted()) throw new InterruptedException();
+          }
+        }
+
+        // // Process validation files
+        // for (int i = 0; i < nValidImages; i++) {
+        //   setProgress((10 * (i + nTrainImages)) / nImages);
+        //   setTaskProgressRange(
+        //       (int)(10 * (i + nTrainImages)) / nImages,
+        //       (int)(10 * (i + ((_sshSession != null) ? 0.5 : 1) +
+        //                   nTrainImages)) / nImages);
+
+        //   // Convert ImagePlus to data and annotation blobs
+        //   ImagePlus dataBlob = UnetTools.convertToUnetFormat(
+        //       ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i),
+        //       this, true);
+        //   ImagePlus[] annotationBlobs =
+        //       UnetTools.convertAnnotationsToLabelsAndWeights(imp, job);
+
+        //   // Tiling
+        //   int[] stride = model.getOutputTileShape(model().getTileShape());
+        //   int[] tiling = new int[stride.length];
+        //   int nTiles = 1;
+        //   if (stride.length == 2) {
+        //     tiling[0] = (int)(
+        //         Math.ceil((double)dataBlob.getHeight() / (double)stride[0]));
+        //     tiling[1] = (int)(
+        //         Math.ceil((double)dataBlob.getWidth() / (double)stride[1]));
+        //   }
+        //   else {
+        //     tiling[0] = (int)(
+        //         Math.ceil((double)dataBlob.getNSlices() / (double)stride[0]));
+        //     tiling[1] = (int)(
+        //         Math.ceil((double)dataBlob.getHeight() / (double)stride[1]));
+        //     tiling[2] = (int)(
+        //         Math.ceil((double)dataBlob.getWidth() / (double)stride[2]));
+        //   }
+        //   for (int d = 0; d < stride.length; d++) nTiles *= tiling[d];
+
+        //   if (_sshSession == null) outfile = new File(allBlobFileNames[i]);
+        //   UnetTools.saveHDF5Blob(allImages[i], outfile, this, true);
+        //   if (interrupted()) throw new InterruptedException();
+        //   if (_sshSession != null) {
+        //     setTaskProgressRange(
+        //         (int)(10 * (i + 0.5)) / allImages.length,
+        //         (int)(10 * (i + 1)) / allImages.length);
+        //     _createdRemoteFolders.addAll(
+        //         UnetTools.put(outfile, allBlobFileNames[i], _sshSession, this));
+        //     _createdRemoteFiles.add(allBlobFileNames[i]);
+        //     if (interrupted()) throw new InterruptedException();
+        //   }
+        // }
       }
-      for (int i = 0; i < validBlobFileNames.length; i++) {
-        allImages[trainBlobFileNames.length + i] =
-            ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i);
-        validBlobFileNames[i] =
-            _processFolderTextField.getText() + "/" + id() + "_" +
-            (trainBlobFileNames.length + i) + ".h5";
-        allBlobFileNames[trainBlobFileNames.length + i] =
-            validBlobFileNames[i];
+      catch (IOException e) {
+        IJ.error(e.toString());
+        cleanUp();
+        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        return;
+      }
+      catch (NotImplementedException e) {
+        IJ.error("Could not create data blob: " + e);
+        cleanUp();
+        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        return;
+      }
+      catch (JSchException e) {
+        IJ.error("Could not upload data blob: " + e);
+        cleanUp();
+        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        return;
+      }
+      catch (SftpException e) {
+        IJ.error("Could not upload data blob: " + e);
+        cleanUp();
+        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        return;
       }
 
       // ---
@@ -875,52 +936,52 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
       }
 
-      if (validBlobFileNames.length != 0)
-      {
-        if (_sshSession != null) {
-          try {
-            File tmpFile = File.createTempFile(id(), "-validfilelist.txt");
-            BufferedWriter out = new BufferedWriter(new FileWriter(tmpFile));
-            for (String fName : validBlobFileNames) out.write(fName + "\n");
-            out.close();
-            _createdRemoteFolders.addAll(
-                UnetTools.put(
-                    tmpFile, validFileListAbsolutePath, _sshSession, this));
-            _createdRemoteFiles.add(validFileListAbsolutePath);
-            tmpFile.delete();
-          }
-          catch (IOException e) {
-            IJ.error("Could not create temporary validfile list: " + e);
-            cleanUp();
-            if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-            return;
-          }
-          catch (Exception e) {
-            IJ.error("Could not upload validfile list: " + e);
-            cleanUp();
-            if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-            return;
-          }
-        }
-        else {
-          try
-          {
-            File validFileListFile = new File(validFileListAbsolutePath);
-            validFileListFile.createNewFile();
-            BufferedWriter out = new BufferedWriter(
-                new FileWriter(validFileListFile));
-            for (String fName : validBlobFileNames) out.write(fName + "\n");
-            out.close();
-            validFileListFile.deleteOnExit();
-          }
-          catch (IOException e) {
-            IJ.error("Could not create validfile list: " + e);
-            cleanUp();
-            if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-            return;
-          }
-        }
-      }
+      // if (validBlobFileNames.length != 0)
+      // {
+      //   if (_sshSession != null) {
+      //     try {
+      //       File tmpFile = File.createTempFile(id(), "-validfilelist.txt");
+      //       BufferedWriter out = new BufferedWriter(new FileWriter(tmpFile));
+      //       for (String fName : validBlobFileNames) out.write(fName + "\n");
+      //       out.close();
+      //       _createdRemoteFolders.addAll(
+      //           UnetTools.put(
+      //               tmpFile, validFileListAbsolutePath, _sshSession, this));
+      //       _createdRemoteFiles.add(validFileListAbsolutePath);
+      //       tmpFile.delete();
+      //     }
+      //     catch (IOException e) {
+      //       IJ.error("Could not create temporary validfile list: " + e);
+      //       cleanUp();
+      //       if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+      //       return;
+      //     }
+      //     catch (Exception e) {
+      //       IJ.error("Could not upload validfile list: " + e);
+      //       cleanUp();
+      //       if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+      //       return;
+      //     }
+      //   }
+      //   else {
+      //     try
+      //     {
+      //       File validFileListFile = new File(validFileListAbsolutePath);
+      //       validFileListFile.createNewFile();
+      //       BufferedWriter out = new BufferedWriter(
+      //           new FileWriter(validFileListFile));
+      //       for (String fName : validBlobFileNames) out.write(fName + "\n");
+      //       out.close();
+      //       validFileListFile.deleteOnExit();
+      //     }
+      //     catch (IOException e) {
+      //       IJ.error("Could not create validfile list: " + e);
+      //       cleanUp();
+      //       if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+      //       return;
+      //     }
+      //   }
+      // }
 
       // ---
       // Create prototxt files
@@ -1033,83 +1094,24 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         return;
       }
 
-      // Data conversion
-      if (_sshSession != null) {
-        try {
-          File localTmpFile = File.createTempFile(id(), ".h5");
-          for (int i = 0; i < allImages.length; i++) {
-            setProgress((10 * i) / allImages.length);
-            localTmpFile.delete();
-            setTaskProgressRange(
-                (int)(10 * i) / allImages.length,
-                (int)(10 * (i + 0.5)) / allImages.length);
-            UnetTools.saveHDF5Blob(allImages[i], localTmpFile, this, true);
-            if (interrupted()) throw new InterruptedException();
-            setTaskProgressRange(
-                (int)(10 * (i + 0.5)) / allImages.length,
-                (int)(10 * (i + 1)) / allImages.length);
-            _createdRemoteFolders.addAll(
-                UnetTools.put(
-                    localTmpFile, allBlobFileNames[i], _sshSession, this));
-            _createdRemoteFiles.add(allBlobFileNames[i]);
-            if (interrupted()) throw new InterruptedException();
-          }
-          setTaskProgressRange(11, 100);
-          runUnetFinetuning(_sshSession);
-          if (interrupted()) throw new InterruptedException();
-        }
-        catch (NotImplementedException e) {
-          IJ.error("Could not create data blob: " + e);
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-          return;
-        }
-        catch (IOException e) {
-          IJ.error("Could not create data blob: " + e);
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-          return;
-        }
-        catch (JSchException e) {
-          IJ.error("Could not upload data blob: " + e);
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-          return;
-        }
-        catch (SftpException e) {
-          IJ.error("Could not upload data blob: " + e);
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-          return;
-        }
+      // Finetuning
+      setTaskProgressRange(11, 100);
+      try {
+        runUnetFinetuning();
       }
-      else {
-        try {
-          for (int i = 0; i < allImages.length; i++) {
-            setProgress((10 * i) / allImages.length);
-            setTaskProgressRange(
-                (int)(10 * i) / allImages.length,
-                (int)(10 * (i + 1)) / allImages.length);
-            UnetTools.saveHDF5Blob(
-                allImages[i], new File(allBlobFileNames[i]), this, true);
-            if (interrupted()) throw new InterruptedException();
-          }
-          setTaskProgressRange(11, 100);
-          runUnetFinetuning();
-          if (interrupted()) throw new InterruptedException();
-        }
-        catch (NotImplementedException e) {
-          IJ.error("Could not create data blob: " + e);
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-          return;
-        }
-        catch (IOException e) {
-          IJ.error(e.toString());
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-        }
+      catch (JSchException e) {
+        IJ.error("Could not upload data blob: " + e);
+        cleanUp();
+        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        return;
       }
+      catch (IOException e) {
+        IJ.error(e.toString());
+        cleanUp();
+        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+      }
+      if (interrupted()) throw new InterruptedException();
+
       setProgress(100);
       setReady(true);
     }

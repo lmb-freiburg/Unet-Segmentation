@@ -1299,14 +1299,6 @@ public class UnetTools {
     }
   }
 
-  public static ModelDefinition loadModel(File modelFile) throws HDF5Exception {
-    if (!modelFile.exists()) return null;
-    ModelDefinition model = new ModelDefinition();
-    model.file = modelFile;
-    model.load();
-    return model;
-  }
-
   public static void loadSegmentationToImagePlus(
       File file, UnetSegmentationJob job, boolean outputScores)
       throws HDF5Exception, Exception {

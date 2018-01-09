@@ -216,8 +216,10 @@ public class UnetJob extends Thread {
             }});
       for (int i = 0; i < files.length; i++) {
         try {
-          ModelDefinition model = UnetTools.loadModel(files[i]);
-          if (model != null) _modelComboBox.addItem(model);
+          ModelDefinition model = new ModelDefinition(this);
+          model.file = files[i];
+          model.load();
+          _modelComboBox.addItem(model);
         }
         catch (HDF5Exception e) {}
       }
@@ -649,7 +651,7 @@ public class UnetJob extends Thread {
     if (_sshSession != null) _sshSession.disconnect();
     _finished = true;
     if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-    IJ.log("Unet_Segmentation finished");
+    IJ.log("U-net job finished");
   }
 
 };

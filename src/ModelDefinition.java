@@ -102,6 +102,22 @@ public class ModelDefinition {
     return file != null;
   }
 
+  public int[] getOutputTileShape(int[] inputTileShape) {
+    if (inputTileShape.length != elementSizeUm.length) return null;
+    int[] res = new int[inputTileShape.length];
+    for (int d = 0; d < elementSizeUm.length; d++)
+        res[d] = inputTileShape[d] - (padInput[d] - padOutput[d]);
+    return res;
+  }
+
+  public int[] getInputTileShape(int[] outputTileShape) {
+    if (outputTileShape.length != elementSizeUm.length) return null;
+    int[] res = new int[outputTileShape.length];
+    for (int d = 0; d < elementSizeUm.length; d++)
+        res[d] = outputTileShape[d] + (padInput[d] - padOutput[d]);
+    return res;
+  }
+
   private void createTileShapeCard() {
     JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
     panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
@@ -111,20 +127,19 @@ public class ModelDefinition {
     int dsFactor = downsampleFactor[downsampleFactor.length - 1];
     int minValue = (_job != null && _job instanceof UnetSegmentationJob) ?
         _minOutTileShape[_minOutTileShape.length - 1] :
-        ((padInput[padInput.length - 1] - padOutput[padOutput.length - 1]) +
-         _minOutTileShape[_minOutTileShape.length - 1]);
+        getInputTileShape(_minOutTileShape)[elementSizeUm.length - 1];
     _shapeXSpinner = new JSpinner(
         new SpinnerNumberModel(
-            (int)Prefs.get("unet_segmentation." + id + ".tileShapeX",
-                           minValue + 10 * dsFactor),
+            (int)Prefs.get(
+                "unet_segmentation." + id + ".tileShapeX",
+                minValue + 10 * dsFactor),
             minValue, (int)Integer.MAX_VALUE, dsFactor));
     panel.add(_shapeXSpinner);
 
     dsFactor = downsampleFactor[downsampleFactor.length - 2];
     minValue = (_job != null && _job instanceof UnetSegmentationJob) ?
         _minOutTileShape[_minOutTileShape.length - 2] :
-        ((padInput[padInput.length - 2] - padOutput[padOutput.length - 2]) +
-         _minOutTileShape[_minOutTileShape.length - 2]);
+        getInputTileShape(_minOutTileShape)[elementSizeUm.length - 2];
     panel.add(new JLabel(" y: "));
     _shapeYSpinner = new JSpinner(
         new SpinnerNumberModel(
@@ -137,8 +152,7 @@ public class ModelDefinition {
       dsFactor = downsampleFactor[downsampleFactor.length - 3];
       minValue = (_job != null && _job instanceof UnetSegmentationJob) ?
           _minOutTileShape[_minOutTileShape.length - 3] :
-          ((padInput[padInput.length - 3] - padOutput[padOutput.length - 3]) +
-           _minOutTileShape[_minOutTileShape.length - 3]);
+          getInputTileShape(_minOutTileShape)[elementSizeUm.length - 3];
       panel.add(new JLabel(" z: "));
       _shapeZSpinner = new JSpinner(
           new SpinnerNumberModel(
