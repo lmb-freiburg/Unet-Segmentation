@@ -723,7 +723,7 @@ public class UnetTools {
  */
 /*======================================================================*/
   public static ImagePlus convertToUnetFormat(
-      ImagePlus imp, UnetJob job, boolean keepOriginal)
+      ImagePlus imp, UnetJob job, boolean keepOriginal, boolean show)
       throws InterruptedException {
     ImagePlus out = normalizeValues(
         rescaleZ(
@@ -739,8 +739,10 @@ public class UnetTools {
         imp.changes = false;
         imp.close();
       }
-      out.resetDisplayRange();
-      out.show();
+      if (show) {
+        out.resetDisplayRange();
+        out.show();
+      }
     }
     return out;
   }
@@ -850,7 +852,6 @@ public class UnetTools {
   public static ImagePlus[] convertAnnotationsToLabelsAndWeights(
       ImagePlus imp, UnetJob job)
       throws InterruptedException, NotImplementedException {
-
 
     float foregroundBackgroundRatio = job.model().foregroundBackgroundRatio;
     float sigma1_px = job.model().sigma1Um / job.model().elementSizeUm[1];
@@ -1136,7 +1137,8 @@ public class UnetTools {
   }
 
   public static ImagePlus saveHDF5Blob(
-      ImagePlus imp, File outFile, UnetJob job, boolean keepOriginal)
+      ImagePlus imp, File outFile, UnetJob job, boolean keepOriginal,
+      boolean show)
       throws IOException, InterruptedException, NotImplementedException {
     if (job == null) {
       IJ.error("Cannot save HDF5 blob without associated unet model");
@@ -1156,7 +1158,7 @@ public class UnetTools {
            imp.getCalibration().pixelHeight + ", " +
            imp.getCalibration().pixelWidth + "]");
 
-    ImagePlus impScaled = convertToUnetFormat(imp, job, keepOriginal);
+    ImagePlus impScaled = convertToUnetFormat(imp, job, keepOriginal, show);
 
     // Recursively create parent folders
     Vector<File> createdFolders = new Vector<File>();
@@ -1212,6 +1214,197 @@ public class UnetTools {
            outFile.getAbsolutePath() + "'");
 
     return impScaled;
+  }
+
+  public static File[] saveHDF5TiledBlob(
+      ImagePlus imp, String fileNameStub, UnetJob job)
+      throws IOException, InterruptedException, NotImplementedException {
+    if (job == null) {
+      IJ.error("Cannot save HDF5 blob without associated unet model");
+      throw new InterruptedException("No active unet job");
+    }
+
+    String dsName = job.model().inputBlobName;
+
+    IJ.log("  Processing '" + imp.getTitle() + "': " +
+           "#frames = " + imp.getNFrames() + ", #slices = " + imp.getNSlices() +
+           ", #channels = " + imp.getNChannels() +
+           ", height = " + imp.getHeight() +
+           ", width = " + imp.getWidth() + " with element size = [" +
+           imp.getCalibration().pixelDepth + ", " +
+           imp.getCalibration().pixelHeight + ", " +
+           imp.getCalibration().pixelWidth + "]");
+
+    ImagePlus data = convertToUnetFormat(imp, job, true, false);
+    ImagePlus[] annotations = null;
+    if (job instanceof UnetFinetuneJob && imp.getOverlay() != null)
+        annotations = convertAnnotationsToLabelsAndWeights(imp, job);
+
+    int T = data.getNFrames();
+    int Z = data.getNSlices();
+    int C = data.getNChannels();
+    int W = data.getWidth();
+    int H = data.getHeight();
+
+    int[] inShape = job.model().getTileShape();
+    int[] outShape = job.model().getOutputTileShape(inShape);
+    int[] tileOffset = new int[inShape.length];
+    for (int d = 0; d < tileOffset.length; d++)
+        tileOffset[d] = (inShape[d] - outShape[d]) / 2;
+    int[] tiling = new int[outShape.length];
+    int nTiles = 1;
+    if (outShape.length == 2) {
+      tiling[0] = (int)(
+          Math.ceil((double)data.getHeight() / (double)outShape[0]));
+      tiling[1] = (int)(
+          Math.ceil((double)data.getWidth() / (double)outShape[1]));
+      IJ.log("  tiling = " + tiling[0] + "x" + tiling[1]);
+    }
+    else {
+      tiling[0] = (int)(
+          Math.ceil((double)data.getNSlices() / (double)outShape[0]));
+      tiling[1] = (int)(
+          Math.ceil((double)data.getHeight() / (double)outShape[1]));
+      tiling[2] = (int)(
+          Math.ceil((double)data.getWidth() / (double)outShape[2]));
+      IJ.log("  tiling = " + tiling[0] + "x" + tiling[1] + "x" + tiling[2]);
+    }
+    for (int d = 0; d < outShape.length; d++) nTiles *= tiling[d];
+    IJ.log("  nTiles = " + nTiles);
+
+    File[] outfiles = new File[nTiles];
+
+    // Recursively create parent folders
+    if (fileNameStub != null) {
+      File outFile = new File(fileNameStub);
+      Vector<File> createdFolders = new Vector<File>();
+      File folder = outFile.getParentFile();
+      while (folder != null && !folder.isDirectory()) {
+        createdFolders.add(folder);
+        folder = folder.getParentFile();
+      }
+      for (int i = createdFolders.size() - 1; i >= 0; --i) {
+        if (job.interrupted())
+            throw new InterruptedException("Aborted by user");
+        job.setTaskProgress(
+            "Creating folder '" + createdFolders.get(i) + "'", 0, 0);
+        IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
+        if (!createdFolders.get(i).mkdir())
+            throw new IOException(
+                "Could not create folder '" +
+                createdFolders.get(i).getAbsolutePath() + "'");
+        createdFolders.get(i).deleteOnExit();
+        job.setTaskProgress(1, 1);
+      }
+    }
+
+    // Create output ImagePlus
+    ImagePlus dataTile = IJ.createHyperStack(
+        imp.getTitle() + " - dataTile", inShape[1], inShape[0], C, Z, T, 32);
+    ImagePlus labelsTile = IJ.createHyperStack(
+        imp.getTitle() + " - labelsTile",
+        outShape[1], outShape[0], 1, Z, T, 32);
+    ImagePlus weightsTile = IJ.createHyperStack(
+        imp.getTitle() + " - weightsTile",
+        outShape[1], outShape[0], 1, Z, T, 32);
+
+    int tileIdx = 0;
+    if (outShape.length == 2) {
+      for (int yIdx = 0; yIdx < tiling[0]; yIdx++) {
+        for (int xIdx = 0; xIdx < tiling[1]; xIdx++, tileIdx++) {
+
+          job.setTaskProgress(
+              "Processing tile (" + yIdx + "," + xIdx + ")",
+              tileIdx, nTiles);
+
+          for (int t = 0; t < T; t++) {
+
+            // Copy data tile for sample t
+            for (int c = 0; c < C; c++) {
+              int stackIdx = data.getStackIndex(c, 1, t);
+              ImageProcessor ipDataIn =
+                  data.getStack().getProcessor(stackIdx);
+              ImageProcessor ipDataOut =
+                  dataTile.getStack().getProcessor(stackIdx);
+              for (int y = 0; y < inShape[0]; y++) {
+                int yR = yIdx * outShape[0] - tileOffset[0] + y;
+                if (yR < 0) yR = -yR;
+                int n = yR / (H - 1);
+                yR = (n % 2 == 0) ? (yR - n * (H - 1)) :
+                    ((n + 1) * (H - 1) - yR);
+                for (int x = 0; x < inShape[1]; x++) {
+                  int xR = xIdx * outShape[1] - tileOffset[1] + x;
+                  if (xR < 0) xR = -xR;
+                  n = xR / (W - 1);
+                  xR = (n % 2 == 0) ? (xR - n * (W - 1)) :
+                      ((n + 1) * (W - 1) - xR);
+                  ipDataOut.setf(x, y, ipDataIn.getf(xR, yR));
+                }
+              }
+            }
+
+            // Copy labels and weights tiles for sample t
+            int stackIdx = annotations[0].getStackIndex(1, 1, t);
+            ImageProcessor ipLabelsIn =
+                annotations[0].getStack().getProcessor(stackIdx);
+            ImageProcessor ipLabelsOut =
+                labelsTile.getStack().getProcessor(stackIdx);
+            ImageProcessor ipWeightsIn =
+                annotations[1].getStack().getProcessor(stackIdx);
+            ImageProcessor ipWeightsOut =
+                weightsTile.getStack().getProcessor(stackIdx);
+            for (int y = 0; y < outShape[0]; y++) {
+              int yR = yIdx * outShape[0] + y;
+              int n = yR / (H - 1);
+              yR = (n % 2 == 0) ? (yR - n * (H - 1)) :
+                  ((n + 1) * (H - 1) - yR);
+              for (int x = 0; x < outShape[1]; x++) {
+                int xR = xIdx * outShape[1] + x;
+                n = xR / (W - 1);
+                xR = (n % 2 == 0) ? (xR - n * (W - 1)) :
+                    ((n + 1) * (W - 1) - xR);
+                ipLabelsOut.setf(x, y, ipLabelsIn.getf(xR, yR));
+                ipWeightsOut.setf(
+                    x, y, (xR == xIdx * outShape[1] + x &&
+                           yR == yIdx * outShape[0] + y) ?
+                    ipWeightsIn.getf(xR, yR) : 0.0f);
+              }
+            }
+          }
+          if (job.interrupted()) throw new InterruptedException();
+
+          // Save tile
+          File outFile = null;
+          if (fileNameStub == null) {
+            outFile = File.createTempFile(job.id(), ".h5");
+            outFile.delete();
+          }
+          else {
+            outFile = new File(fileNameStub + "_" + tileIdx + ".h5");
+          }
+          IHDF5Writer writer =
+              HDF5Factory.configure(outFile.getAbsolutePath()).syncMode(
+                  IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
+              .useSimpleDataSpaceForAttributes().overwrite().writer();
+          outFile.deleteOnExit();
+
+          save2DBlob(dataTile, writer, dsName, job);
+          save2DBlob(labelsTile, writer, "/labels", job);
+          save2DBlob(weightsTile, writer, "/weights", job);
+          writer.file().close();
+
+          outfiles[tileIdx] = outFile;
+
+          if (job.interrupted()) throw new InterruptedException();
+        }
+      }
+    }
+    else {
+      throw new NotImplementedException("3D not yet implemented");
+    }
+
+    job.setTaskProgress(1, 1);
+    return outfiles;
   }
 
   public static ProcessResult execute(Vector<String> command, UnetJob job)

@@ -765,7 +765,8 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
 
         setImagePlus(
             UnetTools.saveHDF5Blob(
-                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected()));
+                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected(),
+                true));
         _impShape = _imp.getDimensions();
         if (interrupted()) throw new InterruptedException();
         setProgress(2);
@@ -793,7 +794,8 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
 
         setImagePlus(
             UnetTools.saveHDF5Blob(
-                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected()));
+                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected(),
+                true));
         _impShape = _imp.getDimensions();
         if (interrupted()) throw new InterruptedException();
         setProgress(2);
