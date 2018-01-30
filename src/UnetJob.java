@@ -429,7 +429,7 @@ public class UnetJob extends Thread {
 
     // Assemble Dialog
     _parametersDialog = new JDialog(
-        WindowManager.getCurrentWindow(), "U-net segmentation", true);
+        WindowManager.getCurrentWindow(), "U-Net Job", true);
     _parametersDialog.add(dialogPanel, BorderLayout.CENTER);
     _parametersDialog.add(buttonPanel, BorderLayout.SOUTH);
     _parametersDialog.getRootPane().setDefaultButton(okButton);
@@ -487,7 +487,7 @@ public class UnetJob extends Thread {
                  model().file.getParentFile() == null) ?
                 new File(".") : model().file.getParentFile();
             JFileChooser f = new JFileChooser(startFolder);
-            f.setDialogTitle("Select U-net model folder");
+            f.setDialogTitle("Select U-Net model folder");
             f.setMultiSelectionEnabled(false);
             f.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
             int res = f.showDialog(_parametersDialog, "Select");
@@ -524,7 +524,7 @@ public class UnetJob extends Thread {
           public void actionPerformed(ActionEvent e) {
             File startFile = new File(_weightsFileTextField.getText());
             JFileChooser f = new JFileChooser(startFile);
-            f.setDialogTitle("Select trained U-net weights");
+            f.setDialogTitle("Select trained U-Net weights");
             f.setFileFilter(
                 new FileNameExtensionFilter(
                     "HDF5 and prototxt files", "h5", "H5",
@@ -651,7 +651,7 @@ public class UnetJob extends Thread {
     if (_sshSession != null) _sshSession.disconnect();
     _finished = true;
     if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-    IJ.log("U-net job finished");
+    IJ.log("U-Net job finished");
   }
 
 };

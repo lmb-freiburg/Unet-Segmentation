@@ -34,22 +34,21 @@ import javax.swing.event.*;
 import javax.swing.table.*;
 import java.util.*;
 
-public class Unet_Segmentation_Manager extends PlugInFrame {
+public class UnetJobManager extends PlugInFrame {
 
   private UnetJobTableModel _unetJobTableModel;
-  private static Unet_Segmentation_Manager _instance = null;
+  private static UnetJobManager _instance = null;
   private static JDialog helpDialog = null;
 
   // This is a bad-style singleton with public constructor. It will
-  // create new Unet_Segmentation_Manager objects for each plugin
+  // create new UnetJobManager objects for each plugin
   // call but in the run() method only the first is used. Actually
   // the constructor should be private and a static instance() method
-  // should create a Unet_Segmentation_Manager on demand. The static
+  // should create a UnetJobManager on demand. The static
   // _instance reference will be valid as long as the virtual machine
-  // is running. The generated objects through plugin calls will be
-  // cleaned up when the manager is closed.
-  public Unet_Segmentation_Manager() {
-    super("Unet Segmentation Manager");
+  // is running.
+  public UnetJobManager() {
+    super("U-Net Job Manager");
 
     if (_instance != null) return;
 

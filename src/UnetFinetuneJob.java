@@ -94,6 +94,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
   public void prepareParametersDialog() {
 
     super.prepareParametersDialog();
+    _parametersDialog.setTitle("U-Net Finetuning");
 
     // Create Train/Test split Configurator
     int[] ids = WindowManager.getIDList();
@@ -245,7 +246,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       if (!dialogOK) continue;
 
       if (_trainFileList.getModel().getSize() == 0) {
-        IJ.error("U-Net finetuning requires at least one training image.");
+        IJ.error("U-Net Finetuning",
+                 "U-Net Finetuning requires at least one training image.");
         dialogOK = false;
         continue;
       }
@@ -259,7 +261,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             imp.getNChannels();
         if (nChannels == -1) nChannels = nc;
         if (nc != nChannels) {
-          IJ.error("U-Net finetuning requires that all training and " +
+          IJ.error("U-Net Finetuning",
+                   "U-Net Finetuning requires that all training and " +
                    "validation images have the same number of channels.");
           dialogOK = false;
           break;
@@ -274,7 +277,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
                   imp.getType() == ImagePlus.COLOR_RGB) ? 3 :
             imp.getNChannels();
         if (nc != nChannels) {
-          IJ.error("U-Net finetuning requires that all training and " +
+          IJ.error("U-Net Finetuning",
+                   "U-Net Finetuning requires that all training and " +
                    "validation images have the same number of channels.");
           dialogOK = false;
           break;
@@ -902,25 +906,25 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
       }
       catch (IOException e) {
-        IJ.error(e.toString());
+        IJ.error("U-Net Finetuning", e.toString());
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
       }
       catch (NotImplementedException e) {
-        IJ.error("Could not create data blob: " + e);
+        IJ.error("U-Net Finetuning", "Could not create data blob: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
       }
       catch (JSchException e) {
-        IJ.error("Could not upload data blob: " + e);
+        IJ.error("U-Net Finetuning", "Could not upload data blob: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
       }
       catch (SftpException e) {
-        IJ.error("Could not upload data blob: " + e);
+        IJ.error("U-Net Finetuning", "Could not upload data blob: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
@@ -946,13 +950,13 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         else outfile.deleteOnExit();
       }
       catch (IOException e) {
-        IJ.error("Could not create trainfile list: " + e);
+        IJ.error("U-Net Finetuning", "Could not create trainfile list: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
       }
       catch (Exception e) {
-        IJ.error("Could not upload trainfile list: " + e);
+        IJ.error("U-Net Finetuning", "Could not upload trainfile list: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
@@ -977,13 +981,13 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           else outfile.deleteOnExit();
         }
         catch (IOException e) {
-          IJ.error("Could not create validfile list: " + e);
+          IJ.error("U-Net Finetuning", "Could not create validfile list: " + e);
           cleanUp();
           if (_jobTableModel != null) _jobTableModel.deleteJob(this);
           return;
         }
         catch (Exception e) {
-          IJ.error("Could not upload validfile list: " + e);
+          IJ.error("U-Net Finetuning", "Could not upload validfile list: " + e);
           cleanUp();
           if (_jobTableModel != null) _jobTableModel.deleteJob(this);
           return;
@@ -1022,6 +1026,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         if (!inputShapeSet)
         {
           IJ.error(
+              "U-Net Finetuning",
               "The selected model cannot be finetuned using this Plugin.\n" +
               "It must contain a CreateDeformationLayer for data " +
               "augmentation.");
@@ -1067,13 +1072,15 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
       }
       catch (IOException e) {
-        IJ.error("Could not create temporary model.prototxt: " + e);
+        IJ.error("U-Net Finetuning",
+                 "Could not create temporary model.prototxt: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
       }
       catch (Exception e) {
-        IJ.error("Could not upload model.prototxt: " + e);
+        IJ.error("U-Net Finetuning",
+                 "Could not upload model.prototxt: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
@@ -1116,13 +1123,13 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
       }
       catch (IOException e) {
-        IJ.error("Could not create solver: " + e);
+        IJ.error("U-Net Finetuning", "Could not create solver: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
       }
       catch (Exception e) {
-        IJ.error("Could not upload solver.prototxt: " + e);
+        IJ.error("U-Net Finetuning", "Could not upload solver.prototxt: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
@@ -1134,13 +1141,13 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         runUnetFinetuning();
       }
       catch (JSchException e) {
-        IJ.error("Could not upload data blob: " + e);
+        IJ.error("U-Net Finetuning", "Could not upload data blob: " + e);
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
         return;
       }
       catch (IOException e) {
-        IJ.error(e.toString());
+        IJ.error("U-Net Finetuning", e.toString());
         cleanUp();
         if (_jobTableModel != null) _jobTableModel.deleteJob(this);
       }

@@ -124,10 +124,10 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       }
     }
     catch (IOException e) {
-      IJ.error(e.toString());
+      IJ.error("U-Net Segmentation", e.toString());
     }
     catch (Exception e) {
-      IJ.error(e.toString());
+      IJ.error("U-Net Segmentation", e.toString());
     }
   }
 
@@ -135,6 +135,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
   public void prepareParametersDialog() {
 
     super.prepareParametersDialog();
+    _parametersDialog.setTitle("U-Net Segmentation");
 
     // Create config panel
     _configPanel.add(_keepOriginalCheckBox);
@@ -286,7 +287,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
                      model().file.getParentFile() == null) ?
                     new File(".") : model().file.getParentFile();
                 JFileChooser f = new JFileChooser(startFile);
-                f.setDialogTitle("Select trained U-net weights");
+                f.setDialogTitle("Select trained U-Net weights");
                 f.setFileFilter(
                     new FileNameExtensionFilter(
                         "HDF5 and prototxt files", "h5", "H5",
@@ -706,8 +707,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       catch (JSchException e) {
         IJ.log("Macro call to UnetJob.segmentHyperStack aborted. " +
                "Could not establish SSH connection.");
-        IJ.error("UnetJob.segmentHyperStack",
-                 "Could not establish SSH connection.");
+        IJ.error("U-Net Segmentation", "Could not establish SSH connection.");
         return;
       }
     }
@@ -813,7 +813,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       if (_jobTableModel != null) _jobTableModel.deleteJob(this);
     }
     catch (Exception e) {
-      IJ.error(e.toString());
+      IJ.error("U-Net Segmentation", e.toString());
       cleanUp();
       if (_jobTableModel != null) _jobTableModel.deleteJob(this);
     }

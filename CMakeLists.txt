@@ -34,7 +34,7 @@ find_jar(JSCH_JAR "${JSCH_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the
 
 set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROJECT_SOURCE_DIR}/protobuf-java-2.6.1.jar)
 
-add_jar(Unet_Segmentation src/Unet_Segmentation_Manager.java src/UnetJobTableModel.java src/HostConfigurationPanel.java src/UnetJob.java src/UnetSegmentationJob.java src/UnetFinetuneJob.java src/UnetTools.java src/MyUserInfo.java src/MySftpProgressMonitor.java src/ModelDefinition.java src/ProcessResult.java src/TaskStatus.java src/ImagePlusListView.java src/NotImplementedException.java caffe/Caffe.java src/caffe.proto COPYING.txt plugins.config resources/README.html INCLUDE_JARS protobuf-java-2.6.1.jar)
+add_jar(Unet_Segmentation src/UnetJobManager.java src/UnetJobTableModel.java src/HostConfigurationPanel.java src/UnetJob.java src/UnetSegmentationJob.java src/UnetFinetuneJob.java src/UnetTools.java src/MyUserInfo.java src/MySftpProgressMonitor.java src/ModelDefinition.java src/ProcessResult.java src/TaskStatus.java src/ImagePlusListView.java src/NotImplementedException.java caffe/Caffe.java src/caffe.proto COPYING.txt plugins.config resources/README.html INCLUDE_JARS protobuf-java-2.6.1.jar)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)
 
