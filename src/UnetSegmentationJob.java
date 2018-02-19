@@ -14,12 +14,16 @@ import javax.swing.JPanel;
 import javax.swing.JLabel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JPasswordField;
+import javax.swing.JSeparator;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.JOptionPane;
 import javax.swing.JFileChooser;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.JDialog;
+import javax.swing.GroupLayout;
 
 import java.io.File;
 import java.io.IOException;
@@ -47,6 +51,9 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
   private int[] _impShape = {0, 0, 0, 0, 0};
   private Calibration _impCalibration = null;
 
+  private final String[] _averagingModes = { "none", "mirror", "rotate" };
+  private JComboBox<String> _averagingComboBox =
+      new JComboBox<String>(_averagingModes);
   private JCheckBox _keepOriginalCheckBox = new JCheckBox(
       "Keep original", Prefs.get("unet_segmentation.keepOriginal", false));
   private JCheckBox _outputScoresCheckBox = new JCheckBox(
@@ -116,6 +123,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
         }
         command +=
             ",processFolder=" + _processFolderTextField.getText() +
+            ",average=" + (String)_averagingComboBox.getSelectedItem() +
             ",keepOriginal=" + String.valueOf(
                 _keepOriginalCheckBox.isSelected()) +
             ",outputScores=" + String.valueOf(
@@ -136,6 +144,25 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
 
     super.prepareParametersDialog();
     _parametersDialog.setTitle("U-Net Segmentation");
+
+    JLabel averagingModeLabel = new JLabel("Averaging:");
+    _averagingComboBox.setToolTipText(
+        "Use average prediction over flipped or rotated patches per pixel");
+
+    JSeparator sep = new JSeparator(SwingConstants.HORIZONTAL);
+
+    _horizontalDialogLayoutGroup
+        .addComponent(sep)
+        .addGroup(
+        _dialogLayout.createSequentialGroup()
+        .addComponent(averagingModeLabel)
+        .addComponent(_averagingComboBox));
+    _verticalDialogLayoutGroup
+        .addComponent(sep)
+        .addGroup(
+        _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+        .addComponent(averagingModeLabel)
+        .addComponent(_averagingComboBox));
 
     // Create config panel
     _configPanel.add(_keepOriginalCheckBox);
@@ -408,6 +435,11 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
     else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
 
     String nTilesParm = model().getCaffeTilingParameter();
+    String averagingParm = new String();
+    if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
+        averagingParm = "-average_mirror";
+    else if (((String)_averagingComboBox.getSelectedItem()).equals("rotate"))
+        averagingParm = "-average_rotate";
 
     String commandString =
         Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
@@ -415,7 +447,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
         "\" -outfileH5 \"" + fileName + "\" -model \"" +
         model().remoteAbsolutePath + "\" -weights \"" +
         weightsFileName() + "\" -iterations 0 " +
-        nTilesParm + " " + gpuParm;
+        nTilesParm + " " + averagingParm + " " + gpuParm;
 
     IJ.log(commandString);
 
@@ -528,6 +560,11 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       gpuAttribute = "-gpu";
       gpuValue = "all";
     }
+    String averagingParm = new String();
+    if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
+        averagingParm = "-average_mirror";
+    else if (((String)_averagingComboBox.getSelectedItem()).equals("rotate"))
+        averagingParm = "-average_rotate";
 
     String[] parameters = model().getCaffeTilingParameter().split("\\s");
     String nTilesAttribute = parameters[0];
@@ -542,23 +579,43 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
         file.getAbsolutePath() + "\" -model \"" +
         model().file.getAbsolutePath() + "\" -weights \"" +
         weightsFileName() + "\" -iterations 0 " +
-        nTilesAttribute + " " + nTilesValue + " " + gpuAttribute + " " +
-        gpuValue);
+        nTilesAttribute + " " + nTilesValue + " " + averagingParm + " " +
+        gpuAttribute + " " + gpuValue);
     ProcessBuilder pb;
-    if (!gpuAttribute.equals(""))
-        pb = new ProcessBuilder(
-            commandString, "tiled_predict", "-infileH5",
-            file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-            "-model", model().file.getAbsolutePath(), "-weights",
-            weightsFileName(), "-iterations", "0",
-            nTilesAttribute, nTilesValue, gpuAttribute, gpuValue);
-    else
-        pb = new ProcessBuilder(
-            commandString, "tiled_predict", "-infileH5",
-            file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-            "-model", model().file.getAbsolutePath(), "-weights",
-            weightsFileName(), "-iterations", "0",
-            nTilesAttribute, nTilesValue);
+    if (averagingParm.equals("")) {
+      if (!gpuAttribute.equals(""))
+          pb = new ProcessBuilder(
+              commandString, "tiled_predict", "-infileH5",
+              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
+              "-model", model().file.getAbsolutePath(), "-weights",
+              weightsFileName(), "-iterations", "0",
+              nTilesAttribute, nTilesValue, gpuAttribute,
+              gpuValue);
+      else
+          pb = new ProcessBuilder(
+              commandString, "tiled_predict", "-infileH5",
+              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
+              "-model", model().file.getAbsolutePath(), "-weights",
+              weightsFileName(), "-iterations", "0",
+              nTilesAttribute, nTilesValue);
+    }
+    else {
+      if (!gpuAttribute.equals(""))
+          pb = new ProcessBuilder(
+              commandString, "tiled_predict", "-infileH5",
+              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
+              "-model", model().file.getAbsolutePath(), "-weights",
+              weightsFileName(), "-iterations", "0",
+              nTilesAttribute, nTilesValue, averagingParm, gpuAttribute,
+              gpuValue);
+      else
+          pb = new ProcessBuilder(
+              commandString, "tiled_predict", "-infileH5",
+              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
+              "-model", model().file.getAbsolutePath(), "-weights",
+              weightsFileName(), "-iterations", "0",
+              nTilesAttribute, nTilesValue, averagingParm);
+    }
 
     Process p = pb.start();
 
