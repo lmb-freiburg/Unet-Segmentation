@@ -449,18 +449,18 @@ public class UnetJob extends Thread {
               tilingParametersPanel.removeAll();
               if (model() != null) {
                 _weightsFileTextField.setText(model().weightFile);
-                tilingModeSelectorPanel.add(model().tileModeSelector);
+                tilingModeSelectorPanel.add(model().tileModeSelector());
                 tilingModeSelectorPanel.setMinimumSize(
-                    model().tileModeSelector.getPreferredSize());
+                    model().tileModeSelector().getPreferredSize());
                 tilingModeSelectorPanel.setMaximumSize(
-                    model().tileModeSelector.getPreferredSize());
-                tilingParametersPanel.add(model().tileModePanel);
+                    model().tileModeSelector().getPreferredSize());
+                tilingParametersPanel.add(model().tileModePanel());
                 tilingParametersPanel.setMinimumSize(
-                    model().tileModePanel.getMinimumSize());
+                    model().tileModePanel().getMinimumSize());
                 tilingParametersPanel.setMaximumSize(
                     new Dimension(
                         Integer.MAX_VALUE,
-                        model().tileModeSelector.getPreferredSize().height));
+                        model().tileModeSelector().getPreferredSize().height));
               }
               dialogPanel.setMaximumSize(
                   new Dimension(
