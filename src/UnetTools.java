@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.util.Vector;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 // For remote SSH connections
 import com.jcraft.jsch.Session;
@@ -445,23 +446,40 @@ public class UnetTools {
         imp.getNSlices(), imp.getNFrames(), 32);
     out.setCalibration(cal);
 
-    // Special treatment for single image
-    if (imp.getImageStackSize() == 1) {
-      ImageProcessor ip = imp.getProcessor().duplicate();
-      ip.setInterpolationMethod(interpolationMethod);
-      out.setProcessor(ip.resize(out.getWidth(), out.getHeight(), true));
-      job.setTaskProgress(1, 1);
-      return out;
-    }
-
-    for (int i = 1; i <= imp.getImageStackSize(); ++i) {
+    // ImageJ interpolation method NEAREST_NEIGHBOR seems to be broken...
+    // To ensure proper interpolation we do the interpolation ourselves
+    int W = imp.getWidth();
+    int H = imp.getHeight();
+    for (int i = 0; i < imp.getImageStackSize(); ++i) {
       if (job.interrupted())
           throw new InterruptedException("Aborted by user");
-      ImageProcessor ip = imp.getStack().getProcessor(i).duplicate();
-      ip.setInterpolationMethod(interpolationMethod);
-      out.getStack().setProcessor(
-          ip.resize(out.getWidth(), out.getHeight(), true), i);
-      job.setTaskProgress(i, imp.getImageStackSize());
+      ImageProcessor ipIn =
+          (imp.getImageStackSize() == 1) ? imp.getProcessor() :
+          imp.getStack().getProcessor(i);
+      ImageProcessor ipOut =
+          (imp.getImageStackSize() == 1) ? out.getProcessor() :
+          out.getStack().getProcessor(i);
+      for (int y = 0; y < out.getHeight(); ++y) {
+        float yRd = y / scales[0];
+        int yBase = (int)Math.floor(yRd);
+        float dy = yRd - yBase;
+        for (int x = 0; x < out.getWidth(); ++x) {
+          float xRd = x / scales[1];
+          int xBase = (int)Math.floor(xRd);
+          float dx = xRd - xBase;
+          if (interpolationMethod == ImageProcessor.NEAREST_NEIGHBOR)
+              ipOut.setf(x, y, ipIn.getf(xBase, yBase));
+          else {
+            ipOut.setf(
+                x, y,
+                (1 - dx) * (1 - dy) * ipIn.getf(xBase, yBase) +
+                (1 - dx) * dy * ipIn.getf(xBase, Math.min(yBase + 1, H - 1)) +
+                dx * (1 - dy) * ipIn.getf(Math.min(xBase + 1, W - 1), yBase) +
+                dx * dy * ipIn.getf(
+                    Math.min(xBase + 1, W - 1), Math.min(yBase + 1, H - 1)));
+          }
+        }
+      }
     }
     return out;
   }
@@ -850,7 +868,7 @@ public class UnetTools {
  */
 /*======================================================================*/
   public static ImagePlus[] convertAnnotationsToLabelsAndWeights(
-      ImagePlus imp, UnetJob job)
+      ImagePlus imp, Vector<String> classes, UnetJob job)
       throws InterruptedException, NotImplementedException {
 
     float foregroundBackgroundRatio = job.model().foregroundBackgroundRatio;
@@ -882,6 +900,9 @@ public class UnetTools {
       }
     }
 
+    // Initialize the weights blob with 0.5, which indicates that no weight
+    // is assigned yet. When computing extra weights all regions with positive
+    // weight will be skipped!
     blobs[1] = IJ.createHyperStack(
         imp.getTitle() + " - weights", W, H, 1, Z, T, 32);
     blobs[1].setCalibration(imp.getCalibration().copy());
@@ -890,7 +911,7 @@ public class UnetTools {
         ImageStack stack = blobs[1].getStack();
         int stackIndex = blobs[1].getStackIndex(1, z + 1, t + 1);
         ImageProcessor ip = stack.getProcessor(stackIndex);
-        ip.setValue(0.5);
+        ip.setValue(-1.0);
         ip.fill();
       }
     }
@@ -908,6 +929,19 @@ public class UnetTools {
       }
     }
 
+    ImagePlus instanceLabels = IJ.createHyperStack(
+        imp.getTitle() + " - instance labels", W, H, 1, Z, T, 32);
+    instanceLabels.setCalibration(imp.getCalibration().copy());
+    for (int t = 0; t < T; t++) {
+      for (int z = 0; z < T; z++) {
+        ImageStack stack = instanceLabels.getStack();
+        int stackIndex = instanceLabels.getStackIndex(1, z + 1, t + 1);
+        ImageProcessor ip = stack.getProcessor(stackIndex);
+        ip.setValue(0.0);
+        ip.fill();
+      }
+    }
+
     Roi[] rois = imp.getOverlay().toArray();
     int[] nObjects = new int[T];
     int nObjectsTotal = 0;
@@ -917,20 +951,30 @@ public class UnetTools {
       int t = roi.getTPosition();
       int stackIndex = blobs[0].getStackIndex(1, z + 1, t + 1);
       ImageProcessor ipLabels = blobs[0].getStack().getProcessor(stackIndex);
+      ImageProcessor ipInstanceLabels =
+          instanceLabels.getStack().getProcessor(stackIndex);
       ImageProcessor ipWeights = blobs[1].getStack().getProcessor(stackIndex);
       ImageProcessor ipPdf = blobs[2].getStack().getProcessor(stackIndex);
-      if (roi.getFillColor() != null &&
-          roi.getFillColor().getRGB() == Color.magenta.getRGB()) {
-        // Magenta indicates ignore regions
+      if (roi.getName() != null &&
+          roi.getName().toLowerCase(Locale.ROOT).contains("ignore")) {
         ipWeights.setValue(0.0);
         ipWeights.fill(roi);
         ipPdf.setValue(0.0);
         ipPdf.fill(roi);
       }
       else {
+        String label = roi.getName();
         nObjects[t]++;
         nObjectsTotal++;
-        ipLabels.setValue(nObjects[t]);
+        ipInstanceLabels.setValue(nObjects[t]);
+        ipInstanceLabels.fill(roi);
+        if (classes != null) {
+          int labelIdx = 1;
+          for (; labelIdx < classes.size() &&
+                   !classes.get(labelIdx).equals(label); labelIdx++);
+          ipLabels.setValue(labelIdx);
+        }
+        else ipLabels.setValue(1.0);
         ipLabels.fill(roi);
         ipWeights.setValue(1.0);
         ipWeights.fill(roi);
@@ -943,11 +987,14 @@ public class UnetTools {
         rescaleXY(blobs[0], ImageProcessor.NEAREST_NEIGHBOR, job),
         ImageProcessor.NEAREST_NEIGHBOR, job);
     blobs[1] = rescaleZ(
-        rescaleXY(blobs[1], ImageProcessor.BILINEAR, job),
-        ImageProcessor.BILINEAR, job);
+        rescaleXY(blobs[1], ImageProcessor.NEAREST_NEIGHBOR, job),
+        ImageProcessor.NEAREST_NEIGHBOR, job);
     blobs[2] = rescaleZ(
-        rescaleXY(blobs[2], ImageProcessor.BILINEAR, job),
-        ImageProcessor.BILINEAR, job);
+        rescaleXY(blobs[2], ImageProcessor.NEAREST_NEIGHBOR, job),
+        ImageProcessor.NEAREST_NEIGHBOR, job);
+    instanceLabels = rescaleZ(
+        rescaleXY(instanceLabels, ImageProcessor.NEAREST_NEIGHBOR, job),
+        ImageProcessor.NEAREST_NEIGHBOR, job);
     Z = blobs[0].getNSlices();
     W = blobs[0].getWidth();
     H = blobs[0].getHeight();
@@ -958,33 +1005,44 @@ public class UnetTools {
 
       // Piece of cake, just process slicewise :-D
 
-      // Create background gaps
+      // Create weighted background gaps
       for (int t = 0; t < T; ++t) {
-        ImageProcessor ip, wp, w2p;
+        ImageProcessor ip, wp, w2p, lp;
         if (blobs[0].getStack().getSize() == 1) {
-          ip = blobs[0].getProcessor();
+          lp = blobs[0].getProcessor();
           wp = blobs[1].getProcessor();
           w2p = blobs[2].getProcessor();
+          ip = instanceLabels.getProcessor();
         }
         else {
-          ip = blobs[0].getStack().getProcessor(t);
+          lp = blobs[0].getStack().getProcessor(t);
           wp = blobs[1].getStack().getProcessor(t);
           w2p = blobs[2].getStack().getProcessor(t);
+          ip = instanceLabels.getStack().getProcessor(t);
         }
 
+        // Create background ridges between touching instances
         for (int y = 0; y < H; y++) {
           for (int x = 0; x < W; x++) {
-            float val = ip.getf(x, y);
-            for (int dy = -1; dy <= 0 && val != 0; dy++) {
+            float instanceLabel = ip.getf(x, y);
+            if (instanceLabel == 0 || wp.getf(x, y) == 0.0f) continue;
+            float classLabel = lp.getf(x, y);
+            for (int dy = -1; dy <= 0; dy++) {
               if (y + dy < 0 || y + dy >= H) continue;
-              for (int dx = -1; dx <= 1 && val != 0; dx++) {
-                if ((dy == 0 && dx > -1) || x + dx < 0 || x + dx >= W)
+              for (int dx = -1; dx <= 1; dx++) {
+                if ((dy == 0 && dx >= 0) || x + dx < 0 || x + dx >= W)
                     continue;
-                float nbVal = ip.getf(x + dx, y + dy);
-                if (nbVal == 0 || nbVal == val) continue;
-                val = 0;
-                ip.setf(x, y, val);
-                wp.setf(x, y, 0.5f);
+                float nbInstanceLabel = ip.getf(x + dx, y + dy);
+                float nbClassLabel = lp.getf(x + dx, y + dy);
+                if (nbInstanceLabel == 0 ||
+                    nbInstanceLabel == instanceLabel ||
+                    classLabel != nbClassLabel) continue;
+                instanceLabel = 0;
+                ip.setf(x, y, instanceLabel);
+                classLabel = 0;
+                lp.setf(x, y, classLabel);
+                // Mark as "pixel needs extraweight computation"
+                wp.setf(x, y, -1.0f);
                 w2p.setf(x, y, foregroundBackgroundRatio);
               }
             }
@@ -1017,7 +1075,7 @@ public class UnetTools {
         float va = 1 - foregroundBackgroundRatio;
         for (int y = 0; y < H; y++) {
           for (int x = 0; x < W; x++) {
-            if (wp.getf(x, y) == 0 || wp.getf(x, y) == 1) continue;
+            if (wp.getf(x, y) >= 0.0f) continue;
             float d1 = min1Dist.getf(x, y);
             float d2 = min2Dist.getf(x, y);
             float wa = (float)Math.exp(
@@ -1028,11 +1086,6 @@ public class UnetTools {
                     foregroundBackgroundRatio);
           }
         }
-
-        // Binarize instance labels
-        for (int y = 0; y < H; y++)
-            for (int x = 0; x < W; x++)
-                ip.setf(x, y, ip.getf(x, y) > 0 ? 1 : 0);
       }
     }
     else {
@@ -1140,6 +1193,13 @@ public class UnetTools {
       ImagePlus imp, File outFile, UnetJob job, boolean keepOriginal,
       boolean show)
       throws IOException, InterruptedException, NotImplementedException {
+    return saveHDF5Blob(imp, null, outFile, job, keepOriginal, show);
+  }
+
+  public static ImagePlus saveHDF5Blob(
+      ImagePlus imp, Vector<String> classes, File outFile, UnetJob job,
+      boolean keepOriginal, boolean show)
+      throws IOException, InterruptedException, NotImplementedException {
     if (job == null) {
       IJ.error("Cannot save HDF5 blob without associated unet model");
       throw new InterruptedException("No active unet job");
@@ -1194,7 +1254,8 @@ public class UnetTools {
     else save3DBlob(impScaled, writer, dsName, job);
 
     if (job instanceof UnetFinetuneJob && imp.getOverlay() != null) {
-      ImagePlus[] blobs = convertAnnotationsToLabelsAndWeights(imp, job);
+      ImagePlus[] blobs =
+          convertAnnotationsToLabelsAndWeights(imp, classes, job);
 
       if (job.model().elementSizeUm.length == 2) {
         save2DBlob(blobs[0], writer, "labels", job);
@@ -1217,7 +1278,7 @@ public class UnetTools {
   }
 
   public static File[] saveHDF5TiledBlob(
-      ImagePlus imp, String fileNameStub, UnetJob job)
+      ImagePlus imp, Vector<String> classes, String fileNameStub, UnetJob job)
       throws IOException, InterruptedException, NotImplementedException {
     if (job == null) {
       IJ.error("Cannot save HDF5 blob without associated unet model");
@@ -1238,7 +1299,7 @@ public class UnetTools {
     ImagePlus data = convertToUnetFormat(imp, job, true, false);
     ImagePlus[] annotations = null;
     if (job instanceof UnetFinetuneJob && imp.getOverlay() != null)
-        annotations = convertAnnotationsToLabelsAndWeights(imp, job);
+        annotations = convertAnnotationsToLabelsAndWeights(imp, classes, job);
 
     int T = data.getNFrames();
     int Z = data.getNSlices();

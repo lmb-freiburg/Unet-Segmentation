@@ -31,6 +31,7 @@ public class HostConfigurationPanel extends JPanel {
 
   private JButton _weightsFileChooseButton = null;
   private JButton _processFolderChooseButton = null;
+  private JButton _finetunedFileChooseButton = null;
 
   public HostConfigurationPanel() {
     _useRemoteHostCheckBox.setToolTipText(
@@ -287,6 +288,23 @@ public class HostConfigurationPanel extends JPanel {
             }});
     }
     return _processFolderChooseButton;
+  }
+
+  JButton finetunedFileChooseButton() {
+    if (_finetunedFileChooseButton == null) {
+      if (UIManager.get("FileView.directoryIcon") instanceof Icon)
+          _finetunedFileChooseButton = new JButton(
+              (Icon)UIManager.get("FileView.directoryIcon"));
+      else _finetunedFileChooseButton = new JButton("...");
+      _finetunedFileChooseButton.setVisible(!useRemoteHost());
+      _useRemoteHostCheckBox.addChangeListener(new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+              JCheckBox c = (JCheckBox) e.getSource();
+              _finetunedFileChooseButton.setVisible(!c.isSelected());
+            }});
+    }
+    return _finetunedFileChooseButton;
   }
 
   Session sshSession() throws JSchException {

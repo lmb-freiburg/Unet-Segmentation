@@ -5,6 +5,7 @@ import ij.process.ImageProcessor;
 import ij.ImagePlus;
 import ij.plugin.PlugIn;
 import ij.gui.Plot;
+import ij.gui.Roi;
 
 import java.awt.Dimension;
 import java.awt.BorderLayout;
@@ -42,6 +43,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.BufferedReader;
 import java.util.Vector;
+import java.util.Locale;
 
 import java.text.DecimalFormat;
 
@@ -63,8 +65,10 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
   private final JFormattedTextField _learningRateTextField =
       new JFormattedTextField(
           new NumberFormatter(new DecimalFormat("0.###E0")));
-  private final JTextField _outfileTextField = new JTextField(
-      Prefs.get("unet_finetuning.outfile", "finetuned.caffemodel.h5"));
+  private final JTextField _outModeldefTextField = new JTextField(
+      Prefs.get("unet_finetuning.outModeldef", "finetuned-modeldef.h5"));
+  private final JTextField _outweightsTextField = new JTextField(
+      Prefs.get("unet_finetuning.outweights", "finetuned.caffemodel.h5"));
   private final JSpinner _iterationsSpinner =
       new JSpinner(
           new SpinnerNumberModel(
@@ -87,6 +91,16 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
   @Override
   public void finish() {
     if (_finished) return;
+    if (_sshSession != null)
+        IJ.showMessage(
+            "Finetuning finished!\nThe finetuned model has been saved to " +
+            _processFolderTextField.getText() + "/" +
+            _outweightsTextField.getText() + " on the remote host");
+    else
+        IJ.showMessage(
+            "Finetuning finished!\nThe finetuned model has been saved to " +
+            _processFolderTextField.getText() + "/" +
+            _outweightsTextField.getText());
     cleanUp();
   }
 
@@ -135,27 +149,50 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         "Model performance will be evaluated on the validation set every " +
         "given number of iterations");
 
-    JLabel outfileLabel = new JLabel("Output file:");
-    _outfileTextField.setToolTipText(
-        "Finetuned weights will be stored to this file");
-    final JButton outfileChooseButton;
-    if (UIManager.get("FileView.directoryIcon") instanceof Icon)
-        outfileChooseButton = new JButton(
-            (Icon)UIManager.get("FileView.directoryIcon"));
-    else outfileChooseButton = new JButton("...");
+    JLabel idLabel = new JLabel("Network ID");
+    _idTextField.setToolTipText(
+        "The Network ID that will be shown in the model selection combo box.");
+    JLabel outModeldefLabel = new JLabel("Model definition");
+    _outModeldefTextField.setToolTipText(
+        "The local path the updated model definition for this finetuning " +
+        "job will be stored to");
+    final JButton outModeldefChooseButton =
+        (UIManager.get("FileView.directoryIcon") instanceof Icon) ?
+        new JButton((Icon)UIManager.get("FileView.directoryIcon")) :
+        new JButton("...");
     int marginTop = (int) Math.ceil(
-        (outfileChooseButton.getPreferredSize().getHeight() -
-         _outfileTextField.getPreferredSize().getHeight()) / 2.0);
+        (outModeldefChooseButton.getPreferredSize().getHeight() -
+         _outModeldefTextField.getPreferredSize().getHeight()) / 2.0);
     int marginBottom = (int) Math.floor(
-        (outfileChooseButton.getPreferredSize().getHeight() -
-         _outfileTextField.getPreferredSize().getHeight()) / 2.0);
-    Insets insets = outfileChooseButton.getMargin();
+        (outModeldefChooseButton.getPreferredSize().getHeight() -
+         _outModeldefTextField.getPreferredSize().getHeight()) / 2.0);
+    Insets insets = outModeldefChooseButton.getMargin();
     insets.top -= marginTop;
     insets.left = 1;
     insets.bottom -= marginBottom;
     insets.right = 1;
-    outfileChooseButton.setMargin(insets);
-    outfileChooseButton.setToolTipText("Select output file name");
+    outModeldefChooseButton.setMargin(insets);
+    outModeldefChooseButton.setToolTipText(
+        "Select output model definition file name");
+
+    JLabel outweightsLabel = new JLabel("Weights:");
+    _outweightsTextField.setToolTipText(
+        "Finetuned weights will be stored to this file");
+    final JButton outweightsChooseButton =
+        _hostConfiguration.finetunedFileChooseButton();
+    marginTop = (int) Math.ceil(
+        (outweightsChooseButton.getPreferredSize().getHeight() -
+         _outweightsTextField.getPreferredSize().getHeight()) / 2.0);
+    marginBottom = (int) Math.floor(
+        (outweightsChooseButton.getPreferredSize().getHeight() -
+         _outweightsTextField.getPreferredSize().getHeight()) / 2.0);
+    insets = outweightsChooseButton.getMargin();
+    insets.top -= marginTop;
+    insets.left = 1;
+    insets.bottom -= marginBottom;
+    insets.right = 1;
+    outweightsChooseButton.setMargin(insets);
+    outweightsChooseButton.setToolTipText("Select output file name");
 
     _horizontalDialogLayoutGroup
         .addComponent(trainValidPane)
@@ -166,16 +203,23 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
                 .addComponent(learningRateLabel)
                 .addComponent(iterationsLabel)
                 .addComponent(validationStepLabel)
-                .addComponent(outfileLabel))
+                .addComponent(idLabel)
+                .addComponent(outModeldefLabel)
+                .addComponent(outweightsLabel))
             .addGroup(
                 _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
                 .addComponent(_learningRateTextField)
                 .addComponent(_iterationsSpinner)
                 .addComponent(_validationStepSpinner)
+                .addComponent(_idTextField)
                 .addGroup(
                     _dialogLayout.createSequentialGroup()
-                    .addComponent(_outfileTextField)
-                    .addComponent(outfileChooseButton))));
+                    .addComponent(_outModeldefTextField)
+                    .addComponent(outModeldefChooseButton))
+                .addGroup(
+                    _dialogLayout.createSequentialGroup()
+                    .addComponent(_outweightsTextField)
+                    .addComponent(outweightsChooseButton))));
     _verticalDialogLayoutGroup
         .addComponent(trainValidPane)
         .addGroup(
@@ -192,15 +236,41 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             .addComponent(_validationStepSpinner))
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(outfileLabel)
-            .addComponent(_outfileTextField)
-            .addComponent(outfileChooseButton));
+            .addComponent(idLabel)
+            .addComponent(_idTextField))
+        .addGroup(
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            .addComponent(outModeldefLabel)
+            .addComponent(_outModeldefTextField)
+            .addComponent(outModeldefChooseButton))
+        .addGroup(
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            .addComponent(outweightsLabel)
+            .addComponent(_outweightsTextField)
+            .addComponent(outweightsChooseButton));
 
-    outfileChooseButton.addActionListener(
+    outModeldefChooseButton.addActionListener(
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
-            File startFolder = new File(_outfileTextField.getText());
+            File startFolder = new File(_outModeldefTextField.getText());
+            JFileChooser f = new JFileChooser(startFolder);
+            f.setDialogTitle("Select output model definition file name");
+            f.setFileFilter(
+                new FileNameExtensionFilter("HDF5 files", "h5", "H5"));
+            f.setMultiSelectionEnabled(false);
+            f.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            int res = f.showDialog(_parametersDialog, "Select");
+            if (res != JFileChooser.APPROVE_OPTION) return;
+            _outModeldefTextField.setText(
+                f.getSelectedFile().getAbsolutePath());
+          }});
+
+    outweightsChooseButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            File startFolder = new File(_outweightsTextField.getText());
             JFileChooser f = new JFileChooser(startFolder);
             f.setDialogTitle("Select output file name");
             f.setFileFilter(
@@ -209,7 +279,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             f.setFileSelectionMode(JFileChooser.FILES_ONLY);
             int res = f.showDialog(_parametersDialog, "Select");
             if (res != JFileChooser.APPROVE_OPTION) return;
-            _outfileTextField.setText(
+            _outweightsTextField.setText(
                 f.getSelectedFile().getAbsolutePath());
           }});
 
@@ -486,7 +556,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
 
     Prefs.set("unet_finetuning.base_learning_rate",
               (Double)_learningRateTextField.getValue());
-    Prefs.set("unet_finetuning.outfile", _outfileTextField.getText());
+    Prefs.set("unet_finetuning.outModeldef", _outModeldefTextField.getText());
+    Prefs.set("unet_finetuning.outweights", _outweightsTextField.getText());
     Prefs.set("unet_finetuning.iterations",
               (Integer)_iterationsSpinner.getValue());
 
@@ -512,8 +583,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         msg = "";
       }
       boolean updatePlot = false;
-      if (line.matches("^.*Iteration [0-9]+, loss = .*$")) {
-        int iter = Integer.valueOf(line.split("Iteration ")[1].split(",")[0]);
+      if (line.matches("^.*Iteration [0-9]+ .* loss = .*$")) {
+        int iter = Integer.valueOf(line.split("Iteration ")[1].split(" ")[0]);
         double loss = Double.valueOf(line.split("loss = ")[1]);
         yTrain[iter] = loss;
         updatePlot = true;
@@ -582,7 +653,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     String commandLineString =
         commandString + " train -solver " +
         model().solverPrototxtAbsolutePath + " " + weightsAttribute + " " +
-        weightsValue + " " + gpuAttribute + " " + gpuValue;
+        weightsValue + " " + gpuAttribute + " " + gpuValue +
+        " -sigint_effect stop";
     IJ.log(commandLineString);
 
     int nIter = (Integer)_iterationsSpinner.getValue();
@@ -701,26 +773,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     catch (InterruptedException e) {
       _readyCancelButton.setText("Terminating...");
       _readyCancelButton.setEnabled(false);
-      if (_sshSession != null) {
-        try {
-          channel.sendSignal("TERM");
-          int graceMilliSeconds = 10000;
-          int timeElapsedMilliSeconds = 0;
-          while (!channel.isClosed() &&
-                 timeElapsedMilliSeconds <= graceMilliSeconds) {
-            timeElapsedMilliSeconds += 100;
-            try {
-              Thread.sleep(100);
-            }
-            catch (InterruptedException eInner) {}
-          }
-          if (!channel.isClosed()) channel.sendSignal("KILL");
-        }
-        catch (Exception eInner) {
-          IJ.log("Process could not be terminated using SIGTERM: " + eInner);
-        }
-        channel.disconnect();
-      }
+      if (_sshSession != null) channel.disconnect();
       else p.destroy();
       throw e;
     }
@@ -740,12 +793,12 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         UnetTools.renameFile(
             processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
             ".caffemodel.h5", processFolder() + "/" +
-            _outfileTextField.getText(), _sshSession, this);
+            _outweightsTextField.getText(), _sshSession, this);
       }
       catch (SftpException e) {
         IJ.showMessage(
             "Could not rename weightsfile to " + processFolder() + "/" +
-            _outfileTextField.getText() + "\n" +
+            _outweightsTextField.getText() + "\n" +
             "The trained model can be found at " + processFolder() + "/" +
             id() + "-snapshot_iter_" + nIter + ".caffemodel.h5");
       }
@@ -763,7 +816,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     else {
       // Rename output file and remove solverstate
       File outfile = new File(
-          processFolder() + "/" + _outfileTextField.getText());
+          processFolder() + "/" + _outweightsTextField.getText());
       File infile = new File(
           processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
           ".caffemodel.h5");
@@ -827,6 +880,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       int nTrainImages = _trainFileList.getModel().getSize();
       int nValidImages = _validFileList.getModel().getSize();
       int nImages = nTrainImages + nValidImages;
+      int nClasses = 2;
 
       String[] trainBlobFileNames = new String[nTrainImages];
       Vector<String> validBlobFileNames = new Vector<String>();
@@ -839,6 +893,44 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           outfile.delete();
         }
 
+        // Get class label information from annotations
+        Vector<String> classes = new Vector<String>();
+        boolean roiNamesAreClasses = false;
+        classes.add("background");
+        for (int i = 0; i < nTrainImages; i++) {
+          ImagePlus imp = ((DefaultListModel<ImagePlus>)
+                           _trainFileList.getModel()).get(i);
+          for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi.getName() == null ||
+                roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
+                continue;
+            if (classes.contains(roi.getName())) {
+              roiNamesAreClasses = true;
+              continue;
+            }
+            classes.add(roi.getName());
+            IJ.log("  Adding class " + roi.getName());
+          }
+        }
+        for (int i = 0; i < nValidImages && roiNamesAreClasses; i++) {
+          ImagePlus imp = ((DefaultListModel<ImagePlus>)
+                           _validFileList.getModel()).get(i);
+          for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi.getName() == null ||
+                roi.getName().toLowerCase(Locale.ROOT).contains("ignore") ||
+                classes.contains(roi.getName()))
+                continue;
+            classes.add(roi.getName());
+            IJ.log("  Adding class " + roi.getName());
+            IJ.log("  WARNING: Training set does not contain instances of " +
+                   "class " + roi.getName() + " switching to instance " +
+                   "segmentation mode");
+            roiNamesAreClasses = false;
+          }
+        }
+
+        nClasses = roiNamesAreClasses ? classes.size() : 2;
+
         // Process train files
         for (int i = 0; i < nTrainImages; i++) {
           setProgress((10 * i) / nImages);
@@ -850,7 +942,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           if (_sshSession == null) outfile = new File(trainBlobFileNames[i]);
           UnetTools.saveHDF5Blob(
               ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i),
-              outfile, this, true, false);
+              roiNamesAreClasses ? classes : null, outfile, this, true, false);
           if (interrupted()) throw new InterruptedException();
           if (_sshSession != null) {
             setTaskProgressRange(
@@ -876,7 +968,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
               processFolder() + "/" + id() + "_valid_" + i : null;
           File[] generatedFiles = UnetTools.saveHDF5TiledBlob(
               ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i),
-              fileNameStub, this);
+              roiNamesAreClasses ? classes : null, fileNameStub, this);
 
           if (_sshSession == null)
               for (File f : generatedFiles)
@@ -1033,6 +1125,38 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           return;
         }
 
+        // Adapt number of output channels if number of classes differs from
+        // number of classes in model. The caffe backend must silently
+        // resize the weight blob for the last layer accordingly. If number
+        // of classes is decreased from n to k, all weights for classes k+1
+        // to n are just ignored, if the number of classes increases new
+        // weights will be initialized using the filler for the layer.
+
+        // Get number of classes in model
+        for (Caffe.LayerParameter.Builder lb : nb.getLayerBuilderList()) {
+          for (int i = 0; i < lb.getTopCount(); ++i) {
+            if (!lb.getTop(i).equals("score")) continue;
+            if (!lb.hasConvolutionParam()) {
+              IJ.error(
+                  "U-Net Finetuning",
+                  "The selected model cannot be finetuned using this " +
+                  "Plugin.\n" +
+                  "Scores must be generated with a Convolution layer.");
+              return;
+            }
+            int nClassesModel = lb.getConvolutionParam().getNumOutput();
+            if (nClassesModel != nClasses)
+                lb.getConvolutionParamBuilder().setNumOutput(nClasses);
+          }
+        }
+
+        // Save model definition file before adding validation structures
+        ModelDefinition finetunedModel = model().duplicate();
+        finetunedModel.id = model().id + "-finetuned";
+        finetunedModel.name = _idTextField.getText();
+        finetunedModel.modelPrototxt = TextFormat.printToString(nb);
+        finetunedModel.save(new File(_outModeldefTextField.getText()));
+
         // Add test layers if a validation set is given
         if (validBlobFileNames.size() != 0) {
           nb.addLayer(
@@ -1059,7 +1183,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           model().saveModelPrototxt(tmpFile);
           _createdRemoteFolders.addAll(
               UnetTools.put(
-                  tmpFile, model().modelPrototxtAbsolutePath,
+                  tmpFile, finetunedModel.modelPrototxtAbsolutePath,
                   _sshSession, this));
           _createdRemoteFiles.add(model().modelPrototxtAbsolutePath);
           tmpFile.delete();

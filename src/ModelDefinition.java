@@ -99,6 +99,33 @@ public class ModelDefinition {
           }});
   }
 
+  public ModelDefinition duplicate() {
+    ModelDefinition dup = new ModelDefinition();
+    dup.remoteAbsolutePath = remoteAbsolutePath;
+    dup.modelPrototxtAbsolutePath = modelPrototxtAbsolutePath;
+    dup.solverPrototxtAbsolutePath = solverPrototxtAbsolutePath;
+    dup.id = id;
+    dup.name = name;
+    dup.description = description;
+    dup.inputBlobName = inputBlobName;
+    dup.inputDatasetName = inputDatasetName;
+    dup.solverPrototxt = solverPrototxt;
+    dup.modelPrototxt = modelPrototxt;
+    dup.padding = padding;
+    dup.normalizationType = normalizationType;
+    if (downsampleFactor != null)
+        dup.downsampleFactor = (int[])downsampleFactor.clone();
+    if (padInput != null) dup.padInput = (int[])padInput.clone();
+    if (padOutput != null) dup.padOutput = (int[])padOutput.clone();
+    if (elementSizeUm != null)
+        dup.elementSizeUm = (float[])elementSizeUm.clone();
+    dup.borderWeightFactor = borderWeightFactor;
+    dup.borderWeightSigmaUm = borderWeightSigmaUm;
+    dup.foregroundBackgroundRatio = foregroundBackgroundRatio;
+    dup.sigma1Um = sigma1Um;
+    return dup;
+  }
+
   public boolean isValid() {
     return file != null;
   }

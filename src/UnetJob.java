@@ -70,6 +70,8 @@ public class UnetJob extends Thread {
 
   protected HostConfigurationPanel _hostConfiguration = null;
 
+  protected JTextField _idTextField = new JTextField("finetuned model");
+
   protected Session _sshSession;
 
   protected Vector<String> _createdRemoteFolders = new Vector<String>();
@@ -461,7 +463,9 @@ public class UnetJob extends Thread {
                     new Dimension(
                         Integer.MAX_VALUE,
                         model().tileModeSelector().getPreferredSize().height));
+                _idTextField.setText(model().id + " (finetuned)");
               }
+              else _idTextField.setText("finetuned");
               dialogPanel.setMaximumSize(
                   new Dimension(
                       Integer.MAX_VALUE,
