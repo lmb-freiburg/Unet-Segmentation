@@ -1,3 +1,35 @@
+/**************************************************************************
+ *
+ * Copyright (C) 2018 Thorsten Falk
+ *
+ *        Image Analysis Lab, University of Freiburg, Germany
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ **************************************************************************/
+
+package de.unifreiburg.unet;
+
 import ij.IJ;
 import ij.Prefs;
 import ij.WindowManager;
@@ -14,6 +46,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 import java.awt.Color;
 import javax.swing.JPanel;
+import javax.swing.JCheckBox;
 import javax.swing.GroupLayout;
 import javax.swing.JScrollPane;
 import javax.swing.JLabel;
@@ -58,7 +91,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.TextFormat.Parser;
 import com.google.protobuf.TextFormat;
 
-public class UnetFinetuneJob extends UnetJob implements PlugIn {
+public class FinetuneJob extends Job implements PlugIn {
 
   private final ImagePlusListView _trainFileList = new ImagePlusListView();
   private final ImagePlusListView _validFileList = new ImagePlusListView();
@@ -79,29 +112,47 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           new SpinnerNumberModel(
               (int)Prefs.get("unet_finetuning.validation_step", 1),
               1, (int)Integer.MAX_VALUE, 1));
+  private final JCheckBox _treatRoiNamesAsClassesCheckBox =
+      new JCheckBox(
+          "ROI names are classes",
+          Prefs.get("unet_finetuning.roiNamesAreClasses", false));
+  private final JTextField _modelNameTextField = new JTextField(
+      Prefs.get("unet_finetuning.modelName", "finetuned model"));
+
 
   private boolean _trainFromScratch = false;
   private int _currentTestIteration = 0;
 
+  private ModelDefinition _finetunedModel = null;
+
+  public FinetuneJob() {
+    super();
+  }
+
+  public FinetuneJob(JobTableModel model) {
+    super(model);
+  }
+
   @Override
-  protected void setReady(boolean ready) {
-    if (ready) finish();
+  public ModelDefinition model() {
+    if (_finetunedModel == null && originalModel() != null)
+        _finetunedModel = originalModel().duplicate();
+    return _finetunedModel;
   }
 
   @Override
   public void finish() {
-    if (_finished) return;
-    if (_sshSession != null)
+    if (progressMonitor().finished()) return;
+    if (sshSession() != null)
         IJ.showMessage(
             "Finetuning finished!\nThe finetuned model has been saved to " +
-            _processFolderTextField.getText() + "/" +
-            _outweightsTextField.getText() + " on the remote host");
+            processFolder() + "/" + _outweightsTextField.getText() +
+            " on the remote host");
     else
         IJ.showMessage(
             "Finetuning finished!\nThe finetuned model has been saved to " +
-            _processFolderTextField.getText() + "/" +
-            _outweightsTextField.getText());
-    cleanUp();
+            processFolder() + "/" + _outweightsTextField.getText());
+    super.finish();
   }
 
   @Override
@@ -150,7 +201,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         "given number of iterations");
 
     JLabel idLabel = new JLabel("Network ID");
-    _idTextField.setToolTipText(
+    _modelNameTextField.setToolTipText(
         "The Network ID that will be shown in the model selection combo box.");
     JLabel outModeldefLabel = new JLabel("Model definition");
     _outModeldefTextField.setToolTipText(
@@ -179,7 +230,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     _outweightsTextField.setToolTipText(
         "Finetuned weights will be stored to this file");
     final JButton outweightsChooseButton =
-        _hostConfiguration.finetunedFileChooseButton();
+        hostConfiguration().finetunedFileChooseButton();
     marginTop = (int) Math.ceil(
         (outweightsChooseButton.getPreferredSize().getHeight() -
          _outweightsTextField.getPreferredSize().getHeight()) / 2.0);
@@ -211,7 +262,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
                 .addComponent(_learningRateTextField)
                 .addComponent(_iterationsSpinner)
                 .addComponent(_validationStepSpinner)
-                .addComponent(_idTextField)
+                .addComponent(_modelNameTextField)
                 .addGroup(
                     _dialogLayout.createSequentialGroup()
                     .addComponent(_outModeldefTextField)
@@ -237,7 +288,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(idLabel)
-            .addComponent(_idTextField))
+            .addComponent(_modelNameTextField))
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(outModeldefLabel)
@@ -248,6 +299,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             .addComponent(outweightsLabel)
             .addComponent(_outweightsTextField)
             .addComponent(outweightsChooseButton));
+
+    _configPanel.add(_treatRoiNamesAsClassesCheckBox);
 
     outModeldefChooseButton.addActionListener(
         new ActionListener() {
@@ -295,7 +348,10 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     trainValidPane.setDividerLocation(0.5);
   }
 
-  public boolean getParameters() {
+  public boolean getParameters() throws InterruptedException {
+
+    progressMonitor().initNewTask("Checking parameters", 0.0f, 0);
+
     if (WindowManager.getImageTitles().length == 0) {
       IJ.noImage();
       return false;
@@ -303,14 +359,13 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
 
     boolean dialogOK = false;
     while (!dialogOK) {
+
       dialogOK = true;
       _parametersDialog.setVisible(true);
 
       // Dialog was cancelled
-      if (!_parametersDialog.isDisplayable()) {
-        cleanUp();
-        return false;
-      }
+      if (!_parametersDialog.isDisplayable())
+          throw new InterruptedException("Dialog canceled");
 
       dialogOK = checkParameters();
       if (!dialogOK) continue;
@@ -358,86 +413,67 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
 
       // Check whether caffe binary exists and is executable
       ProcessResult res = null;
-      if (_sshSession == null) {
-        try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_finetuning.caffeBinary", "caffe"));
-          res = UnetTools.execute(cmd, this);
+      while (res == null)
+      {
+        if (sshSession() == null) {
+          try {
+            Vector<String> cmd = new Vector<String>();
+            cmd.add(Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+            res = Tools.execute(cmd, this);
+          }
+          catch (IOException e) {
+            res.exitStatus = 1;
+          }
         }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
+        else {
+          try {
+            String cmd = Prefs.get("unet_finetuning.caffeBinary", "caffe");
+            res = Tools.execute(cmd, sshSession(), this);
+          }
+          catch (JSchException e) {
+            res.exitStatus = 1;
+          }
+          catch (IOException e) {
+            res.exitStatus = 1;
+          }
         }
-        catch (IOException e) {
-          res.exitStatus = 1;
+        if (res.exitStatus != 0) {
+          String caffePath = JOptionPane.showInputDialog(
+              WindowManager.getActiveWindow(), "caffe was not found.\n" +
+              "Please specify your caffe binary\n",
+              Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+          if (caffePath == null)
+              throw new InterruptedException("Dialog canceled");
+          if (caffePath.equals(""))
+              Prefs.set("unet_finetuning.caffeBinary", "caffe");
+          else Prefs.set("unet_finetuning.caffeBinary", caffePath);
+          res = null;
         }
-      }
-      else {
-        try {
-          String cmd = Prefs.get("unet_finetuning.caffeBinary", "caffe");
-          res = UnetTools.execute(cmd, _sshSession, this);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-        }
-      }
-      if (res.exitStatus != 0) {
-        String caffePath = JOptionPane.showInputDialog(
-            WindowManager.getActiveWindow(), "caffe was not found.\n" +
-            "Please specify your caffe binary\n",
-            Prefs.get("unet_finetuning.caffeBinary", "caffe"));
-        if (caffePath == null) {
-          cleanUp();
-          return false;
-        }
-        if (caffePath.equals(""))
-            Prefs.set("unet_finetuning.caffeBinary", "caffe");
-        else Prefs.set("unet_finetuning.caffeBinary", caffePath);
-        dialogOK = false;
-        continue;
       }
 
       // Check for correct model and weight combination
-      if (_sshSession != null) {
+      if (sshSession() != null) {
         model().remoteAbsolutePath =
             processFolder() + "/" + id() + "-modeldef.h5";
         try {
           _createdRemoteFolders.addAll(
-              UnetTools.put(
-                  model().file, model().remoteAbsolutePath, _sshSession, this));
+              Tools.put(
+                  originalModel().file, model().remoteAbsolutePath,
+                  sshSession(), this));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
           Prefs.set("unet_segmentation.processfolder", processFolder());
         }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (SftpException e) {
-          dialogOK = false;
+        catch (SftpException|JSchException e) {
           IJ.showMessage(
               "Model upload failed.\nDo you have sufficient " +
               "permissions to create the processing folder on " +
               "the remote host?");
-          continue;
-        }
-        catch (JSchException e) {
           dialogOK = false;
-          IJ.showMessage(
-              "Model upload failed.\nDo you have sufficient " +
-              "permissions to create the processing folder on " +
-              "the remote host?");
           continue;
         }
         catch (IOException e) {
-          dialogOK = false;
           IJ.showMessage("Model upload failed. Could not read model file.");
+          dialogOK = false;
           continue;
         }
 
@@ -448,7 +484,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
               model().remoteAbsolutePath + "\" -weights \"" +
               weightsFileName() + "\" -n_channels " + nChannels + " " +
               caffeGPUParameter();
-          res = UnetTools.execute(cmd, _sshSession, this);
+          res = Tools.execute(cmd, sshSession(), this);
           if (res.exitStatus != 0) {
             int selectedOption = JOptionPane.showConfirmDialog(
                 WindowManager.getActiveWindow(),
@@ -474,10 +510,6 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             }
           }
         }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
         catch (JSchException e) {
           res.exitStatus = 1;
           res.shortErrorString = "SSH connection error";
@@ -495,7 +527,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
           cmd.add("check_model_and_weights_h5");
           cmd.add("-model");
-          cmd.add(model().file.getAbsolutePath());
+          cmd.add(originalModel().file.getAbsolutePath());
           cmd.add("-weights");
           cmd.add(weightsFileName());
           cmd.add("-n_channels");
@@ -504,7 +536,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             cmd.add(caffeGPUParameter().split(" ")[0]);
             cmd.add(caffeGPUParameter().split(" ")[1]);
           }
-          res = UnetTools.execute(cmd, this);
+          res = Tools.execute(cmd, this);
           if (res.exitStatus != 0) {
             int selectedOption = JOptionPane.showConfirmDialog(
                 WindowManager.getActiveWindow(),
@@ -531,10 +563,6 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             if (res.exitStatus > 1) break;
           }
         }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
         catch (IOException e) {
           res.exitStatus = 1;
           res.shortErrorString = "Input/Output error";
@@ -542,28 +570,31 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
       }
       if (res.exitStatus != 0) {
-        dialogOK = false;
-
         // User decided to change weight file, so don't bother him with
         // additional message boxes
         if (res.exitStatus == 2) continue;
-
         IJ.log(res.cerr);
         IJ.showMessage("Model/Weight check failed:\n" + res.shortErrorString);
+        dialogOK = false;
         continue;
       }
     }
 
     Prefs.set("unet_finetuning.base_learning_rate",
               (Double)_learningRateTextField.getValue());
+    Prefs.set("unet_finetuning.modelName", _modelNameTextField.getText());
     Prefs.set("unet_finetuning.outModeldef", _outModeldefTextField.getText());
     Prefs.set("unet_finetuning.outweights", _outweightsTextField.getText());
     Prefs.set("unet_finetuning.iterations",
               (Integer)_iterationsSpinner.getValue());
+    Prefs.set("unet_finetuning.validation_step",
+              (Integer)_validationStepSpinner.getValue());
+    Prefs.set("unet_finetuning.roiNamesAreClasses",
+              _treatRoiNamesAsClassesCheckBox.isSelected());
 
     _parametersDialog.dispose();
 
-    if (_jobTableModel != null) _jobTableModel.fireTableDataChanged();
+    if (jobTable() != null) jobTable().fireTableDataChanged();
 
     return true;
   }
@@ -590,13 +621,9 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         updatePlot = true;
 
         // Update progress
-        setTaskProgress(
+        progressMonitor().count(
             "Finetuning iteration " + iter + "/" + (xTrain.length - 1) +
-            " loss = " + loss, iter, xTrain.length - 1);
-        setProgress(
-            (int) (_taskProgressMin + (float)(iter) /
-                   (float)(xTrain.length - 1) *
-                   (_taskProgressMax - _taskProgressMin)));
+            " loss = " + loss, 1);
       }
       if (line.matches("^.*Iteration [0-9]+, Testing net.*$")) {
         _currentTestIteration = Integer.valueOf(
@@ -626,15 +653,16 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     }
   }
 
-  public void runUnetFinetuning()
+  public void runFinetuning()
       throws JSchException, IOException, InterruptedException {
-    _taskStatus.isIndeterminate = true;
-    setTaskProgress("Initializing U-Net", 0, 0);
+
+    progressMonitor().initNewTask(
+        "Initializing U-Net", progressMonitor().taskProgressMax(), 0);
 
     // Prepare caffe call
     String gpuAttribute = new String();
     String gpuValue = new String();
-    String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
+    String selectedGPU = selectedGPUString();
     if (selectedGPU.contains("GPU ")) {
       gpuAttribute = "-gpu";
       gpuValue = selectedGPU.substring(selectedGPU.length() - 1);
@@ -652,9 +680,9 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     String commandString = Prefs.get("unet_finetuning.caffeBinary", "caffe");
     String commandLineString =
         commandString + " train -solver " +
-        model().solverPrototxtAbsolutePath + " " + weightsAttribute + " " +
-        weightsValue + " " + gpuAttribute + " " + gpuValue +
-        " -sigint_effect stop";
+        model().solverPrototxtAbsolutePath + " " +
+        weightsAttribute + " " + weightsValue + " " + gpuAttribute + " " +
+        gpuValue + " -sigint_effect stop";
     IJ.log(commandLineString);
 
     int nIter = (Integer)_iterationsSpinner.getValue();
@@ -687,7 +715,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
     Process p = null;
     BufferedReader stdOutput = null;
     BufferedReader stdError = null;
-    if (_sshSession == null)
+    if (sshSession() == null)
     {
       ProcessBuilder pb = null;
       if (gpuAttribute.equals("")) {
@@ -719,7 +747,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       stdError = new BufferedReader(new InputStreamReader(p.getErrorStream()));
     }
     else {
-      channel = _sshSession.openChannel("exec");
+      channel = sshSession().openChannel("exec");
       ((ChannelExec)channel).setCommand(commandLineString);
       stdOutput =
           new BufferedReader(new InputStreamReader(channel.getInputStream()));
@@ -752,7 +780,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
               line, plotImage, xTrain, yTrain, xValid, yValid);
         }
 
-        if (_sshSession != null) {
+        if (sshSession() != null) {
           if (channel.isClosed()) {
             if(stdOutput.ready() || stdError.ready()) continue;
             exitStatus = channel.getExitStatus();
@@ -769,15 +797,13 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         if (interrupted()) throw new InterruptedException();
         Thread.sleep(100);
       }
+      if (sshSession() != null) channel.disconnect();
     }
     catch (InterruptedException e) {
-      _readyCancelButton.setText("Terminating...");
-      _readyCancelButton.setEnabled(false);
-      if (_sshSession != null) channel.disconnect();
+      if (sshSession() != null) channel.disconnect();
       else p.destroy();
       throw e;
     }
-    if (_sshSession != null) channel.disconnect();
 
     if (exitStatus != 0) {
       IJ.log(errorMsg);
@@ -786,14 +812,14 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           "\nSee log for further details");
     }
 
-    if (_sshSession != null)
+    if (sshSession() != null)
     {
       try {
         // Rename output file name and remove solverstate file
-        UnetTools.renameFile(
+        Tools.renameFile(
             processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
             ".caffemodel.h5", processFolder() + "/" +
-            _outweightsTextField.getText(), _sshSession, this);
+            _outweightsTextField.getText(), sshSession(), this);
       }
       catch (SftpException e) {
         IJ.showMessage(
@@ -803,9 +829,9 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
             id() + "-snapshot_iter_" + nIter + ".caffemodel.h5");
       }
       try {
-        UnetTools.removeFile(
+        Tools.removeFile(
             processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
-            ".solverstate.h5", _sshSession, this);
+            ".solverstate.h5", sshSession(), this);
       }
       catch (SftpException e) {
         IJ.showMessage(
@@ -831,7 +857,6 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           IJ.showMessage(
               "Could not delete solverstate " + solverstatefile.getPath());
     }
-    setTaskProgress(1, 1);
   }
 
   @Override
@@ -849,6 +874,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       IJ.error("U-Net Finetuning", "No image with annotations found for " +
                "finetuning.\nThis Plugin requires at least one image with " +
                "overlay containing annotations.");
+      abort();
       return;
     }
     prepareParametersDialog();
@@ -857,17 +883,17 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       join();
       finish();
     }
-    catch (InterruptedException e) {}
-    IJ.showProgress(1.0);
+    catch (InterruptedException e) {
+      IJ.showMessage("Job " + id() + " canceled. Cleaning up.");
+      abort();
+    }
   }
 
   @Override
   public void run() {
     try
     {
-      setProgress(0);
-      if (_isInteractive && !getParameters()) return;
-
+      if (isInteractive() && !getParameters()) return;
       model().modelPrototxtAbsolutePath =
           processFolder() + "/" + id() + "-model.prototxt";
       model().solverPrototxtAbsolutePath =
@@ -888,26 +914,27 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       // Convert and upload caffe blobs
       try {
         File outfile = null;
-        if (_sshSession != null) {
+        if (sshSession() != null) {
           outfile = File.createTempFile(id(), ".h5");
           outfile.delete();
         }
 
         // Get class label information from annotations
+        progressMonitor().initNewTask(
+            "Searching class labels", progressMonitor().taskProgressMax(), 0);
         Vector<String> classes = new Vector<String>();
-        boolean roiNamesAreClasses = false;
+        boolean roiNamesAreClasses =
+            _treatRoiNamesAsClassesCheckBox.isSelected();
         classes.add("background");
         for (int i = 0; i < nTrainImages; i++) {
           ImagePlus imp = ((DefaultListModel<ImagePlus>)
                            _trainFileList.getModel()).get(i);
           for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi.getName() == null) roiNamesAreClasses = false;
             if (roi.getName() == null ||
-                roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
+                roi.getName().toLowerCase(Locale.ROOT).contains("ignore") ||
+                classes.contains(roi.getName()))
                 continue;
-            if (classes.contains(roi.getName())) {
-              roiNamesAreClasses = true;
-              continue;
-            }
             classes.add(roi.getName());
             IJ.log("  Adding class " + roi.getName());
           }
@@ -916,6 +943,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           ImagePlus imp = ((DefaultListModel<ImagePlus>)
                            _validFileList.getModel()).get(i);
           for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi.getName() == null) roiNamesAreClasses = false;
             if (roi.getName() == null ||
                 roi.getName().toLowerCase(Locale.ROOT).contains("ignore") ||
                 classes.contains(roi.getName()))
@@ -933,23 +961,26 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
 
         // Process train files
         for (int i = 0; i < nTrainImages; i++) {
-          setProgress((10 * i) / nImages);
-          setTaskProgressRange(
-              (int)(10 * i) / nImages,
-              (int)(10 * (i + ((_sshSession != null) ? 0.5 : 1))) / nImages);
+          ImagePlus imp =
+              ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i);
+          progressMonitor().initNewTask(
+              "Converting " + imp.getTitle(),
+              0.05f * ((float)i + ((sshSession() == null) ? 1.0f : 0.5f)) /
+              (float)nImages, 1);
           trainBlobFileNames[i] =
               processFolder() + "/" + id() + "_train_" + i + ".h5";
-          if (_sshSession == null) outfile = new File(trainBlobFileNames[i]);
-          UnetTools.saveHDF5Blob(
-              ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i),
-              roiNamesAreClasses ? classes : null, outfile, this, true, false);
+          if (sshSession() == null) outfile = new File(trainBlobFileNames[i]);
+          Tools.saveHDF5Blob(
+              imp, roiNamesAreClasses ? classes : null, outfile, this, true,
+              false);
           if (interrupted()) throw new InterruptedException();
-          if (_sshSession != null) {
-            setTaskProgressRange(
-                (int)(10 * (i + 0.5)) / nImages, (int)(10 * (i + 1)) / nImages);
+          if (sshSession() != null) {
+            progressMonitor().initNewTask(
+                "Uploading " + trainBlobFileNames[i],
+                0.05f * (float)(i + 1) / (float)nImages, 1);
             _createdRemoteFolders.addAll(
-                UnetTools.put(
-                    outfile, trainBlobFileNames[i], _sshSession, this));
+                Tools.put(
+                    outfile, trainBlobFileNames[i], sshSession(), this));
             _createdRemoteFiles.add(trainBlobFileNames[i]);
             outfile.delete();
             if (interrupted()) throw new InterruptedException();
@@ -958,38 +989,34 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
 
         // Process validation files
         for (int i = 0; i < nValidImages; i++) {
-          setProgress((10 * (i + nTrainImages)) / nImages);
-          setTaskProgressRange(
-              (int)(10 * (i + nTrainImages)) / nImages,
-              (int)(10 * (i + ((_sshSession != null) ? 0.5 : 1) +
-                          nTrainImages)) / nImages);
-
-          String fileNameStub = (_sshSession == null) ?
+          ImagePlus imp =
+              ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i);
+          progressMonitor().initNewTask(
+              "Converting " + imp.getTitle(),
+              0.05f + 0.05f *
+              ((float)i + ((sshSession() == null) ? 1.0f : 0.5f)) /
+              (float)nImages, 1);
+          String fileNameStub = (sshSession() == null) ?
               processFolder() + "/" + id() + "_valid_" + i : null;
-          File[] generatedFiles = UnetTools.saveHDF5TiledBlob(
-              ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i),
-              roiNamesAreClasses ? classes : null, fileNameStub, this);
+          File[] generatedFiles = Tools.saveHDF5TiledBlob(
+              imp, roiNamesAreClasses ? classes : null, fileNameStub, this);
 
-          if (_sshSession == null)
+          if (sshSession() == null)
               for (File f : generatedFiles)
                   validBlobFileNames.add(f.getAbsolutePath());
           else {
             for (int j = 0; j < generatedFiles.length; j++) {
-              setTaskProgressRange(
-                  (int)(
-                      10 * (
-                          i + 0.5 + (
-                              (double)j / (double)generatedFiles.length /
-                              2.0))) / nImages,
-                  (int)(10 * (i + 0.5 + ((double)(j + 1) /
-                                         (double)generatedFiles.length /
-                                         2.0))) / nImages);
+              progressMonitor().initNewTask(
+                  "Uploading " + generatedFiles[j],
+                  0.05f + 0.05f * (float)
+                  ((i + 0.5 * (1 + (float)(j + 1) / generatedFiles.length))) /
+                  (float)nImages, 1);
               String outFileName =
                   processFolder() + "/" + id() + "_valid_" + i + "_" + j +
                   ".h5";
               _createdRemoteFolders.addAll(
-                  UnetTools.put(
-                      generatedFiles[j], outFileName, _sshSession, this));
+                  Tools.put(
+                      generatedFiles[j], outFileName, sshSession(), this));
               _createdRemoteFiles.add(outFileName);
               validBlobFileNames.add(outFileName);
               if (interrupted()) throw new InterruptedException();
@@ -999,43 +1026,42 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       }
       catch (IOException e) {
         IJ.error("U-Net Finetuning", e.toString());
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
       catch (NotImplementedException e) {
         IJ.error("U-Net Finetuning", "Could not create data blob: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
       catch (JSchException e) {
         IJ.error("U-Net Finetuning", "Could not upload data blob: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
       catch (SftpException e) {
         IJ.error("U-Net Finetuning", "Could not upload data blob: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
 
       // ---
       // Create train and valid file list files
+      progressMonitor().initNewTask(
+          "Create train and valid file lists",
+          progressMonitor().taskProgressMax(), 0);
       try {
-        File outfile = (_sshSession != null) ?
+        File outfile = (sshSession() != null) ?
             File.createTempFile(id(), "-trainfilelist.txt") :
             new File(trainFileListAbsolutePath);
-        if (_sshSession == null) outfile.createNewFile();
+        if (sshSession() == null) outfile.createNewFile();
         BufferedWriter out = new BufferedWriter(new FileWriter(outfile));
         for (String fName : trainBlobFileNames) out.write(fName + "\n");
         out.close();
-        if (_sshSession != null) {
+        if (sshSession() != null) {
           _createdRemoteFolders.addAll(
-              UnetTools.put(
-                  outfile, trainFileListAbsolutePath, _sshSession, this));
+              Tools.put(
+                  outfile, trainFileListAbsolutePath, sshSession(), this));
           _createdRemoteFiles.add(trainFileListAbsolutePath);
           outfile.delete();
         }
@@ -1043,30 +1069,28 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       }
       catch (IOException e) {
         IJ.error("U-Net Finetuning", "Could not create trainfile list: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
       catch (Exception e) {
         IJ.error("U-Net Finetuning", "Could not upload trainfile list: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
 
       if (validBlobFileNames.size() != 0) {
         try {
-          File outfile = (_sshSession != null) ?
+          File outfile = (sshSession() != null) ?
               File.createTempFile(id(), "-validfilelist.txt") :
               new File(validFileListAbsolutePath);
-          if (_sshSession == null) outfile.createNewFile();
+          if (sshSession() == null) outfile.createNewFile();
           BufferedWriter out = new BufferedWriter(new FileWriter(outfile));
           for (String fName : validBlobFileNames) out.write(fName + "\n");
           out.close();
-          if (_sshSession != null) {
+          if (sshSession() != null) {
             _createdRemoteFolders.addAll(
-                UnetTools.put(
-                    outfile, validFileListAbsolutePath, _sshSession, this));
+                Tools.put(
+                    outfile, validFileListAbsolutePath, sshSession(), this));
             _createdRemoteFiles.add(validFileListAbsolutePath);
             outfile.delete();
           }
@@ -1074,14 +1098,12 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
         catch (IOException e) {
           IJ.error("U-Net Finetuning", "Could not create validfile list: " + e);
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+          abort();
           return;
         }
         catch (Exception e) {
           IJ.error("U-Net Finetuning", "Could not upload validfile list: " + e);
-          cleanUp();
-          if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+          abort();
           return;
         }
       }
@@ -1090,6 +1112,8 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       // Create prototxt files
 
       // model.prototxt
+      progressMonitor().initNewTask(
+          "Create model prototxt", progressMonitor().taskProgressMax(), 0);
       try {
         Caffe.NetParameter.Builder nb = Caffe.NetParameter.newBuilder();
         TextFormat.getParser().merge(model().modelPrototxt, nb);
@@ -1101,7 +1125,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
           }
 
           if (lb.getType().equals("CreateDeformation")) {
-            if (model().elementSizeUm.length == 3) {
+            if (model().nDims() == 3) {
               lb.getCreateDeformationParamBuilder()
                   .setNz(model().getTileShape()[0])
                   .setNy(model().getTileShape()[1])
@@ -1122,6 +1146,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
               "The selected model cannot be finetuned using this Plugin.\n" +
               "It must contain a CreateDeformationLayer for data " +
               "augmentation.");
+          abort();
           return;
         }
 
@@ -1142,6 +1167,7 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
                   "The selected model cannot be finetuned using this " +
                   "Plugin.\n" +
                   "Scores must be generated with a Convolution layer.");
+              abort();
               return;
             }
             int nClassesModel = lb.getConvolutionParam().getNumOutput();
@@ -1151,17 +1177,18 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
 
         // Save model definition file before adding validation structures
-        ModelDefinition finetunedModel = model().duplicate();
-        finetunedModel.id = model().id + "-finetuned";
-        finetunedModel.name = _idTextField.getText();
-        finetunedModel.modelPrototxt = TextFormat.printToString(nb);
-        finetunedModel.save(new File(_outModeldefTextField.getText()));
+        model().file = new File(_outModeldefTextField.getText());
+        model().id = originalModel().id + "-" + id();
+        model().name = _modelNameTextField.getText();
+        model().modelPrototxt = TextFormat.printToString(nb);
+        model().save();
 
         // Add test layers if a validation set is given
         if (validBlobFileNames.size() != 0) {
           nb.addLayer(
               0, Caffe.LayerParameter.newBuilder().setType("HDF5Data")
-              .addTop(model().inputBlobName).addTop("labels").addTop("weights")
+              .addTop(model().inputBlobName).addTop(
+                  "labels").addTop("weights")
               .setName("loaddata_valid").setHdf5DataParam(
                   Caffe.HDF5DataParameter.newBuilder().setBatchSize(1)
                   .setShuffle(false).setSource(validFileListAbsolutePath))
@@ -1178,13 +1205,13 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
 
         model().modelPrototxt = TextFormat.printToString(nb);
-        if (_sshSession != null) {
+        if (sshSession() != null) {
           File tmpFile = File.createTempFile(id(), "-model.prototxt");
           model().saveModelPrototxt(tmpFile);
           _createdRemoteFolders.addAll(
-              UnetTools.put(
-                  tmpFile, finetunedModel.modelPrototxtAbsolutePath,
-                  _sshSession, this));
+              Tools.put(
+                  tmpFile, model().modelPrototxtAbsolutePath,
+                  sshSession(), this));
           _createdRemoteFiles.add(model().modelPrototxtAbsolutePath);
           tmpFile.delete();
         }
@@ -1198,19 +1225,19 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       catch (IOException e) {
         IJ.error("U-Net Finetuning",
                  "Could not create temporary model.prototxt: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
       catch (Exception e) {
         IJ.error("U-Net Finetuning",
                  "Could not upload model.prototxt: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
 
       // solver.prototxt
+      progressMonitor().initNewTask(
+          "Create solver prototxt", progressMonitor().taskProgressMax(), 0);
       try {
         Caffe.SolverParameter.Builder sb = Caffe.SolverParameter.newBuilder();
         TextFormat.getParser().merge(model().solverPrototxt, sb);
@@ -1229,18 +1256,19 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
         }
 
         model().solverPrototxt = TextFormat.printToString(sb);
-        if (_sshSession != null) {
+        if (sshSession() != null) {
           File tmpFile = File.createTempFile(id(), "-solver.prototxt");
           model().saveSolverPrototxt(tmpFile);
           _createdRemoteFolders.addAll(
-              UnetTools.put(
+              Tools.put(
                   tmpFile, model().solverPrototxtAbsolutePath,
-                  _sshSession, this));
+                  sshSession(), this));
           _createdRemoteFiles.add(model().solverPrototxtAbsolutePath);
           tmpFile.delete();
         }
         else {
-          File solverFile = new File(model().solverPrototxtAbsolutePath);
+          File solverFile =
+              new File(model().solverPrototxtAbsolutePath);
           solverFile.createNewFile();
           model().saveSolverPrototxt(solverFile);
           solverFile.deleteOnExit();
@@ -1248,43 +1276,37 @@ public class UnetFinetuneJob extends UnetJob implements PlugIn {
       }
       catch (IOException e) {
         IJ.error("U-Net Finetuning", "Could not create solver: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
       catch (Exception e) {
         IJ.error("U-Net Finetuning", "Could not upload solver.prototxt: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
 
       // Finetuning
-      setTaskProgressRange(11, 100);
+      progressMonitor().initNewTask("U-Net finetuning", 1.0f, 0);
       try {
-        runUnetFinetuning();
+        runFinetuning();
       }
       catch (JSchException e) {
         IJ.error("U-Net Finetuning", "Could not upload data blob: " + e);
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
         return;
       }
       catch (IOException e) {
         IJ.error("U-Net Finetuning", e.toString());
-        cleanUp();
-        if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+        abort();
+        return;
       }
       if (interrupted()) throw new InterruptedException();
 
-      setProgress(100);
       setReady(true);
     }
     catch (InterruptedException e) {
       IJ.showMessage("Job " + id() + " canceled. Cleaning up.");
-      cleanUp();
-      if (_jobTableModel != null) _jobTableModel.deleteJob(this);
-      return;
+      abort();
     }
   }
 

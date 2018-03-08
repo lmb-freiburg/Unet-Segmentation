@@ -1,18 +1,51 @@
-import ij.*;
+/**************************************************************************
+ *
+ * Copyright (C) 2018 Thorsten Falk
+ *
+ *        Image Analysis Lab, University of Freiburg, Germany
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ **************************************************************************/
 
-import javax.swing.table.*;
+package de.unifreiburg.unet;
+
+import ij.ImagePlus;
+import ij.WindowManager;
+
+import javax.swing.table.AbstractTableModel;
 import java.util.Vector;
 
-public class UnetJobTableModel extends AbstractTableModel {
+public class JobTableModel extends AbstractTableModel {
 
   private String[] _columnNames = {
       "Job ID", "Source Image", "Model", "Weights", "Host", "Status",
       "Progress", "Show" };
 
-  private Vector<UnetJob> _jobs;
+  private Vector<Job> _jobs;
 
-  public UnetJobTableModel() {
-    _jobs = new Vector<UnetJob>();
+  public JobTableModel() {
+    _jobs = new Vector<Job>();
   }
 
   @Override
@@ -55,13 +88,14 @@ public class UnetJobTableModel extends AbstractTableModel {
       return _jobs.get(row).weightsFileName();
     }
     case 4: {
-      return _jobs.get(row).hostname();
+      return (_jobs.get(row).sshSession() != null) ?
+          _jobs.get(row).sshSession().getHost() : "localhost";
     }
     case 5: {
-      return _jobs.get(row).status();
+      return _jobs.get(row).progressMonitor();
     }
     case 6: {
-      return (int)_jobs.get(row).progress();
+      return new Float(_jobs.get(row).progressMonitor().progress());
     }
     case 7: {
       return _jobs.get(row).readyCancelButton();
@@ -72,7 +106,7 @@ public class UnetJobTableModel extends AbstractTableModel {
     }
   }
 
-  public void deleteJob(UnetJob job) {
+  public void deleteJob(Job job) {
     if (job == null) return;
     int jobIdx = 0;
     while (jobIdx < _jobs.size() && _jobs.get(jobIdx) != job) ++jobIdx;
@@ -82,31 +116,31 @@ public class UnetJobTableModel extends AbstractTableModel {
     fireTableRowsDeleted(jobIdx, jobIdx);
   }
 
+  public void createSegmentationJob() {
+    SegmentationJob job = new SegmentationJob(this);
+    job.setImagePlus(WindowManager.getCurrentImage());
+    _jobs.add(job);
+    job.start();
+    fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
+  }
+
+  public void createDetectionJob() {
+    DetectionJob job = new DetectionJob(this);
+    job.setImagePlus(WindowManager.getCurrentImage());
+    _jobs.add(job);
+    job.start();
+    fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
+  }
+
   public void createFinetuneJob() {
-    UnetFinetuneJob job = new UnetFinetuneJob();
-    job.setJobTableModel(this);
+    FinetuneJob job = new FinetuneJob(this);
     job.prepareParametersDialog();
     _jobs.add(job);
     job.start();
     fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
   }
 
-  public void createSegmentationJob(ImagePlus imp) {
-    if (imp == null) {
-      IJ.error(
-          "U-Net Segmentation", "No image selected for segmentation.");
-      return;
-    }
-    UnetSegmentationJob job = new UnetSegmentationJob();
-    job.setJobTableModel(this);
-    job.setImagePlus(imp);
-    job.prepareParametersDialog();
-    _jobs.add(job);
-    job.start();
-    fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
-  }
-
-  public UnetJob getJob(String jobId) {
+  public Job job(String jobId) {
     int jobIdx = 0;
     while (jobIdx < _jobs.size() && !_jobs.get(jobIdx).id().equals(jobId))
         ++jobIdx;

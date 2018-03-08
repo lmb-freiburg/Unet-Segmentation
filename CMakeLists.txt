@@ -34,7 +34,29 @@ find_jar(JSCH_JAR "${JSCH_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the
 
 set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROJECT_SOURCE_DIR}/protobuf-java-2.6.1.jar)
 
-add_jar(Unet_Segmentation src/UnetJobManager.java src/UnetJobTableModel.java src/HostConfigurationPanel.java src/UnetJob.java src/UnetSegmentationJob.java src/UnetFinetuneJob.java src/UnetTools.java src/MyUserInfo.java src/MySftpProgressMonitor.java src/ModelDefinition.java src/ProcessResult.java src/TaskStatus.java src/ImagePlusListView.java src/NotImplementedException.java caffe/Caffe.java src/caffe.proto COPYING.txt plugins.config resources/README.html INCLUDE_JARS protobuf-java-2.6.1.jar)
+add_jar(Unet_Segmentation
+  src/de/unifreiburg/unet/JobManager.java
+  src/de/unifreiburg/unet/JobTableModel.java
+  src/de/unifreiburg/unet/HostConfigurationPanel.java
+  src/de/unifreiburg/unet/Job.java
+  src/de/unifreiburg/unet/SegmentationJob.java
+  src/de/unifreiburg/unet/DetectionJob.java
+  src/de/unifreiburg/unet/FinetuneJob.java
+  src/de/unifreiburg/unet/Tools.java
+  src/de/unifreiburg/unet/MyUserInfo.java
+  src/de/unifreiburg/unet/ProgressMonitor.java
+  src/de/unifreiburg/unet/ModelDefinition.java
+  src/de/unifreiburg/unet/ProcessResult.java
+  src/de/unifreiburg/unet/ImagePlusListView.java
+  src/de/unifreiburg/unet/NotImplementedException.java
+  src/de/unifreiburg/unet/DistanceTransform.java
+  src/de/unifreiburg/unet/ConnectedComponentLabeling.java
+  src/de/unifreiburg/unet/Pair.java
+  src/de/unifreiburg/unet/BlobException.java
+  src/de/unifreiburg/unet/Blob.java
+  caffe/Caffe.java
+  caffe/caffe.proto COPYING.txt plugins.config
+  resources/README.html INCLUDE_JARS protobuf-java-2.6.1.jar)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)
 
@@ -45,7 +67,7 @@ add_custom_command(TARGET Unet_Segmentation
   )
 
 add_custom_command(OUTPUT ${PROJECT_SOURCE_DIR}/caffe/Caffe.java
-  COMMAND ${PROTOBUF_COMPILER} -I${PROJECT_SOURCE_DIR}/src --java_out=${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src/caffe.proto
+  COMMAND ${PROTOBUF_COMPILER} -I${PROJECT_SOURCE_DIR}/src --java_out=${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/caffe/caffe.proto
   )
 
 install_jar(Unet_Segmentation ${CMAKE_INSTALL_PREFIX})

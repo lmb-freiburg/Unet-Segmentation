@@ -1,3 +1,35 @@
+/**************************************************************************
+ *
+ * Copyright (C) 2018 Thorsten Falk
+ *
+ *        Image Analysis Lab, University of Freiburg, Germany
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ **************************************************************************/
+
+package de.unifreiburg.unet;
+
 import ij.IJ;
 import ij.Prefs;
 import ij.WindowManager;
@@ -42,22 +74,33 @@ import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.SftpException;
 
-public class UnetSegmentationJob extends UnetJob implements PlugIn {
+public class SegmentationJob extends Job implements PlugIn {
 
-  private File _localTmpFile = null;
+  protected File _localTmpFile = null;
 
-  private ImagePlus _imp = null;
-  private String _impName = null;
-  private int[] _impShape = {0, 0, 0, 0, 0};
-  private Calibration _impCalibration = null;
+  protected ImagePlus _imp = null;
+  protected String _impName = null;
+  protected int[] _impShape = {0, 0, 0, 0, 0};
+  protected Calibration _impCalibration = null;
 
-  private final String[] _averagingModes = { "none", "mirror", "rotate" };
-  private JComboBox<String> _averagingComboBox =
+  protected final String[] _averagingModes = { "none", "mirror", "rotate" };
+  protected JComboBox<String> _averagingComboBox =
       new JComboBox<String>(_averagingModes);
-  private JCheckBox _keepOriginalCheckBox = new JCheckBox(
+  protected JCheckBox _keepOriginalCheckBox = new JCheckBox(
       "Keep original", Prefs.get("unet_segmentation.keepOriginal", false));
-  private JCheckBox _outputScoresCheckBox = new JCheckBox(
-      "Output scores", Prefs.get("unet_segmentation.outputScores", false));
+  protected JCheckBox _outputScoresCheckBox = new JCheckBox(
+      "Show scores", Prefs.get("unet_segmentation.outputScores", false));
+  protected JCheckBox _outputSoftmaxScoresCheckBox = new JCheckBox(
+      "Show softmax scores",
+      Prefs.get("unet_segmentation.outputSoftmaxScores", false));
+
+  public SegmentationJob() {
+    super();
+  }
+
+  public SegmentationJob(JobTableModel model) {
+    super(model);
+  }
 
   public void setImagePlus(ImagePlus imp) {
     _imp = imp;
@@ -83,60 +126,80 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
 
   @Override
   public boolean ready() {
-    return _readyCancelButton.getText().equals("Show");
+    return readyCancelButton().getText().equals("Show");
   }
 
   @Override
   protected void setReady(boolean ready) {
-    _readyCancelButton.setText("Show");
-    if (_jobTableModel == null) return;
-    SwingUtilities.invokeLater(
-        new Runnable() {
-          @Override
-          public void run() {
-            _jobTableModel.updateJobDownloadEnabled(id());
-          }});
+    if (ready() == ready) return;
+    if (ready) {
+      readyCancelButton().setText("Show");
+      if (jobTable() == null) finish();
+      else
+          SwingUtilities.invokeLater(
+              new Runnable() {
+                @Override
+                public void run() {
+                  jobTable().updateJobDownloadEnabled(id());
+                }
+              });
+    }
+    else readyCancelButton().setText("Cancel");
   }
 
   @Override
   public void finish() {
-    if (_finished) return;
+    if (progressMonitor().finished()) return;
+    readyCancelButton().setEnabled(false);
     try {
-      UnetTools.loadSegmentationToImagePlus(
-          _localTmpFile, this, _outputScoresCheckBox.isSelected());
-      cleanUp();
-      if (Recorder.record) {
-        Recorder.setCommand(null);
-        String command = "call('UnetSegmentationJob.segmentHyperStack', " +
-            "'modelFilename=" + model().file.getAbsolutePath() +
-            ",weightsFilename=" + weightsFileName() +
-            "," + model().getTilingParameterString() +
-            ",gpuId=" + (String)_useGPUComboBox.getSelectedItem() +
-            ",useRemoteHost=" + String.valueOf(_sshSession != null);
-        if (_sshSession != null) {
-          command +=
-              ",hostname=" + _sshSession.getHost() +
-              ",port=" + String.valueOf(_sshSession.getPort()) +
-              ",username=" + _sshSession.getUserName();
-          if (_hostConfiguration.authRSAKey())
-              command += ",RSAKeyfile=" + _hostConfiguration.rsaKeyFile();
+      new Thread()
+      {
+        @Override
+        public void run() {
+          try {
+            Tools.loadSegmentationToImagePlus(
+                _localTmpFile, SegmentationJob.this,
+                _outputScoresCheckBox.isSelected(),
+                _outputSoftmaxScoresCheckBox.isSelected());
+            if (Recorder.record) {
+              Recorder.setCommand(null);
+              String command =
+                  "call('de.unifreiburg.unet.SegmentationJob." +
+                  "processHyperStack', " +
+                  "'modelFilename=" + model().file.getAbsolutePath() +
+                  ",weightsFilename=" + weightsFileName() +
+                  "," + model().getTilingParameterString() +
+                  ",gpuId=" + selectedGPUString() +
+                  ",useRemoteHost=" + String.valueOf(sshSession() != null);
+              if (sshSession() != null) {
+                command +=
+                    ",hostname=" + sshSession().getHost() +
+                    ",port=" + String.valueOf(sshSession().getPort()) +
+                    ",username=" + sshSession().getUserName();
+                if (hostConfiguration().authRSAKey())
+                    command += ",RSAKeyfile=" +
+                        hostConfiguration().rsaKeyFile();
+              }
+              command +=
+                  ",processFolder=" + processFolder() +
+                  ",average=" + (String)_averagingComboBox.getSelectedItem() +
+                  ",keepOriginal=" + String.valueOf(
+                      _keepOriginalCheckBox.isSelected()) +
+                  ",outputScores=" + String.valueOf(
+                      _outputScoresCheckBox.isSelected()) +
+                  ",outputSoftmaxScores=" + String.valueOf(
+                      _outputSoftmaxScoresCheckBox.isSelected()) + "');\n";
+              Recorder.recordString(command);
+            }
+          }
+          catch (IOException e) {
+            IJ.error("U-Net Segmentation", e.toString());
+          }
+          finishJob();
         }
-        command +=
-            ",processFolder=" + _processFolderTextField.getText() +
-            ",average=" + (String)_averagingComboBox.getSelectedItem() +
-            ",keepOriginal=" + String.valueOf(
-                _keepOriginalCheckBox.isSelected()) +
-            ",outputScores=" + String.valueOf(
-                _outputScoresCheckBox.isSelected()) + "');";
-        Recorder.recordString(command);
-      }
+      }.start();
     }
-    catch (IOException e) {
-      IJ.error("U-Net Segmentation", e.toString());
-    }
-    catch (Exception e) {
-      IJ.error("U-Net Segmentation", e.toString());
-    }
+    catch (IllegalThreadStateException e) {}
   }
 
   @Override
@@ -167,6 +230,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
     // Create config panel
     _configPanel.add(_keepOriginalCheckBox);
     _configPanel.add(_outputScoresCheckBox);
+    _configPanel.add(_outputSoftmaxScoresCheckBox);
 
     // Finalize the dialog
     _parametersDialog.pack();
@@ -179,7 +243,10 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
     _parametersDialog.setLocationRelativeTo(_imp.getWindow());
   }
 
-  public boolean getParameters() {
+  public boolean getParameters() throws InterruptedException {
+
+    progressMonitor().initNewTask("Checking parameters", 0.0f, 0);
+
     if (_imp == null) setImagePlus(WindowManager.getCurrentImage());
     if (_imp == null) {
       IJ.showMessage(
@@ -193,61 +260,50 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       _parametersDialog.setVisible(true);
 
       // Dialog was cancelled
-      if (!_parametersDialog.isDisplayable()) {
-        cleanUp();
-        return false;
-      }
+      if (!_parametersDialog.isDisplayable())
+          throw new InterruptedException("Dialog canceled");
 
       dialogOK = checkParameters();
       if (!dialogOK) continue;
 
-      // Check whether caffe unet binary exists and is executable
+      // Check whether caffe binary exists and is executable
       ProcessResult res = null;
-      if (_sshSession == null) {
-        try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
-          res = UnetTools.execute(cmd, this);
+      while (res == null)
+      {
+        if (sshSession() == null) {
+          try {
+            Vector<String> cmd = new Vector<String>();
+            cmd.add(Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+            res = Tools.execute(cmd, this);
+          }
+          catch (IOException e) {
+            res.exitStatus = 1;
+          }
         }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
+        else {
+          try {
+            String cmd = Prefs.get("unet_finetuning.caffeBinary", "caffe");
+            res = Tools.execute(cmd, sshSession(), this);
+          }
+          catch (JSchException e) {
+            res.exitStatus = 1;
+          }
+          catch (IOException e) {
+            res.exitStatus = 1;
+          }
         }
-        catch (IOException e) {
-          res.exitStatus = 1;
+        if (res.exitStatus != 0) {
+          String caffePath = JOptionPane.showInputDialog(
+              WindowManager.getActiveWindow(), "caffe was not found.\n" +
+              "Please specify your caffe binary\n",
+              Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+          if (caffePath == null)
+              throw new InterruptedException("Dialog canceled");
+          if (caffePath.equals(""))
+              Prefs.set("unet_finetuning.caffeBinary", "caffe");
+          else Prefs.set("unet_finetuning.caffeBinary", caffePath);
+          res = null;
         }
-      }
-      else {
-        try {
-          String cmd = Prefs.get(
-              "unet_segmentation.caffeBinary", "caffe_unet");
-          res = UnetTools.execute(cmd, _sshSession, this);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-        }
-      }
-      if (res.exitStatus != 0) {
-        String caffePath = JOptionPane.showInputDialog(
-            _imp.getWindow(), "caffe_unet was not found.\n" +
-            "Please specify your caffe_unet binary\n",
-            Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
-        if (caffePath == null) {
-          cleanUp();
-          return false;
-        }
-        if (caffePath.equals(""))
-            Prefs.set("unet_segmentation.caffeBinary", "caffe_unet");
-        else Prefs.set("unet_segmentation.caffeBinary", caffePath);
-        dialogOK = false;
-        continue;
       }
 
       // Check whether combination of model and weights can be used for
@@ -256,38 +312,27 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
           (_imp.getType() == ImagePlus.COLOR_256 ||
            _imp.getType() == ImagePlus.COLOR_RGB) ? 3 : _imp.getNChannels();
 
-      if (_sshSession != null) {
+      if (sshSession() != null) {
         model().remoteAbsolutePath = processFolder() + "/" + id() + "_model.h5";
         try {
           _createdRemoteFolders.addAll(
-              UnetTools.put(
-                  model().file, model().remoteAbsolutePath, _sshSession, this));
+              Tools.put(
+                  model().file, model().remoteAbsolutePath, sshSession(),
+                  this));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
           Prefs.set("unet_segmentation.processfolder", processFolder());
         }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
-        catch (SftpException e) {
-          dialogOK = false;
+        catch (SftpException|JSchException e) {
           IJ.showMessage(
               "Model upload failed.\nDo you have sufficient " +
               "permissions to create the processing folder on " +
               "the remote host?");
-          continue;
-        }
-        catch (JSchException e) {
           dialogOK = false;
-          IJ.showMessage(
-              "Model upload failed.\nDo you have sufficient " +
-              "permissions to create the processing folder on " +
-              "the remote host?");
           continue;
         }
         catch (IOException e) {
-          dialogOK = false;
           IJ.showMessage("Model upload failed. Could not read model file.");
+          dialogOK = false;
           continue;
         }
 
@@ -299,7 +344,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
                 model().remoteAbsolutePath + "\" -weights \"" +
                 weightsFileName() + "\" -n_channels " + nChannels + " " +
                 caffeGPUParameter();
-            res = UnetTools.execute(cmd, _sshSession, this);
+            res = Tools.execute(cmd, sshSession(), this);
             if (res.exitStatus != 0) {
               int selectedOption = JOptionPane.showConfirmDialog(
                   _imp.getWindow(), "No compatible weights found at the " +
@@ -325,9 +370,9 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
                 if (res2 != JFileChooser.APPROVE_OPTION)
                     throw new InterruptedException("Aborted by user");
                 try {
-                  UnetTools.put(
+                  Tools.put(
                       f.getSelectedFile(), weightsFileName(),
-                      _sshSession, this);
+                      sshSession(), this);
                 }
                 catch (SftpException e) {
                   res.exitStatus = 3;
@@ -356,10 +401,6 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
           }
           while (res.exitStatus != 0);
         }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
-        }
         catch (JSchException e) {
           res.exitStatus = 1;
           res.shortErrorString = "SSH connection error";
@@ -386,11 +427,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
             cmd.add(caffeGPUParameter().split(" ")[0]);
             cmd.add(caffeGPUParameter().split(" ")[1]);
           }
-          res = UnetTools.execute(cmd, this);
-        }
-        catch (InterruptedException e) {
-          cleanUp();
-          return false;
+          res = Tools.execute(cmd, this);
         }
         catch (IOException e) {
           res.exitStatus = 1;
@@ -415,25 +452,21 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
               _keepOriginalCheckBox.isSelected());
     Prefs.set("unet_segmentation.outputScores",
               _outputScoresCheckBox.isSelected());
+    Prefs.set("unet_segmentation.outputSoftmaxScores",
+              _outputSoftmaxScoresCheckBox.isSelected());
 
     _parametersDialog.dispose();
 
-    if (_jobTableModel != null) _jobTableModel.fireTableDataChanged();
+    if (jobTable() != null) jobTable().fireTableDataChanged();
 
     return true;
   }
 
-  public void runUnetSegmentation(
+  public void runSegmentation(
       String fileName, Session session)
       throws JSchException, IOException, InterruptedException {
-    _taskStatus.isIndeterminate = true;
-    setTaskProgress("Initializing U-Net", 0, 0);
-    String gpuParm = new String();
-    String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
-    if (selectedGPU.contains("GPU "))
-        gpuParm = "-gpu " + selectedGPU.substring(selectedGPU.length() - 1);
-    else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
 
+    String gpuParm = caffeGPUParameter();
     String nTilesParm = model().getCaffeTilingParameter();
     String averagingParm = new String();
     if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
@@ -463,6 +496,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
     String errorMsg = new String();
     String outMsg = new String();
     int exitStatus = -1;
+    boolean initialized = false;
     try {
       while (true) {
         while(stdOutput.available() > 0) {
@@ -491,16 +525,15 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
             int tileIdx = Integer.parseInt(line.substring(0, sepPos));
             line = line.substring(sepPos + 1);
             int nTiles = Integer.parseInt(line);
-            setTaskProgress(
+            if (!initialized)
+            {
+              progressMonitor().init(0, "", "", nBatches * nTiles);
+              initialized = true;
+            }
+            progressMonitor().count(
                 "Segmenting batch " + String.valueOf(batchIdx) + "/" +
                 String.valueOf(nBatches) + ", tile " +
-                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles),
-                (batchIdx - 1) * nTiles + tileIdx - 1, nBatches * nTiles);
-            setProgress(
-                (int) (_taskProgressMin +
-                       (float) ((batchIdx - 1) * nTiles + tileIdx - 1) /
-                       (float) (nBatches * nTiles) *
-                       (_taskProgressMax - _taskProgressMin)));
+                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles), 1);
           }
         }
         if (channel.isClosed()) {
@@ -513,8 +546,8 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       }
     }
     catch (InterruptedException e) {
-      _readyCancelButton.setText("Terminating...");
-      _readyCancelButton.setEnabled(false);
+      readyCancelButton().setText("Terminating...");
+      readyCancelButton().setEnabled(false);
       try {
         channel.sendSignal("TERM");
         int graceMilliSeconds = 10000;
@@ -546,12 +579,11 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
     }
   }
 
-  public void runUnetSegmentation(File file)
+  public void runSegmentation(File file)
       throws IOException, InterruptedException {
-    setTaskProgress("Initializing U-Net", 0, 0);
     String gpuAttribute = new String();
     String gpuValue = new String();
-    String selectedGPU = (String)_useGPUComboBox.getSelectedItem();
+    String selectedGPU = selectedGPUString();
     if (selectedGPU.contains("GPU ")) {
       gpuAttribute = "-gpu";
       gpuValue = selectedGPU.substring(selectedGPU.length() - 1);
@@ -627,6 +659,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
     int exitStatus = -1;
     String line;
     String errorMsg = "";
+    boolean initialized = false;
     try {
       while (true) {
         // Check for ready() to avoid thread blocking, then read
@@ -645,16 +678,15 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
             int tileIdx = Integer.parseInt(line.substring(0, sepPos));
             line = line.substring(sepPos + 1);
             int nTiles = Integer.parseInt(line);
-            setTaskProgress(
+            if (!initialized)
+            {
+              progressMonitor().init(0, "", "", nBatches * nTiles);
+              initialized = true;
+            }
+            progressMonitor().count(
                 "Segmenting batch " + String.valueOf(batchIdx) + "/" +
                 String.valueOf(nBatches) + ", tile " +
-                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles),
-                (batchIdx - 1) * nTiles + tileIdx - 1, nBatches * nTiles);
-            setProgress(
-                (int) (_taskProgressMin +
-                       (float) ((batchIdx - 1) * nTiles + tileIdx - 1) /
-                       (float) (nBatches * nTiles) *
-                       (_taskProgressMax - _taskProgressMin)));
+                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles), 1);
           }
         }
         // Also read error stream to avoid stream overflow that leads
@@ -674,8 +706,8 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
       }
     }
     catch (InterruptedException e) {
-      _readyCancelButton.setText("Terminating...");
-      _readyCancelButton.setEnabled(false);
+      readyCancelButton().setText("Terminating...");
+      readyCancelButton().setEnabled(false);
       p.destroy();
       throw e;
     }
@@ -686,18 +718,14 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
           "Error during segmentation: exit status " + exitStatus +
           "\nSee log for further details");
     }
-
-    setTaskProgress(1, 1);
   }
 
-  public static void segmentHyperStack(String params)
+  public static void processHyperStack(String params)
       throws InterruptedException {
-    final UnetSegmentationJob job = new UnetSegmentationJob();
-    if (job._imp == null)
-        job.setImagePlus(WindowManager.getCurrentImage());
+    final SegmentationJob job = new SegmentationJob();
+    job.setImagePlus(WindowManager.getCurrentImage());
     if (job._imp == null) {
-      IJ.error(
-          "U-Net Segmentation", "No image selected for segmentation.");
+      IJ.noImage();
       return;
     }
 
@@ -706,14 +734,12 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
     for (int i = 0; i < parameterStrings.length; i++)
         parameters.put(parameterStrings[i].split("=")[0],
                        parameterStrings[i].split("=")[1]);
-    job._modelComboBox.removeAllItems();
     ModelDefinition model = new ModelDefinition();
-    job._modelComboBox.addItem(model);
-    job._modelComboBox.setSelectedItem(model);
-    job.model().load(new File(parameters.get("modelFilename")));
-    job._weightsFileTextField.setText(parameters.get("weightsFilename"));
+    model.load(new File(parameters.get("modelFilename")));
+    job.setModel(model);
+    job.setWeightsFileName(parameters.get("weightsFilename"));
     job.model().setFromTilingParameterString(parameterStrings[2]);
-    job._useGPUComboBox.setSelectedItem(parameters.get("gpuId"));
+    job.setGPUString(parameters.get("gpuId"));
     if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
       try {
         String hostname = parameters.get("hostname");
@@ -725,8 +751,8 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
                      "/.ssh/known_hosts").getAbsolutePath());
         if (parameters.containsKey("RSAKeyfile"))
             jsch.addIdentity(parameters.get("RSAKeyfile"));
-        job._sshSession = jsch.getSession(username, hostname, port);
-        job._sshSession.setUserInfo(new MyUserInfo());
+        job.setSshSession(jsch.getSession(username, hostname, port));
+        job.sshSession().setUserInfo(new MyUserInfo());
 
         if (!parameters.containsKey("RSAKeyfile")) {
           final JDialog passwordDialog = new JDialog(
@@ -744,7 +770,7 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
                   char[] password = passwordField.getPassword();
                   byte[] passwordAsBytes =
                       HostConfigurationPanel.toBytes(password);
-                  job._sshSession.setPassword(passwordAsBytes);
+                  job.sshSession().setPassword(passwordAsBytes);
                   Arrays.fill(passwordAsBytes, (byte) 0);
                   Arrays.fill(password, '\u0000');
                   passwordField.setText("");
@@ -759,21 +785,23 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
           passwordDialog.setVisible(true);
         }
 
-        job._sshSession.connect();
+        job.sshSession().connect();
       }
       catch (JSchException e) {
-        IJ.log("Macro call to UnetJob.segmentHyperStack aborted. " +
+        IJ.log("Macro call to SegmentationJob.processHyperStack aborted. " +
                "Could not establish SSH connection.");
         IJ.error("U-Net Segmentation", "Could not establish SSH connection.");
         return;
       }
     }
-    job._processFolderTextField.setText(parameters.get("processFolder"));
+    job.setProcessFolder(parameters.get("processFolder"));
     job._keepOriginalCheckBox.setSelected(
         Boolean.valueOf(parameters.get("keepOriginal")));
     job._outputScoresCheckBox.setSelected(
         Boolean.valueOf(parameters.get("outputScores")));
-    job._isInteractive = false;
+    job._outputSoftmaxScoresCheckBox.setSelected(
+        Boolean.valueOf(parameters.get("outputSoftmaxScores")));
+    job.setInteractive(false);
 
     job.start();
     job.join();
@@ -784,95 +812,81 @@ public class UnetSegmentationJob extends UnetJob implements PlugIn {
   public void run(String arg) {
     setImagePlus(WindowManager.getCurrentImage());
     if (_imp == null) {
-      IJ.error(
-          "U-Net Segmentation", "No image selected for segmentation.");
+      IJ.noImage();
       return;
     }
-    prepareParametersDialog();
+    start();
     try {
-      start();
       join();
-      finish();
     }
     catch (InterruptedException e) {}
-    IJ.showProgress(1.0);
   }
 
   @Override
   public void run() {
-    setProgress(0);
-    if (_isInteractive && !getParameters()) return;
     try {
-      if (_sshSession != null) {
-        if (!_isInteractive) {
+      prepareParametersDialog();
+      if (isInteractive() && !getParameters()) return;
+      if (sshSession() != null) {
+        progressMonitor().initNewTask("Uploading Model", 0.01f, 1);
+        if (!isInteractive()) {
           model().remoteAbsolutePath =
-              _processFolderTextField.getText() + "/" + id() + "_model.h5";
+              processFolder() + "/" + id() + "_model.h5";
           _createdRemoteFolders.addAll(
-              UnetTools.put(
-                  model().file, model().remoteAbsolutePath, _sshSession, this));
+              Tools.put(
+                  model().file, model().remoteAbsolutePath, sshSession(),
+                  this));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
         }
-        setProgress(1);
 
         _localTmpFile = File.createTempFile(id(), ".h5");
         _localTmpFile.delete();
+        String remoteFileName = processFolder() + "/" + id() + ".h5";
 
-        String remoteFileName = _processFolderTextField.getText() + "/" +
-            id() + ".h5";
-
+        progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
         setImagePlus(
-            UnetTools.saveHDF5Blob(
+            Tools.saveHDF5Blob(
                 _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected(),
                 true));
-        _impShape = _imp.getDimensions();
         if (interrupted()) throw new InterruptedException();
-        setProgress(2);
 
-        setTaskProgressRange(3, 10);
+        progressMonitor().initNewTask("Uploading HDF5 blobs", 0.1f, 1);
         _createdRemoteFolders.addAll(
-            UnetTools.put(_localTmpFile, remoteFileName, _sshSession, this));
+            Tools.put(_localTmpFile, remoteFileName, sshSession(), this));
         _createdRemoteFiles.add(remoteFileName);
         if (interrupted()) throw new InterruptedException();
-        setProgress(10);
 
-        setTaskProgressRange(11, 90);
-        runUnetSegmentation(remoteFileName, _sshSession);
+        progressMonitor().initNewTask("U-Net segmentation", 0.9f, 1);
+        runSegmentation(remoteFileName, sshSession());
         if (interrupted()) throw new InterruptedException();
-        setProgress(90);
 
-        setTaskProgressRange(91, 100);
-        UnetTools.get(remoteFileName, _localTmpFile, _sshSession, this);
+        progressMonitor().initNewTask("Downloading segmentation", 1.0f, 1);
+        Tools.get(remoteFileName, _localTmpFile, sshSession(), this);
         if (interrupted()) throw new InterruptedException();
-        setProgress(100);
-      }
+     }
       else {
-        _localTmpFile = new File(
-            _processFolderTextField.getText() + "/" + id() + ".h5");
+        _localTmpFile = new File(processFolder() + "/" + id() + ".h5");
 
+        progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
         setImagePlus(
-            UnetTools.saveHDF5Blob(
+            Tools.saveHDF5Blob(
                 _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected(),
                 true));
-        _impShape = _imp.getDimensions();
         if (interrupted()) throw new InterruptedException();
-        setProgress(2);
 
-        setTaskProgressRange(3, 100);
-        runUnetSegmentation(_localTmpFile);
+        progressMonitor().initNewTask("U-Net Segmentation", 1.0f, 1);
+        runSegmentation(_localTmpFile);
         if (interrupted()) throw new InterruptedException();
-        setProgress(100);
       }
       setReady(true);
     }
     catch (InterruptedException e) {
       IJ.showMessage("Job " + id() + " canceled. Cleaning up.");
-      cleanUp();
-      if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+      abort();
     }
     catch (Exception e) {
       IJ.error("U-Net Segmentation", e.toString());
-      cleanUp();
-      if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+      abort();
     }
   }
 

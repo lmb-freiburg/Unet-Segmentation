@@ -1,13 +1,55 @@
+/**************************************************************************
+ *
+ * Copyright (C) 2018 Thorsten Falk
+ *
+ *        Image Analysis Lab, University of Freiburg, Germany
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ **************************************************************************/
+
+package de.unifreiburg.unet;
+
 // ImageJ stuff
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.gui.Roi;
+import ij.gui.PointRoi;
+import ij.gui.OvalRoi;
+import ij.gui.Overlay;
 import ij.process.ImageProcessor;
+import ij.process.FloatProcessor;
+import ij.process.ByteProcessor;
 import ij.measure.Calibration;
+import ij.measure.ResultsTable;
 import ij.plugin.CompositeConverter;
+import ij.plugin.filter.ParticleAnalyzer;
+import ij.plugin.frame.RoiManager;
 
 import java.awt.Color;
+import java.awt.Point;
+import java.awt.geom.Point2D;
 
 // Java utilities
 import java.io.File;
@@ -39,7 +81,7 @@ import ch.systemsx.cisd.hdf5.HDF5DataSetInformation;
 import ch.systemsx.cisd.base.mdarray.MDFloatArray;
 
 
-public class UnetTools {
+public class Tools {
 
 /*======================================================================*/
 /*!
@@ -47,7 +89,7 @@ public class UnetTools {
  *
  *   \param path The absolute file path on the remote host
  *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given UnetJob
+ *   \param job If not null, progress will be reported to the given Job
  *     otherwise it will be shown in the ImageJ status bar
  *
  *   \exception JSchException if the SSH session is not open
@@ -56,13 +98,11 @@ public class UnetTools {
  *   \exception SftpException if the Sftp connection fails
  */
 /*======================================================================*/
-  public static void removeFile(String path, Session session, UnetJob job)
+  public static void removeFile(String path, Session session, Job job)
       throws JSchException, IOException, InterruptedException, SftpException {
-    if (job != null)
-        job.setTaskProgress(
-            "Removing file '" + session.getHost() + ":" + path + "'", 0, 0);
-    else
-        IJ.showStatus("Removing file '" + session.getHost() + ":" + path + "'");
+    job.progressMonitor().init(0, "", "", 1);
+    job.progressMonitor().count(
+        "Removing file '" + session.getHost() + ":" + path + "'", 0);
     IJ.log(session.getUserName() + "@" + session.getHost() + " $ rm \"" +
            path + "\"");
     Channel channel = session.openChannel("sftp");
@@ -70,7 +110,7 @@ public class UnetTools {
     ChannelSftp c = (ChannelSftp)channel;
     c.rm(path);
     channel.disconnect();
-    if (job != null) job.setTaskProgress(1, 1);
+    job.progressMonitor().count(1);
   }
 
 /*======================================================================*/
@@ -80,7 +120,7 @@ public class UnetTools {
  *   \param oldpath The absolute file path on the remote host
  *   \param newpath The new absolute file path on the remote host
  *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given UnetJob
+ *   \param job If not null, progress will be reported to the given Job
  *     otherwise it will be shown in the ImageJ status bar
  *
  *   \exception JSchException if the SSH session is not open
@@ -90,16 +130,12 @@ public class UnetTools {
  */
 /*======================================================================*/
   public static void renameFile(
-      String oldpath, String newpath, Session session, UnetJob job)
+      String oldpath, String newpath, Session session, Job job)
       throws JSchException, IOException, InterruptedException, SftpException {
-    if (job != null)
-        job.setTaskProgress(
-            "Renaming file '" + session.getHost() + ":" + oldpath + "' to '" +
-            newpath + "'", 0, 0);
-    else
-        IJ.showStatus(
-            "Renaming file '" + session.getHost() + ":" + oldpath + "' to '" +
-            newpath + "'");
+    job.progressMonitor().init(0, "", "", 1);
+    job.progressMonitor().count(
+        "Renaming file '" + session.getHost() + ":" + oldpath + "' to '" +
+        newpath + "'", 0);
     IJ.log(session.getUserName() + "@" + session.getHost() + " $ mv \"" +
            oldpath + "\" \"" + newpath + "\"");
     Channel channel = session.openChannel("sftp");
@@ -107,7 +143,7 @@ public class UnetTools {
     ChannelSftp c = (ChannelSftp)channel;
     c.rename(oldpath, newpath);
     channel.disconnect();
-    if (job != null) job.setTaskProgress(1, 1);
+    job.progressMonitor().count(1);
   }
 
 /*======================================================================*/
@@ -117,7 +153,7 @@ public class UnetTools {
  *
  *   \param path The absolute folder path on the remote host
  *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given UnetJob
+ *   \param job If not null, progress will be reported to the given Job
  *     otherwise it will be shown in the ImageJ status bar
  *
  *   \exception JSchException if the SSH session is not open
@@ -126,14 +162,11 @@ public class UnetTools {
  *   \exception SftpException if the Sftp connection fails
  */
 /*======================================================================*/
-  public static void removeFolder(String path, Session session, UnetJob job)
+  public static void removeFolder(String path, Session session, Job job)
       throws JSchException, IOException, InterruptedException, SftpException {
-    if (job != null)
-        job.setTaskProgress(
-            "Removing folder '" + session.getHost() + ":" + path + "'", 0, 0);
-    else
-        IJ.showStatus(
-            "Removing folder '" + session.getHost() + ":" + path + "'");
+    job.progressMonitor().init(0, "", "", 1);
+    job.progressMonitor().count(
+        "Removing folder '" + session.getHost() + ":" + path + "'", 0);
     IJ.log(session.getUserName() + "@" + session.getHost() + " $ rmdir \"" +
            path + "\"");
     Channel channel = session.openChannel("sftp");
@@ -141,7 +174,7 @@ public class UnetTools {
     ChannelSftp c = (ChannelSftp)channel;
     c.rmdir(path);
     channel.disconnect();
-    if (job != null) job.setTaskProgress(1, 1);
+    job.progressMonitor().count(1);
   }
 
 /*======================================================================*/
@@ -153,7 +186,7 @@ public class UnetTools {
  *   \param inFile The file to copy on the local host
  *   \param outFileName The absolute file path on the remote host
  *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given UnetJob
+ *   \param job If not null, progress will be reported to the given Job
  *     otherwise it will be shown in the ImageJ status bar
  *
  *   \exception JSchException if the SSH session is not open
@@ -167,7 +200,7 @@ public class UnetTools {
  */
 /*======================================================================*/
   public static Vector<String> put(
-      File inFile, String outFileName, Session session, UnetJob job)
+      File inFile, String outFileName, Session session, Job job)
       throws JSchException, IOException, InterruptedException, SftpException {
     Channel channel = session.openChannel("sftp");
     channel.connect();
@@ -185,14 +218,9 @@ public class UnetTools {
           currentFolder += "/" + folders[i];
         }
         catch (SftpException e) {
-          if (job != null)
-              job.setTaskProgress(
-                  "Creating folder '" + currentFolder + "/" + folders[i] +
-                  "' on host '" + session.getHost() + "'", 0, 0);
-          else
-              IJ.showStatus(
-                  "Creating folder '" + currentFolder + "/" + folders[i] +
-                  "' on host '" + session.getHost() + "'");
+          job.progressMonitor().count(
+              "Creating folder '" + currentFolder + "/" + folders[i] +
+              "' on host '" + session.getHost() + "'", 0);
           IJ.log(
               session.getUserName() + "@" + session.getHost() +
               " $ mkdir \"" + currentFolder + "/" + folders[i] + "\"");
@@ -201,35 +229,28 @@ public class UnetTools {
           if (!currentFolder.endsWith("/")) currentFolder += "/";
           currentFolder += folders[i];
           createdFolders.add(0, currentFolder);
-          if (job != null) job.setTaskProgress(1, 1);
         }
       }
     }
 
     // Copy the file
-    if (job != null)
-        job.setTaskProgress(
-            "Copying '" + inFile.getName() + "' to host '" +
-            session.getHost() + "'", 0, 0);
-    else
-        IJ.showStatus("Copying '" + inFile.getName() + "' to host '" +
-                      session.getHost() + "'");
+    job.progressMonitor().count(
+        "Copying '" + inFile.getName() + "' to host '" +
+        session.getHost() + "'", 0);
     IJ.log(
         "$ sftp \"" + inFile.getAbsolutePath() + "\" \"" +
         session.getUserName() + "@" + session.getHost() + ":" +
         session.getPort() + ":" + outFileName + "\"");
-    MySftpProgressMonitor progressMonitor =
-        new MySftpProgressMonitor(job);
-    c.put(inFile.getAbsolutePath(), outFileName, progressMonitor,
+    c.put(inFile.getAbsolutePath(), outFileName, job.progressMonitor(),
           ChannelSftp.OVERWRITE);
-    if (progressMonitor.canceled()) {
+    if (job.progressMonitor().canceled()) {
       c.rm(outFileName);
       for (int i = 0; i < createdFolders.size(); ++i)
           c.rmdir(createdFolders.get(i));
+      channel.disconnect();
       throw new InterruptedException("Upload canceled by user");
     }
     channel.disconnect();
-    if (job != null) job.setTaskProgress(1, 1);
 
     return createdFolders;
   }
@@ -244,7 +265,7 @@ public class UnetTools {
  *   \param inFileName The file to copy on the remote host
  *   \param outFile The File on the local host to create
  *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given UnetJob
+ *   \param job If not null, progress will be reported to the given Job
  *     otherwise it will be shown in the ImageJ status bar
  *
  *   \exception JSchException if the SSH session is not open
@@ -254,7 +275,7 @@ public class UnetTools {
  */
 /*======================================================================*/
   public static void get(
-      String inFileName, File outFile, Session session, UnetJob job)
+      String inFileName, File outFile, Session session, Job job)
       throws JSchException, IOException, InterruptedException, SftpException {
     Channel channel = session.openChannel("sftp");
     channel.connect();
@@ -268,42 +289,32 @@ public class UnetTools {
       folder = folder.getParentFile();
     }
     for (int i = createdFolders.size() - 1; i >= 0; --i) {
-      if (job != null)
-          job.setTaskProgress(
-              "Creating folder '" + createdFolders.get(i) + "'", 0, 0);
-      else
-          IJ.showStatus(
-              "Creating folder '" + createdFolders.get(i) + "'");
+      job.progressMonitor().count(
+          "Creating folder '" + createdFolders.get(i) + "'", 0);
       IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
       if (!createdFolders.get(i).mkdir())
           throw new IOException(
               "Could not create folder '" +
               createdFolders.get(i).getAbsolutePath() + "'");
       createdFolders.get(i).deleteOnExit();
-      if (job != null) job.setTaskProgress(1, 1);
     }
 
     // Copy the file
-    if (job != null)
-        job.setTaskProgress("Fetching '" + inFileName + "' from host '" +
-                            session.getHost() + "'", 0, 0);
-    else
-        IJ.showStatus("Fetching '" + inFileName + "' from host '" +
-                      session.getHost() + "'");
+    job.progressMonitor().count(
+        "Fetching '" + inFileName + "' from host '" + session.getHost() + "'",
+        0);
     IJ.log(
         "$ sftp \"" + session.getUserName() +
         "@" + session.getHost() + ":" + session.getPort() + ":" +
         inFileName + "\" \"" + outFile.getAbsolutePath() + "\"");
-    MySftpProgressMonitor progressMonitor = new MySftpProgressMonitor(job);
     outFile.deleteOnExit();
-    c.get(inFileName, outFile.getAbsolutePath(), progressMonitor,
+    c.get(inFileName, outFile.getAbsolutePath(), job.progressMonitor(),
           ChannelSftp.OVERWRITE);
 
-    if (progressMonitor.canceled())
-        throw new InterruptedException("Download canceled by user");
-
     channel.disconnect();
-    if (job != null) job.setTaskProgress(1, 1);
+
+    if (job.progressMonitor().canceled())
+        throw new InterruptedException("Download canceled by user");
   }
 
 /*======================================================================*/
@@ -314,17 +325,17 @@ public class UnetTools {
  *   the input ImagePlus is returned
  *
  *   \param imp The ImagePlus to convert to a composite multi channel image
- *   \param job Task progress will be reported via this UnetJob.
+ *   \param job Task progress will be reported via this Job.
  *
  *   \return The newly created ImagePlus or if no conversion was required
  *     a reference to imp
  */
 /*======================================================================*/
-  public static ImagePlus makeComposite(ImagePlus imp, UnetJob job) {
+  public static ImagePlus makeComposite(ImagePlus imp, Job job) {
     if (imp.getType() != ImagePlus.COLOR_256 &&
         imp.getType() != ImagePlus.COLOR_RGB) return imp;
 
-    job.setTaskProgress("Splitting color channels", 0, 0);
+    job.progressMonitor().count("Splitting color channels", 0);
     ImagePlus out = CompositeConverter.makeComposite(imp);
     out.setTitle(imp.getTitle() + " - composite");
     out.setCalibration(imp.getCalibration());
@@ -339,59 +350,58 @@ public class UnetTools {
  *   the input ImagePlus is returned
  *
  *   \param imp The ImagePlus to convert to float
- *   \param job Task progress will be reported via this UnetJob.
+ *   \param job Task progress will be reported via this Job.
  *
  *   \return The newly created ImagePlus or if no conversion was required
  *     a reference to imp
  */
 /*======================================================================*/
-  public static ImagePlus convertToFloat(ImagePlus imp, UnetJob job)
+  public static ImagePlus convertToFloat(ImagePlus imp, Job job)
       throws InterruptedException {
     if (imp.getBitDepth() == 32) return imp;
 
-    job.setTaskProgress(
-        "Converting hyperstack to float", 0, imp.getImageStackSize());
+    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
+    job.progressMonitor().count("Converting hyperstack to float", 0);
     ImagePlus out = IJ.createHyperStack(
         imp.getTitle() + " - 32-Bit", imp.getWidth(), imp.getHeight(),
         imp.getNChannels(), imp.getNSlices(), imp.getNFrames(), 32);
     out.setCalibration(imp.getCalibration());
 
-    if (imp.getImageStackSize() == 1) {
+    if (imp.getStackSize() == 1) {
+      job.progressMonitor().count(1);
       out.setProcessor(imp.getProcessor().duplicate().convertToFloat());
-      job.setTaskProgress(1, 1);
       return out;
     }
 
     for (int i = 1; i <= imp.getImageStackSize(); i++) {
       if (job.interrupted())
           throw new InterruptedException("Aborted by user");
+      job.progressMonitor().count(1);
       out.getStack().setProcessor(
           imp.getStack().getProcessor(i).duplicate().convertToFloat(), i);
-      job.setTaskProgress(i, imp.getImageStackSize());
     }
     return out;
   }
 
 /*======================================================================*/
 /*!
- *   If the model definition of the given UnetJob requires 2-D data, both
+ *   If the model definition of the given Job requires 2-D data, both
  *   time and z will be interpreted as time. The stack layout is changed
  *   accordingly. For 3-D models or if the image only contains one slice
  *   per time point, this method is a noop and a reference to
  *   the input ImagePlus is returned
  *
  *   \param imp The ImagePlus to rearrange
- *   \param job The UnetJob containing the model definition. Task progress
- *     will be reported via this UnetJob.
+ *   \param job The Job containing the model definition. Task progress
+ *     will be reported via this Job.
  *
  *   \return The newly created ImagePlus or if no conversion was required
  *     a reference to imp
  */
 /*======================================================================*/
-  public static ImagePlus fixStackLayout(ImagePlus imp, UnetJob job)
+  public static ImagePlus fixStackLayout(ImagePlus imp, Job job)
       throws InterruptedException {
-    if (job.model().elementSizeUm.length == 3 || imp.getNSlices() == 1)
-        return imp;
+    if (job.model().nDims() == 3 || imp.getNSlices() == 1) return imp;
     if (!IJ.showMessageWithCancel(
             "2-D model selected", "The selected model " +
             "requires 2-D Input.\n" +
@@ -404,20 +414,20 @@ public class UnetTools {
     Calibration cal = imp.getCalibration().copy();
     cal.pixelDepth = 1;
     out.setCalibration(cal);
-    job.setTaskProgress(
-        "Fixing stack layout", 0, imp.getImageStackSize());
+    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
+    job.progressMonitor().count("Fixing stack layout", 0);
     for (int i = 1; i <= imp.getImageStackSize(); ++i) {
       if (job.interrupted())
           throw new InterruptedException("Aborted by user");
+      job.progressMonitor().count(1);
       out.getStack().setProcessor(
           imp.getStack().getProcessor(i).duplicate(), i);
-      job.setTaskProgress(i, imp.getImageStackSize());
     }
     return out;
   }
 
   public static ImagePlus rescaleXY(
-      ImagePlus imp, int interpolationMethod, UnetJob job)
+      ImagePlus imp, int interpolationMethod, Job job)
       throws InterruptedException {
     Calibration cal = imp.getCalibration().copy();
     int offs = (job.model().elementSizeUm.length == 2) ? 0 : 1;
@@ -429,8 +439,8 @@ public class UnetTools {
     scales[1] = (float)(imp.getCalibration().pixelWidth / cal.pixelWidth);
     if (scales[0] == 1 && scales[1] == 1) return imp;
 
-    job.setTaskProgress(
-        "Rescaling hyperstack (xy)", 0, imp.getImageStackSize());
+    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
+    job.progressMonitor().count("Rescaling hyperstack (xy)", 0);
     IJ.log("Rescaling Hyperstack (xy) from [" +
            imp.getCalibration().pixelDepth + ", " +
            imp.getCalibration().pixelHeight + ", " +
@@ -453,12 +463,13 @@ public class UnetTools {
     for (int i = 0; i < imp.getImageStackSize(); ++i) {
       if (job.interrupted())
           throw new InterruptedException("Aborted by user");
+      job.progressMonitor().count(1);
       ImageProcessor ipIn =
           (imp.getImageStackSize() == 1) ? imp.getProcessor() :
-          imp.getStack().getProcessor(i);
+          imp.getStack().getProcessor(i + 1);
       ImageProcessor ipOut =
           (imp.getImageStackSize() == 1) ? out.getProcessor() :
-          out.getStack().getProcessor(i);
+          out.getStack().getProcessor(i + 1);
       for (int y = 0; y < out.getHeight(); ++y) {
         float yRd = y / scales[0];
         int yBase = (int)Math.floor(yRd);
@@ -485,7 +496,7 @@ public class UnetTools {
   }
 
   public static ImagePlus rescaleZ(
-      ImagePlus imp, int interpolationMethod, UnetJob job)
+      ImagePlus imp, int interpolationMethod, Job job)
       throws InterruptedException {
     if (job.model().elementSizeUm.length == 2 || imp.getNSlices() == 1)
         return imp;
@@ -501,8 +512,8 @@ public class UnetTools {
         imp.getWidth(), imp.getHeight(), imp.getNChannels(),
         (int)(imp.getNSlices() * scale), imp.getNFrames(), 32);
     out.setCalibration(cal);
-    job.setTaskProgress(
-        "Rescaling hyperstack (z)", 0, out.getImageStackSize());
+    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
+    job.progressMonitor().count("Rescaling hyperstack (z)", 0);
     IJ.log("Rescaling Hyperstack (z) from [" +
            imp.getCalibration().pixelDepth + ", " +
            imp.getCalibration().pixelHeight + ", " +
@@ -532,6 +543,7 @@ public class UnetTools {
           for (int c = 1; c <= out.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");
+            job.progressMonitor().count(1);
             ImageProcessor ip = imp.getStack().getProcessor(
                 imp.getStackIndex(c, zIn, t)).duplicate();
             if (lambda != 0) {
@@ -546,8 +558,6 @@ public class UnetTools {
               }
             }
             out.getStack().setProcessor(ip, out.getStackIndex(c, z, t));
-            job.setTaskProgress(
-                out.getStackIndex(c, z, t), out.getImageStackSize());
           }
         }
         else {
@@ -555,12 +565,11 @@ public class UnetTools {
           for (int c = 1; c <= out.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");
+            job.progressMonitor().count(1);
             out.getStack().setProcessor(
                 imp.getStack().getProcessor(
                     imp.getStackIndex(c, zIn, t)).duplicate(),
                 out.getStackIndex(c, z, t));
-            job.setTaskProgress(
-                out.getStackIndex(c, z, t), out.getImageStackSize());
           }
         }
       }
@@ -568,12 +577,17 @@ public class UnetTools {
     return out;
   }
 
-  public static ImagePlus normalizeValues(ImagePlus imp, UnetJob job)
+  public static ImagePlus normalizeValues(ImagePlus imp, Job job)
       throws InterruptedException {
     if (job.model().normalizationType == 0) return imp;
     ImagePlus out = imp;
     float[] scales = new float[imp.getNFrames()];
     float[] offsets = new float[imp.getNFrames()];
+
+    long nSteps = 2 * imp.getStackSize();
+    if (job.model().normalizationType == 2) nSteps += imp.getStackSize();
+    job.progressMonitor().init(0, "", "", nSteps);
+
     for (int t = 1; t <= imp.getNFrames(); ++t) {
       switch (job.model().normalizationType) {
       case 1: { // MIN/MAX
@@ -583,10 +597,9 @@ public class UnetTools {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");
-            job.setTaskProgress(
+            job.progressMonitor().count(
                 "Computing data min/max (t=" + t + ", z=" + z +
-                ", c=" + c + ")", imp.getStackIndex(c, z, t),
-                imp.getImageStackSize());
+                ", c=" + c + ")", 1);
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i) {
@@ -605,10 +618,9 @@ public class UnetTools {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");
-            job.setTaskProgress(
+            job.progressMonitor().count(
                 "Computing data mean (t=" + t + ", z=" + z +
-                ", c=" + c + ")", imp.getStackIndex(c, z, t),
-                imp.getImageStackSize());
+                ", c=" + c + ")", 1);
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
@@ -622,10 +634,9 @@ public class UnetTools {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");
-            job.setTaskProgress(
+            job.progressMonitor().count(
                 "Computing data standard deviation (t=" + t + ", z=" + z +
-                ", c=" + c + ")", imp.getStackIndex(c, z, t),
-                imp.getImageStackSize());
+                ", c=" + c + ")", 1);
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
@@ -646,10 +657,9 @@ public class UnetTools {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");
-            job.setTaskProgress(
+            job.progressMonitor().count(
                 "Computing data norm (t=" + t + ", z=" + z +
-                ", c=" + c + ")", imp.getStackIndex(c, z, t),
-                imp.getImageStackSize());
+                ", c=" + c + ")", 1);
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
@@ -678,31 +688,34 @@ public class UnetTools {
 
         // Special treatment for single image
         if (imp.getImageStackSize() == 1) {
+          job.progressMonitor().count("Normalizing", 1);
           ImageProcessor ip = imp.getProcessor().duplicate();
           ip.add(offsets[t - 1]);
           ip.multiply(scales[t - 1]);
           out.setProcessor(ip);
-          job.setTaskProgress(1, 1);
           return out;
         }
 
-        for (int t2 = 1; t2 <= t; ++t2) {
-          for (int z = 1; z <= imp.getNSlices(); ++z) {
-            for (int c = 1; c <= imp.getNChannels(); ++c) {
-              ImageProcessor ip =
-                  imp.getStack().getProcessor(
-                      imp.getStackIndex(c, z, t2)).duplicate();
-              ip.add(offsets[t2 - 1]);
-              ip.multiply(scales[t2 - 1]);
-              out.getStack().setProcessor(
-                  ip, out.getStackIndex(c, z, t2));
-            }
+        for (int z = 1; z <= imp.getNSlices(); ++z) {
+          for (int c = 1; c <= imp.getNChannels(); ++c) {
+            job.progressMonitor().count(
+                "Normalizing (t=" + t + ", z=" + z +
+                ", c=" + c + ")", 1);
+            ImageProcessor ip =
+                imp.getStack().getProcessor(
+                    imp.getStackIndex(c, z, t)).duplicate();
+            ip.add(offsets[t - 1]);
+            ip.multiply(scales[t - 1]);
+            out.getStack().setProcessor(ip, out.getStackIndex(c, z, t));
           }
         }
       }
       else {
         for (int z = 1; z <= imp.getNSlices(); ++z) {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
+            job.progressMonitor().count(
+                "Normalizing (t=" + t + ", z=" + z +
+                ", c=" + c + ")", 1);
             ImageProcessor ip =
                 imp.getStack().getProcessor(
                     imp.getStackIndex(c, z, t)).duplicate();
@@ -730,9 +743,9 @@ public class UnetTools {
  *   \param imp The ImagePlus to convert to unet model compliant format
  *   \param job The unet job asking for the resize operation. Its model
  *     will be queried for the required output format. Task progress will
- *     be reported via the UnetJob.
+ *     be reported via the Job.
  *
- *   \exception InterruptedException The user can quit this operation
+ *   \exception InterruptedException The user can abort this operation
  *     resulting in this error
  *
  *   \return The unet compatible ImagePlus correponding to the input
@@ -741,7 +754,7 @@ public class UnetTools {
  */
 /*======================================================================*/
   public static ImagePlus convertToUnetFormat(
-      ImagePlus imp, UnetJob job, boolean keepOriginal, boolean show)
+      ImagePlus imp, Job job, boolean keepOriginal, boolean show)
       throws InterruptedException {
     ImagePlus out = normalizeValues(
         rescaleZ(
@@ -765,99 +778,17 @@ public class UnetTools {
     return out;
   }
 
-  private static final float INF = 1e20f;
-
-  private static float[] dt(float[] f, int n) {
-    float[] d = new float[n];
-    int[] v = new int[n];
-    float[] z = new float[n + 1];
-    int k = 0;
-    v[0] = 0;
-    z[0] = -INF;
-    z[1] = INF;
-    for (int q = 1; q <= n - 1; q++) {
-      float s  = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) /
-          (2 * q - 2 * v[k]);
-      while (s <= z[k]) {
-        k--;
-        s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
-      }
-      k++;
-      v[k] = q;
-      z[k] = s;
-      z[k+1] = INF;
-    }
-
-    k = 0;
-    for (int q = 0; q <= n - 1; q++) {
-      while (z[k+1] < q) k++;
-      d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
-    }
-
-    return d;
-  }
-
-  private static void dt(ImageProcessor ip) {
-    int width = ip.getWidth();
-    int height = ip.getHeight();
-    float[] f = new float[Math.max(width, height)];
-
-    // transform along columns
-    for (int x = 0; x < width; x++) {
-      for (int y = 0; y < height; y++) f[y] = ip.getf(x, y);
-      float[] d = dt(f, height);
-      for (int y = 0; y < height; y++) ip.setf(x, y, d[y]);
-    }
-
-    // transform along rows
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) f[x] = ip.getf(x, y);
-      float[] d = dt(f, width);
-      for (int x = 0; x < width; x++) ip.setf(x, y, d[x]);
-    }
-  }
-
-  private static void distanceTransform(ImageProcessor ip, float fg) {
-    for (int y = 0; y < ip.getHeight(); y++) {
-      for (int x = 0; x < ip.getWidth(); x++) {
-        if (ip.getf(x, y) == fg) ip.setf(x, y, 0);
-        else ip.setf(x, y, INF);
-      }
-    }
-    dt(ip);
-    for (int y = 0; y < ip.getHeight(); y++) {
-      for (int x = 0; x < ip.getWidth(); x++) {
-        ip.setf(x, y, (float)Math.sqrt(ip.getf(x, y)));
-      }
-    }
-  }
-
-  private static void distanceTransformBG(ImageProcessor ip, float fg) {
-    for (int y = 0; y < ip.getHeight(); y++) {
-      for (int x = 0; x < ip.getWidth(); x++) {
-        if (ip.getf(x, y) != fg) ip.setf(x, y, 0);
-        else ip.setf(x, y, INF);
-      }
-    }
-    dt(ip);
-    for (int y = 0; y < ip.getHeight(); y++) {
-      for (int x = 0; x < ip.getWidth(); x++) {
-        ip.setf(x, y, (float)Math.sqrt(ip.getf(x, y)));
-      }
-    }
-  }
-
-
 /*======================================================================*/
 /*!
  *   Extracts annotations stored as overlay from the given ImagePlus and
- *   generates corresponding labels and weights. Annotation color is used
- *   to distinguish the different classes, where magenta indicates ignore
- *   regions. Finetuning only works for 2D models at the moment because
- *   the annotation tools of ImageJ are restricted to 2D.
+ *   generates corresponding labels and weights. Annotation names indicate
+ *   class labels if at least two names are identical. If ROI names contain
+ *   ignore, they will be treated as ignore regions. Point ROIs will be
+ *   treated as detection ROIs and instead of single points small disks are
+ *   rendered as labels. Finetuning only works for 2D models at the moment.
  *
  *   \param imp The ImagePlus to generate labels and weights for
- *   \param job Task progress will be reported via this UnetJob.
+ *   \param job Task progress will be reported via this Job.
  *
  *   \exception InterruptedException The user can quit this operation
  *     resulting in this error
@@ -868,14 +799,22 @@ public class UnetTools {
  */
 /*======================================================================*/
   public static ImagePlus[] convertAnnotationsToLabelsAndWeights(
-      ImagePlus imp, Vector<String> classes, UnetJob job)
+      ImagePlus imp, Vector<String> classes, Job job)
       throws InterruptedException, NotImplementedException {
+
+    int nDims = job.model().nDims();
+    if (nDims != 2) throw new NotImplementedException(
+        "Sorry, " + nDims + "D finetuning is not implemented yet");
 
     float foregroundBackgroundRatio = job.model().foregroundBackgroundRatio;
     float sigma1_px = job.model().sigma1Um / job.model().elementSizeUm[1];
     float borderWeightFactor = job.model().borderWeightFactor;
     float sigma2_px = job.model().borderWeightSigmaUm /
         job.model().elementSizeUm[1];
+    double diskRadiusXPx = 2.0 * job.model().elementSizeUm[nDims - 1] /
+        imp.getCalibration().pixelWidth;
+    double diskRadiusYPx = 2.0 * job.model().elementSizeUm[nDims - 2] /
+        imp.getCalibration().pixelHeight;
 
     ImagePlus[] blobs = new ImagePlus[3];
 
@@ -890,53 +829,33 @@ public class UnetTools {
     blobs[0] = IJ.createHyperStack(
         imp.getTitle() + " - labels", W, H, 1, Z, T, 32);
     blobs[0].setCalibration(imp.getCalibration().copy());
-    for (int t = 0; t < T; t++) {
-      for (int z = 0; z < T; z++) {
-        ImageStack stack = blobs[0].getStack();
-        int stackIndex = blobs[0].getStackIndex(1, z + 1, t + 1);
-        ImageProcessor ip = stack.getProcessor(stackIndex);
-        ip.setValue(0.0);
-        ip.fill();
-      }
-    }
-
-    // Initialize the weights blob with 0.5, which indicates that no weight
-    // is assigned yet. When computing extra weights all regions with positive
-    // weight will be skipped!
     blobs[1] = IJ.createHyperStack(
         imp.getTitle() + " - weights", W, H, 1, Z, T, 32);
     blobs[1].setCalibration(imp.getCalibration().copy());
-    for (int t = 0; t < T; t++) {
-      for (int z = 0; z < T; z++) {
-        ImageStack stack = blobs[1].getStack();
-        int stackIndex = blobs[1].getStackIndex(1, z + 1, t + 1);
-        ImageProcessor ip = stack.getProcessor(stackIndex);
-        ip.setValue(-1.0);
-        ip.fill();
-      }
-    }
-
     blobs[2] = IJ.createHyperStack(
         imp.getTitle() + " - sample pdf", W, H, 1, Z, T, 32);
     blobs[2].setCalibration(imp.getCalibration().copy());
-    for (int t = 0; t < T; t++) {
-      for (int z = 0; z < T; z++) {
-        ImageStack stack = blobs[2].getStack();
-        int stackIndex = blobs[2].getStackIndex(1, z + 1, t + 1);
-        ImageProcessor ip = stack.getProcessor(stackIndex);
-        ip.setValue(foregroundBackgroundRatio);
-        ip.fill();
-      }
-    }
-
     ImagePlus instanceLabels = IJ.createHyperStack(
         imp.getTitle() + " - instance labels", W, H, 1, Z, T, 32);
     instanceLabels.setCalibration(imp.getCalibration().copy());
-    for (int t = 0; t < T; t++) {
-      for (int z = 0; z < T; z++) {
-        ImageStack stack = instanceLabels.getStack();
-        int stackIndex = instanceLabels.getStackIndex(1, z + 1, t + 1);
-        ImageProcessor ip = stack.getProcessor(stackIndex);
+
+    // Initialize output blobs
+    // Initialize the weights blob with -1, which indicates that no weight
+    // is assigned yet. When computing extra weights all regions with positive
+    // weight will be skipped!
+    for (int t = 1; t <= T; t++) {
+      for (int z = 1; z <= Z; z++) {
+        int stackIdx = blobs[0].getStackIndex(1, z, t);
+        ImageProcessor ip = blobs[0].getStack().getProcessor(stackIdx);
+        ip.setValue(0.0);
+        ip.fill();
+        ip = blobs[1].getStack().getProcessor(stackIdx);
+        ip.setValue(-1.0);
+        ip.fill();
+        ip = blobs[2].getStack().getProcessor(stackIdx);
+        ip.setValue(foregroundBackgroundRatio);
+        ip.fill();
+        ip = instanceLabels.getStack().getProcessor(stackIdx);
         ip.setValue(0.0);
         ip.fill();
       }
@@ -946,7 +865,35 @@ public class UnetTools {
     int[] nObjects = new int[T];
     int nObjectsTotal = 0;
     Arrays.fill(nObjects, 0);
+
+    // First pass: Set ignore disks for point ROIs
     for (Roi roi: rois) {
+      if (job.interrupted())
+          throw new InterruptedException("Aborted by user");
+
+      if (!(roi instanceof PointRoi)) continue;
+      int z = roi.getZPosition();
+      int t = roi.getTPosition();
+      int stackIndex = blobs[0].getStackIndex(1, z + 1, t + 1);
+      ImageProcessor ipWeights = blobs[1].getStack().getProcessor(stackIndex);
+      ImageProcessor ipPdf = blobs[2].getStack().getProcessor(stackIndex);
+      for (Point point: roi.getContainedPoints()) {
+        OvalRoi disk = new OvalRoi(
+            point.x - 2 * diskRadiusXPx, point.y - 2 * diskRadiusYPx,
+            4 * diskRadiusXPx + 1, 4 * diskRadiusYPx + 1);
+        ipWeights.setValue(0.0);
+        ipWeights.fill(disk);
+        ipPdf.setValue(0.0);
+        ipPdf.fill(disk);
+      }
+    }
+
+    // Second pass: Create labels, instancelabels, weights and pdf
+    for (Roi roi: rois) {
+
+      if (job.interrupted())
+          throw new InterruptedException("Aborted by user");
+
       int z = roi.getZPosition();
       int t = roi.getTPosition();
       int stackIndex = blobs[0].getStackIndex(1, z + 1, t + 1);
@@ -963,23 +910,41 @@ public class UnetTools {
         ipPdf.fill(roi);
       }
       else {
-        String label = roi.getName();
-        nObjects[t]++;
-        nObjectsTotal++;
-        ipInstanceLabels.setValue(nObjects[t]);
-        ipInstanceLabels.fill(roi);
+        String label = (roi.getName() != null) ? roi.getName() : "foreground";
+        int labelIdx = 1;
         if (classes != null) {
-          int labelIdx = 1;
           for (; labelIdx < classes.size() &&
                    !classes.get(labelIdx).equals(label); labelIdx++);
-          ipLabels.setValue(labelIdx);
         }
-        else ipLabels.setValue(1.0);
-        ipLabels.fill(roi);
-        ipWeights.setValue(1.0);
-        ipWeights.fill(roi);
-        ipPdf.setValue(1.0);
-        ipPdf.fill(roi);
+        ipLabels.setValue(labelIdx);
+
+        if (roi instanceof PointRoi) {
+          for (Point point: roi.getContainedPoints()) {
+            OvalRoi disk = new OvalRoi(
+                point.x - diskRadiusXPx, point.y - diskRadiusYPx,
+                2 * diskRadiusXPx + 1, 2 * diskRadiusYPx + 1);
+            nObjects[t]++;
+            nObjectsTotal++;
+            ipInstanceLabels.setValue(nObjects[t]);
+            ipInstanceLabels.fill(disk);
+            ipLabels.fill(disk);
+            ipWeights.setValue(1.0);
+            ipWeights.fill(disk);
+            ipPdf.setValue(1.0);
+            ipPdf.fill(disk);
+          }
+        }
+        else {
+          nObjects[t]++;
+          nObjectsTotal++;
+          ipInstanceLabels.setValue(nObjects[t]);
+          ipInstanceLabels.fill(roi);
+          ipLabels.fill(roi);
+          ipWeights.setValue(1.0);
+          ipWeights.fill(roi);
+          ipPdf.setValue(1.0);
+          ipPdf.fill(roi);
+        }
       }
     }
 
@@ -999,16 +964,22 @@ public class UnetTools {
     W = blobs[0].getWidth();
     H = blobs[0].getHeight();
 
+    // Here labels and instance labels are not separated by background,
+    // weights are -1 for background pixels, sample pdf is ready except for
+    // gaps between cells
+
     int objIdx = 1;
 
-    if (Z == 1) {
+    job.progressMonitor().init(0, "", "", nObjectsTotal);
+
+    if (nDims == 2) {
 
       // Piece of cake, just process slicewise :-D
 
-      // Create weighted background gaps
-      for (int t = 0; t < T; ++t) {
+      for (int t = 1; t <= T; ++t) {
+
         ImageProcessor ip, wp, w2p, lp;
-        if (blobs[0].getStack().getSize() == 1) {
+        if (blobs[0].getStackSize() == 1) {
           lp = blobs[0].getProcessor();
           wp = blobs[1].getProcessor();
           w2p = blobs[2].getProcessor();
@@ -1027,9 +998,9 @@ public class UnetTools {
             float instanceLabel = ip.getf(x, y);
             if (instanceLabel == 0 || wp.getf(x, y) == 0.0f) continue;
             float classLabel = lp.getf(x, y);
-            for (int dy = -1; dy <= 0; dy++) {
+            for (int dy = -1; dy <= 0 && instanceLabel != 0; dy++) {
               if (y + dy < 0 || y + dy >= H) continue;
-              for (int dx = -1; dx <= 1; dx++) {
+              for (int dx = -1; dx <= 1 && instanceLabel != 0; dx++) {
                 if ((dy == 0 && dx >= 0) || x + dx < 0 || x + dx >= W)
                     continue;
                 float nbInstanceLabel = ip.getf(x + dx, y + dy);
@@ -1039,8 +1010,7 @@ public class UnetTools {
                     classLabel != nbClassLabel) continue;
                 instanceLabel = 0;
                 ip.setf(x, y, instanceLabel);
-                classLabel = 0;
-                lp.setf(x, y, classLabel);
+                lp.setf(x, y, 0);
                 // Mark as "pixel needs extraweight computation"
                 wp.setf(x, y, -1.0f);
                 w2p.setf(x, y, foregroundBackgroundRatio);
@@ -1050,41 +1020,42 @@ public class UnetTools {
         }
 
         // Compute extra weights
-        ImageProcessor min1Dist = ip.duplicate();
-        min1Dist.setValue(INF);
-        min1Dist.fill();
-        ImageProcessor min2Dist = ip.duplicate();
-        min2Dist.setValue(INF);
-        min2Dist.fill();
-        for (int i = 1; i <= nObjects[t]; i++, objIdx++) {
-          job.setTaskProgress(
-              "Processing slice " + (t + 1) + " / " + T + ": object " + i +
-              " / " + nObjects[t], objIdx, nObjectsTotal);
-          ImageProcessor d = ip.duplicate();
-          ImageProcessor newMin = ip.duplicate();
-          distanceTransform(d, i);
-          for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-              float min1dist = min1Dist.getf(x, y);
-              float min2dist = Math.min(min2Dist.getf(x, y), d.getf(x, y));
-              min1Dist.setf(x, y, Math.min(min1dist, min2dist));
-              min2Dist.setf(x, y, Math.max(min1dist, min2dist));
-            }
+        ImageProcessor impMin1Dist = ip.duplicate();
+        impMin1Dist.setValue(DistanceTransform.BG_VALUE);
+        impMin1Dist.fill();
+        float[] min1Dist = (float[])impMin1Dist.getPixels();
+        ImageProcessor impMin2Dist = ip.duplicate();
+        impMin2Dist.setValue(DistanceTransform.BG_VALUE);
+        impMin2Dist.fill();
+        float[] min2Dist = (float[])impMin2Dist.getPixels();
+        for (int i = 1; i <= nObjects[t - 1]; i++, objIdx++) {
+          if (job.interrupted())
+              throw new InterruptedException("Aborted by user");
+          job.progressMonitor().count(
+              "Processing slice " + t + " / " + T + ": object " + i +
+              " / " + nObjects[t], 1);
+          float[] d = (float[])DistanceTransform.getDistanceToForegroundPixels(
+              (FloatProcessor)ip.duplicate(), i).getPixels();
+          for (int j = 0; j < H * W; j++) {
+            float min1dist = min1Dist[j];
+            float min2dist = Math.min(min2Dist[j], d[j]);
+            min1Dist[j] = Math.min(min1dist, min2dist);
+            min2Dist[j] = Math.max(min1dist, min2dist);
           }
         }
+
         float va = 1 - foregroundBackgroundRatio;
-        for (int y = 0; y < H; y++) {
-          for (int x = 0; x < W; x++) {
-            if (wp.getf(x, y) >= 0.0f) continue;
-            float d1 = min1Dist.getf(x, y);
-            float d2 = min2Dist.getf(x, y);
-            float wa = (float)Math.exp(
-                -(d1 * d1) / (2 * sigma1_px * sigma1_px));
-            float we = (float)Math.exp(
-                -(d1 + d2) * (d1 + d2) / (2 * sigma2_px * sigma2_px));
-            wp.setf(x, y, borderWeightFactor * we + va * wa +
-                    foregroundBackgroundRatio);
-          }
+        float[] w = (float[])wp.getPixels();
+        for (int i = 0; i < W * H; ++i) {
+          if (w[i] >= 0.0f) continue;
+          float d1 = min1Dist[i];
+          float d2 = min2Dist[i];
+          float wa = (float)Math.exp(
+              -(d1 * d1) / (2 * sigma1_px * sigma1_px));
+          float we = (float)Math.exp(
+              -(d1 + d2) * (d1 + d2) / (2 * sigma2_px * sigma2_px));
+          w[i] = borderWeightFactor * we + va * wa +
+              foregroundBackgroundRatio;
         }
       }
     }
@@ -1100,7 +1071,7 @@ public class UnetTools {
   }
 
   private static void save2DBlob(
-      ImagePlus imp, IHDF5Writer writer, String dsName, UnetJob job)
+      ImagePlus imp, IHDF5Writer writer, String dsName, Job job)
         throws InterruptedException {
     int T = imp.getNFrames();
     int Z = imp.getNSlices();
@@ -1112,6 +1083,8 @@ public class UnetTools {
     int[] blockDims = { 1, 1, H, W };
     long[] blockIdx = { 0, 0, 0, 0 };
 
+    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
+
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
 
@@ -1121,7 +1094,10 @@ public class UnetTools {
         for (int c = 0; c < C; ++c) {
           if (job.interrupted())
               throw new InterruptedException("Aborted by user");
-          blockIdx[1] = c;
+          job.progressMonitor().count(
+              "Saving " + dsName + " t=" + t + ", z=" + z + ", c=" + c, 1);
+
+           blockIdx[1] = c;
 
           // Create HDF5 Multi-dimensional Array (memory space)
           MDFloatArray data = new MDFloatArray(blockDims);
@@ -1133,11 +1109,7 @@ public class UnetTools {
 
           System.arraycopy(stack.getPixels(stackIndex), 0, dataFlat, 0, H * W);
 
-          job.setTaskProgress(
-              "Saving t=" + t + ", z=" + z + ", c=" + c,
-              imp.getStackIndex(c, z, t), imp.getImageStackSize());
-
-          // save it
+         // save it
           writer.float32().writeMDArrayBlock(dsName, data, blockIdx);
         }
       }
@@ -1145,7 +1117,7 @@ public class UnetTools {
   }
 
   private static void save3DBlob(
-      ImagePlus imp, IHDF5Writer writer, String dsName, UnetJob job)
+      ImagePlus imp, IHDF5Writer writer, String dsName, Job job)
         throws InterruptedException {
     int T = imp.getNFrames();
     int Z = imp.getNSlices();
@@ -1155,6 +1127,8 @@ public class UnetTools {
     long[] dims = { T, C, Z, H, W };
     int[] blockDims = { 1, 1, 1, H, W };
     long[] blockIdx = { 0, 0, 0, 0, 0 };
+
+    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
 
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
@@ -1178,9 +1152,8 @@ public class UnetTools {
 
           System.arraycopy(stack.getPixels(stackIndex), 0, dataFlat, 0, H * W);
 
-          job.setTaskProgress(
-              "Saving t=" + t + ", z=" + z + ", c=" + c,
-              imp.getStackIndex(c, z, t), imp.getImageStackSize());
+          job.progressMonitor().count(
+              "Saving t=" + t + ", z=" + z + ", c=" + c, 1);
 
           // save it
           writer.float32().writeMDArrayBlock(dsName, data, blockIdx);
@@ -1190,14 +1163,14 @@ public class UnetTools {
   }
 
   public static ImagePlus saveHDF5Blob(
-      ImagePlus imp, File outFile, UnetJob job, boolean keepOriginal,
+      ImagePlus imp, File outFile, Job job, boolean keepOriginal,
       boolean show)
       throws IOException, InterruptedException, NotImplementedException {
     return saveHDF5Blob(imp, null, outFile, job, keepOriginal, show);
   }
 
   public static ImagePlus saveHDF5Blob(
-      ImagePlus imp, Vector<String> classes, File outFile, UnetJob job,
+      ImagePlus imp, Vector<String> classes, File outFile, Job job,
       boolean keepOriginal, boolean show)
       throws IOException, InterruptedException, NotImplementedException {
     if (job == null) {
@@ -1230,15 +1203,14 @@ public class UnetTools {
     for (int i = createdFolders.size() - 1; i >= 0; --i) {
       if (job.interrupted())
           throw new InterruptedException("Aborted by user");
-      job.setTaskProgress(
-          "Creating folder '" + createdFolders.get(i) + "'", 0, 0);
+      job.progressMonitor().count(
+          "Creating folder '" + createdFolders.get(i) + "'", 0);
       IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
       if (!createdFolders.get(i).mkdir())
           throw new IOException(
               "Could not create folder '" +
               createdFolders.get(i).getAbsolutePath() + "'");
       createdFolders.get(i).deleteOnExit();
-      job.setTaskProgress(1, 1);
     }
 
     // syncMode: Always wait on close and flush till all data is written!
@@ -1253,7 +1225,7 @@ public class UnetTools {
         save2DBlob(impScaled, writer, dsName, job);
     else save3DBlob(impScaled, writer, dsName, job);
 
-    if (job instanceof UnetFinetuneJob && imp.getOverlay() != null) {
+    if (job instanceof FinetuneJob && imp.getOverlay() != null) {
       ImagePlus[] blobs =
           convertAnnotationsToLabelsAndWeights(imp, classes, job);
 
@@ -1270,7 +1242,6 @@ public class UnetTools {
     }
 
     writer.file().close();
-    job.setTaskProgress(1, 1);
     IJ.log("ImagePlus converted to caffe blob and saved to '" +
            outFile.getAbsolutePath() + "'");
 
@@ -1278,7 +1249,7 @@ public class UnetTools {
   }
 
   public static File[] saveHDF5TiledBlob(
-      ImagePlus imp, Vector<String> classes, String fileNameStub, UnetJob job)
+      ImagePlus imp, Vector<String> classes, String fileNameStub, Job job)
       throws IOException, InterruptedException, NotImplementedException {
     if (job == null) {
       IJ.error("Cannot save HDF5 blob without associated unet model");
@@ -1298,7 +1269,7 @@ public class UnetTools {
 
     ImagePlus data = convertToUnetFormat(imp, job, true, false);
     ImagePlus[] annotations = null;
-    if (job instanceof UnetFinetuneJob && imp.getOverlay() != null)
+    if (job instanceof FinetuneJob && imp.getOverlay() != null)
         annotations = convertAnnotationsToLabelsAndWeights(imp, classes, job);
 
     int T = data.getNFrames();
@@ -1347,15 +1318,14 @@ public class UnetTools {
       for (int i = createdFolders.size() - 1; i >= 0; --i) {
         if (job.interrupted())
             throw new InterruptedException("Aborted by user");
-        job.setTaskProgress(
-            "Creating folder '" + createdFolders.get(i) + "'", 0, 0);
+        job.progressMonitor().count(
+            "Creating folder '" + createdFolders.get(i) + "'", 0);
         IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
         if (!createdFolders.get(i).mkdir())
             throw new IOException(
                 "Could not create folder '" +
                 createdFolders.get(i).getAbsolutePath() + "'");
         createdFolders.get(i).deleteOnExit();
-        job.setTaskProgress(1, 1);
       }
     }
 
@@ -1369,14 +1339,15 @@ public class UnetTools {
         imp.getTitle() + " - weightsTile",
         outShape[1], outShape[0], 1, Z, T, 32);
 
+    job.progressMonitor().init(0, "", "", nTiles);
+
     int tileIdx = 0;
     if (outShape.length == 2) {
       for (int yIdx = 0; yIdx < tiling[0]; yIdx++) {
         for (int xIdx = 0; xIdx < tiling[1]; xIdx++, tileIdx++) {
 
-          job.setTaskProgress(
-              "Processing tile (" + yIdx + "," + xIdx + ")",
-              tileIdx, nTiles);
+          job.progressMonitor().count(
+              "Processing tile (" + yIdx + "," + xIdx + ")", 1);
 
           for (int t = 0; t < T; t++) {
 
@@ -1464,21 +1435,17 @@ public class UnetTools {
       throw new NotImplementedException("3D not yet implemented");
     }
 
-    job.setTaskProgress(1, 1);
     return outfiles;
   }
 
-  public static ProcessResult execute(Vector<String> command, UnetJob job)
+  public static ProcessResult execute(Vector<String> command, Job job)
       throws IOException, InterruptedException {
     if (command == null || command.size() == 0)
-        throw new IOException(
-            "UnetTools.execute() Received empty command");
+        throw new IOException("Tools.execute() Received empty command");
     String cmdString = command.get(0);
     for (int i = 1; i < command.size(); ++i)
         cmdString += " " + command.get(i);
-    if (job != null) job.setTaskProgress(
-        "Executing '" + cmdString + "'", 0, 0);
-    else IJ.showStatus("Executing '" + cmdString + "'");
+    job.progressMonitor().count("Executing '" + cmdString + "'", 0);
     IJ.log("$ " + cmdString);
 
     Process p = new ProcessBuilder(command).start();
@@ -1503,7 +1470,6 @@ public class UnetTools {
         while (stdOutput.ready())
             res.cout += stdOutput.readLine() + "\n";
         while (stdError.ready()) res.cerr += stdError.readLine() + "\n";
-        if (job != null) job.setTaskProgress(1, 1);
         return res;
       }
       catch (IllegalThreadStateException e) {}
@@ -1512,12 +1478,10 @@ public class UnetTools {
   }
 
   public static ProcessResult execute(
-      String command, Session session, UnetJob job)
+      String command, Session session, Job job)
       throws JSchException, InterruptedException, IOException {
-    if (job != null)
-        job.setTaskProgress(
-            "Executing remote command '" + command + "'", 0, 0);
-    else IJ.showStatus("Executing remote command '" + command + "'");
+    job.progressMonitor().count(
+        "Executing remote command '" + command + "'", 0);
     IJ.log(session.getUserName() + "@" + session.getHost() +
            "$ " + command);
 
@@ -1546,7 +1510,6 @@ public class UnetTools {
       if (channel.isClosed()) {
         if (stdOutput.available() > 0 || stdError.available() > 0) continue;
         res.exitStatus = channel.getExitStatus();
-        if (job != null) job.setTaskProgress(1, 1);
         return res;
       }
       Thread.sleep(100);
@@ -1554,151 +1517,337 @@ public class UnetTools {
   }
 
   public static void loadSegmentationToImagePlus(
-      File file, UnetSegmentationJob job, boolean outputScores)
-      throws HDF5Exception, Exception {
+      File file, SegmentationJob job, boolean outputScores,
+      boolean outputSoftmaxScores)
+      throws HDF5Exception, IOException {
+    loadSegmentationToImagePlus(
+        file, job, outputScores, outputSoftmaxScores, false);
+  }
+
+  public static void loadSegmentationToImagePlus(
+      File file, SegmentationJob job, boolean outputScores,
+      boolean outputSoftmaxScores, boolean generateMarkers)
+      throws HDF5Exception, IOException {
+
+    job.progressMonitor().reset();
+    job.progressMonitor().count("Creating visualization", 0);
+
+    boolean computeSoftmaxScores = outputSoftmaxScores || generateMarkers;
+
     IHDF5Reader reader =
         HDF5Factory.configureForReading(file.getAbsolutePath()).reader();
     List<String> outputs = reader.getGroupMembers("/");
-    for (String dsName : outputs) {
-      IJ.showStatus("Creating visualization for output " + dsName);
 
+    int dsIdx = 1;
+    for (String dsName : outputs) {
+
+      String title = job.imageName() + " - " + dsName;
       HDF5DataSetInformation dsInfo =
           reader.object().getDataSetInformation(dsName);
-      boolean is2D = dsInfo.getDimensions().length == 4;
+      int nDims    = dsInfo.getDimensions().length - 2;
+      int nFrames  = (int)dsInfo.getDimensions()[0];
+      int nClasses = (int)dsInfo.getDimensions()[1];
+      int nLevs    = (nDims == 2) ? 1 : (int)dsInfo.getDimensions()[2];
+      int nRows    = (int)dsInfo.getDimensions()[2 + ((nDims == 2) ? 0 : 1)];
+      int nCols    = (int)dsInfo.getDimensions()[3 + ((nDims == 2) ? 0 : 1)];
 
-      String title = dsName;
-      int nFrames, nChannels, nLevs, nRows, nCols;
+      ImagePlus impScores = null;
+      if (outputScores) {
+        impScores = IJ.createHyperStack(
+            title, nCols, nRows, nClasses, nLevs, nFrames, 32);
+        impScores.setDisplayMode(IJ.GRAYSCALE);
+        impScores.setCalibration(job.imageCalibration().copy());
+      }
 
-      title = job.imageName() + " - " + title;
-      nFrames   = (int)dsInfo.getDimensions()[0];
-      nChannels = (int)dsInfo.getDimensions()[1];
-      nLevs     = (is2D) ? 1 : (int)dsInfo.getDimensions()[2];
-      nRows     = (int)dsInfo.getDimensions()[2 + ((is2D) ? 0 : 1)];
-      nCols     = (int)dsInfo.getDimensions()[3 + ((is2D) ? 0 : 1)];
+      ImagePlus impSoftmaxScores = null;
+      if (computeSoftmaxScores) {
+        impSoftmaxScores = IJ.createHyperStack(
+            title + " (softmax)", nCols, nRows, nClasses, nLevs, nFrames, 32);
+        impSoftmaxScores.setDisplayMode(IJ.GRAYSCALE);
+        impSoftmaxScores.setCalibration(job.imageCalibration().copy());
+      }
 
-      ImagePlus impNew;
-      if (outputScores)
-          impNew = IJ.createHyperStack(
-              title, nCols, nRows, nChannels, nLevs, nFrames, 32);
-      else
-          impNew = IJ.createHyperStack(
-              title, nCols, nRows, 1, nLevs, nFrames, 16);
+      ImagePlus impClassification = IJ.createHyperStack(
+          title + " (segmentation)", nCols, nRows, 1, nLevs, nFrames, 16);
+      impClassification.setDisplayMode(IJ.GRAYSCALE);
+      impClassification.setCalibration(job.imageCalibration().copy());
 
-      impNew.setDisplayMode(IJ.GRAYSCALE);
-      impNew.getCalibration().pixelDepth =
-          job.imageCalibration().pixelDepth;
-      impNew.getCalibration().pixelHeight =
-          job.imageCalibration().pixelHeight;
-      impNew.getCalibration().pixelWidth =
-          job.imageCalibration().pixelWidth;
-      impNew.getCalibration().setUnit("um");
+      int[] blockDims = (nDims == 2) ?
+          (new int[] { 1, 1, nRows, nCols }) :
+          (new int[] { 1, 1, 1, nRows, nCols });
+      long[] blockIdx = (nDims == 2) ?
+          (new long[] { 0, 0, 0, 0 }) : (new long[] { 0, 0, 0, 0, 0 });
 
-      if (is2D) {
-        int[] blockDims = { 1, 1, nRows, nCols };
-        long[] blockIdx = { 0, 0, 0, 0 };
+      int nOperations = nFrames * nLevs * nClasses;
+      if (generateMarkers) nOperations += 4 * nFrames * nLevs * (nClasses - 1);
+      job.progressMonitor().initNewTask(
+          "Creating visualization for " + dsName,
+          (float)dsIdx / (float)outputs.size(), nOperations);
+      dsIdx++;
 
-        for (int t = 0; t < nFrames; ++t) {
-          blockIdx[0] = t;
-          if (outputScores) {
-            for (int c = 0; c < nChannels; ++c) {
-              blockIdx[1] = c;
-              IJ.showProgress(t * nChannels + c + 1, nFrames * nChannels);
-              MDFloatArray data = reader.float32().readMDArrayBlock(
-                  dsName, blockDims, blockIdx);
-              ImageProcessor ip = impNew.getStack().getProcessor(
-                  impNew.getStackIndex(c + 1, 1, t + 1));
+      for (int t = 0; t < nFrames; ++t) {
+        blockIdx[0] = t;
+        for (int z = 0; z < nLevs; ++z) {
+          if (nDims == 3) blockIdx[2] = z;
+          float[] maxScore = new float[nRows * nCols];
+          float[] expScoreSum =
+              computeSoftmaxScores ? new float[nRows * nCols] : null;
+          ImageProcessor ipC = impClassification.getStack().getProcessor(
+              impClassification.getStackIndex(1, z + 1, t + 1));
+          short[] maxIndex = (short[])ipC.getPixels();
+          int c = 0;
+          blockIdx[1] = c;
+          job.progressMonitor().count(
+              "Classification t=" + (t + 1) + "/" + nFrames +
+              ", z=" + (z + 1) + "/" + nLevs + ", class=" + c + "/" +
+              (nClasses - 1), 1);
+          float[] score = reader.float32().readMDArrayBlock(
+              dsName, blockDims, blockIdx).getAsFlatArray();
+          if (outputScores)
               System.arraycopy(
-                  data.getAsFlatArray(), 0, (float[])ip.getPixels(), 0,
-                  nRows * nCols);
+                  score, 0,
+                  impScores.getStack().getProcessor(
+                      impScores.getStackIndex(c + 1, z + 1, t + 1)).getPixels(),
+                  0, nRows * nCols);
+          if (computeSoftmaxScores) {
+            float[] smscores =
+                (float[])impSoftmaxScores.getStack().getProcessor(
+                    impSoftmaxScores.getStackIndex(
+                        c + 1, z + 1, t + 1)).getPixels();
+            for (int i = 0; i < nRows * nCols; ++i) {
+              smscores[i] = (float)Math.exp((double)score[i]);
+              expScoreSum[i] = smscores[i];
             }
           }
-          else {
-            float[] maxScore = new float[nRows * nCols];
-            short[] maxIndex = (short[]) impNew.getStack().getProcessor(
-                impNew.getStackIndex(1, 1, t + 1)).getPixels();
-            int c = 0;
+          System.arraycopy(score, 0, maxScore, 0, nRows * nCols);
+          Arrays.fill(maxIndex, (short) c);
+          ++c;
+          for (; c < nClasses; ++c) {
             blockIdx[1] = c;
-            IJ.showProgress(t * nChannels + c + 1, nFrames * nChannels);
-            float[] score = reader.float32().readMDArrayBlock(
+            job.progressMonitor().count(
+                "Classification t=" + (t + 1) + "/" + nFrames +
+                ", z=" + (z + 1) + "/" + nLevs + ", class=" + c + "/" +
+                (nClasses - 1), 1);
+            score = reader.float32().readMDArrayBlock(
                 dsName, blockDims, blockIdx).getAsFlatArray();
-            System.arraycopy(score, 0, maxScore, 0, nRows * nCols);
-            Arrays.fill(maxIndex, (short) c);
-            ++c;
-            for (; c < nChannels; ++c) {
-              blockIdx[1] = c;
-              IJ.showProgress(t * nChannels + c + 1, nFrames * nChannels);
-              score = reader.float32().readMDArrayBlock(
-                  dsName, blockDims, blockIdx).getAsFlatArray();
+            if (outputScores)
+                System.arraycopy(
+                    score, 0, impScores.getStack().getProcessor(
+                        impScores.getStackIndex(
+                            c + 1, z + 1, t + 1)).getPixels(),
+                    0, nRows * nCols);
+            if (computeSoftmaxScores) {
+              float[] smscores =
+                  (float[])impSoftmaxScores.getStack().getProcessor(
+                  impSoftmaxScores.getStackIndex(
+                      c + 1, z + 1, t + 1)).getPixels();
               for (int i = 0; i < nRows * nCols; ++i) {
-                if (score[i] > maxScore[i]) {
-                  maxScore[i] = score[i];
-                  maxIndex[i] = (short) c;
-                }
+                smscores[i] = (float)Math.exp((double)score[i]);
+                expScoreSum[i] += smscores[i];
               }
+            }
+            for (int i = 0; i < nRows * nCols; ++i) {
+              if (score[i] > maxScore[i]) {
+                maxScore[i] = score[i];
+                maxIndex[i] = (short) c;
+              }
+            }
+          }
+          if (computeSoftmaxScores) {
+            for (c = 0; c < nClasses; ++c) {
+              float[] smscores =
+                  (float[])impSoftmaxScores.getStack().getProcessor(
+                      impSoftmaxScores.getStackIndex(
+                          c + 1, z + 1, t + 1)).getPixels();
+              for (int i = 0; i < nRows * nCols; ++i)
+                  smscores[i] /= expScoreSum[i];
             }
           }
         }
       }
-      else {
-        int[] blockDims = { 1, 1, 1, nRows, nCols };
-        long[] blockIdx = { 0, 0, 0, 0, 0 };
+
+      if (outputScores) {
+        for (int i = 0; i < impScores.getStackSize(); ++i) {
+          impScores.setSlice(i + 1);
+          impScores.resetDisplayRange();
+        }
+        impScores.setSlice(1);
+        impScores.show();
+      }
+      if (outputSoftmaxScores) {
+        for (int i = 0; i < impSoftmaxScores.getStackSize(); ++i) {
+          impSoftmaxScores.setSlice(i + 1);
+          impSoftmaxScores.setDisplayRange(0.0, 1.0);
+        }
+        impSoftmaxScores.setSlice(1);
+        impSoftmaxScores.show();
+      }
+      if (impClassification.getStackSize() > 1) {
+        for (int i = 0; i < impClassification.getStackSize(); ++i) {
+          impClassification.setSlice(i + 1);
+          impClassification.resetDisplayRange();
+        }
+        impClassification.setSlice(1);
+      }
+      else impClassification.resetDisplayRange();
+      impClassification.show();
+
+      if (generateMarkers) {
+
+        // Create multi-channel image of per class binary masks
+        ImagePlus impMCClassification = IJ.createHyperStack(
+            title + " (classes)", nCols, nRows, nClasses - 1,
+            nLevs, nFrames, 8);
+        impMCClassification.setCalibration(job.imageCalibration().copy());
 
         for (int t = 0; t < nFrames; ++t) {
-          blockIdx[0] = t;
           for (int z = 0; z < nLevs; ++z) {
-            blockIdx[2] = z;
-            if (outputScores) {
-              for (int c = 0; c < nChannels; ++c) {
-                blockIdx[1] = c;
-                IJ.showProgress(
-                    (t * nLevs + z) * nChannels + c + 1,
-                    nFrames * nLevs * nChannels);
-                MDFloatArray data =
-                    reader.float32().readMDArrayBlock(
-                        dsName, blockDims, blockIdx);
-                ImageProcessor ip = impNew.getStack().getProcessor(
-                    impNew.getStackIndex(c + 1, z + 1, t + 1));
-                System.arraycopy(
-                    data.getAsFlatArray(), 0, (float[])ip.getPixels(), 0,
-                    nRows * nCols);
-              }
+            short[] cl = (short[])impClassification.getStack().getProcessor(
+                impClassification.getStackIndex(1, z + 1, t + 1)).getPixels();
+            byte[][] mccl = new byte[nClasses - 1][];
+            for (int c = 0; c < nClasses - 1; ++c)
+            {
+              job.progressMonitor().count(
+                  "Generating masks t=" + (t + 1) + "/" + nFrames +
+                  ", z=" + (z + 1) + "/" + nLevs + ", class=" + (c + 1) + "/" +
+                  (nClasses - 1), 1);
+              ImageProcessor impMccl =
+                  impMCClassification.getStack().getProcessor(
+                      impMCClassification.getStackIndex(c + 1, z + 1, t + 1));
+              impMccl.setValue(0);
+              impMccl.fill();
+              mccl[c] = (byte[])impMccl.getPixels();
             }
-            else {
-              float[] maxScore = new float[nRows * nCols];
-              short[] maxIndex = (short[]) impNew.getStack().getProcessor(
-                  impNew.getStackIndex(1, z + 1, t + 1)).getPixels();
-              int c = 0;
-              blockIdx[1] = c;
-              IJ.showProgress(
-                  (t * nLevs + z) * nChannels + c + 1,
-                  nFrames * nLevs * nChannels);
-              float[] score = reader.float32().readMDArrayBlock(
-                  dsName, blockDims, blockIdx).getAsFlatArray();
-              System.arraycopy(
-                  score, 0, maxScore, 0, nRows * nCols);
-              Arrays.fill(maxIndex, (short) c);
-              ++c;
-              for (; c < nChannels; ++c) {
-                blockIdx[1] = c;
-                IJ.showProgress(
-                    (t * nLevs + z) * nChannels + c + 1,
-                    nFrames * nLevs * nChannels);
-                score = reader.float32().readMDArrayBlock(
-                    dsName, blockDims, blockIdx).getAsFlatArray();
-                for (int i = 0; i < nRows * nCols; ++i) {
-                  if (score[i] > maxScore[i]) {
-                    maxScore[i] = score[i];
-                    maxIndex[i] = (short) c;
+            for (int i = 0; i < nRows * nCols; ++i)
+                if (cl[i] != 0) mccl[cl[i] - 1][i] = (byte)255;
+          }
+        }
+
+        // Connected component labeling
+        job.progressMonitor().count("Connected component labeling", 0);
+        Pair< Integer[], Blob<Integer> > connComps =
+            ConnectedComponentLabeling.label(
+                impMCClassification,
+                ConnectedComponentLabeling.SIMPLE_NEIGHBORHOOD,
+                job.progressMonitor());
+
+        // Compute centers of mass of connected components
+        float[][][] centerPosUm = new float[nFrames * (nClasses - 1)][][];
+        float[][] weightSum = new float[nFrames * (nClasses - 1)][];
+        int[][] nPixels = new int[nFrames * (nClasses - 1)][];
+        for (int i = 0; i < nFrames * (nClasses - 1); ++i) {
+          centerPosUm[i] = new float[connComps.first[i]][nDims];
+          weightSum[i] = new float[connComps.first[i]];
+          nPixels[i] = new int[connComps.first[i]];
+          for (int j = 0; j < connComps.first[i]; ++j) {
+            for (int d = 0; d < nDims; ++d) centerPosUm[i][j][d] = 0.0f;
+            weightSum[i][j] = 0.0f;
+            nPixels[i][j] = 0;
+          }
+        }
+        Integer[] labels = connComps.second.data();
+        double[] elSize = connComps.second.elementSizeUm();
+        int lblIdx = 0;
+        for (int t = 0; t < nFrames; ++t) {
+          for (int c = 0; c < nClasses - 1; ++c) {
+            float[][] cPosUm = centerPosUm[t * (nClasses - 1) + c];
+            float[] ws = weightSum[t * (nClasses - 1) + c];
+            int[] np = nPixels[t * (nClasses - 1) + c];
+            for (int z = 0; z < nLevs; ++z) {
+              job.progressMonitor().count(
+                  "Computing positions t=" + (t + 1) + "/" + nFrames +
+                  ", z=" + (z + 1) + "/" + nLevs + ", class=" + (c + 1) + "/" +
+                  (nClasses - 1), 1);
+              float[] smscore = (float[])
+                  impSoftmaxScores.getStack().getProcessor(
+                      impSoftmaxScores.getStackIndex(
+                          c + 2, z + 1, t + 1)).getPixels();
+              int smIdx = 0;
+              for (int y = 0; y < nRows; ++y) {
+                for (int x = 0; x < nCols; ++x, ++lblIdx, ++smIdx) {
+                  if (labels[lblIdx] == 0) continue;
+                  if (nDims == 2) {
+                    cPosUm[labels[lblIdx] - 1][0] +=
+                        smscore[smIdx] * y * elSize[0];
+                    cPosUm[labels[lblIdx] - 1][1] +=
+                        smscore[smIdx] * x * elSize[1];
                   }
+                  else {
+                    cPosUm[labels[lblIdx] - 1][0] +=
+                        smscore[smIdx] * z * elSize[0];
+                    cPosUm[labels[lblIdx] - 1][1] +=
+                        smscore[smIdx] * y * elSize[1];
+                    cPosUm[labels[lblIdx] - 1][2] +=
+                        smscore[smIdx] * x * elSize[2];
+                  }
+                  ws[labels[lblIdx] - 1] += smscore[smIdx];
+                  np[labels[lblIdx] - 1]++;
                 }
               }
             }
           }
         }
+
+        Overlay overlay = new Overlay();
+        ResultsTable table = new ResultsTable();
+        int volIdx = 0;
+        for (int t = 0; t < nFrames; ++t) {
+          for (int c = 0; c < nClasses - 1; ++c, ++volIdx) {
+            PointRoi[] detections = new PointRoi[nLevs];
+            for (int j = 0; j < connComps.first[volIdx]; ++j) {
+              table.incrementCounter();
+              table.addValue("frame", t + 1);
+              for (int d = 0; d < nDims; ++d)
+                  centerPosUm[volIdx][j][d] /= weightSum[volIdx][j];
+              if (nDims == 2) {
+                table.addValue("x [µm]", centerPosUm[volIdx][j][1]);
+                table.addValue("y [µm]", centerPosUm[volIdx][j][0]);
+                if (detections[0] == null) {
+                  detections[0] = new PointRoi(
+                      centerPosUm[volIdx][j][1] / elSize[1],
+                      centerPosUm[volIdx][j][0] / elSize[0]);
+                  detections[0].setPosition(t + 1);
+                }
+                else detections[0].addPoint(
+                    centerPosUm[volIdx][j][1] / elSize[1],
+                    centerPosUm[volIdx][j][0] / elSize[0]);
+              }
+              else {
+                table.addValue("x [µm]", centerPosUm[volIdx][j][2]);
+                table.addValue("y [µm]", centerPosUm[volIdx][j][1]);
+                table.addValue("z [µm]", centerPosUm[volIdx][j][0]);
+                int z = (int)Math.round(centerPosUm[volIdx][j][0] / elSize[0]);
+                if (z < 0) z = 0;
+                if (z >= nLevs) z = nLevs - 1;
+                if (detections[z] == null) {
+                  detections[z] = new PointRoi(
+                      centerPosUm[volIdx][j][2] / elSize[2],
+                      centerPosUm[volIdx][j][1] / elSize[1]);
+                  if (nFrames > 1)
+                      detections[z].setPosition(1, z + 1, t + 1);
+                  else
+                      detections[z].setPosition(z + 1);
+                }
+                else detections[z].addPoint(
+                    centerPosUm[volIdx][j][2] / elSize[2],
+                    centerPosUm[volIdx][j][1] / elSize[1]);
+              }
+              table.addValue("class", c + 1);
+              table.addValue(
+                  "confidence", weightSum[volIdx][j] / nPixels[volIdx][j]);
+            }
+            for (int z = 0; z < nLevs; ++z) {
+              if (detections[z] != null) overlay.add(
+                  detections[z], "Class " + (c + 1));
+            }
+          }
+        }
+
+        table.show(title + " (detections)");
+        impClassification.setOverlay(overlay);
+
+        job.progressMonitor().end();
       }
-      if (outputScores) impNew.setC(1);
-      impNew.resetDisplayRange();
-      impNew.show();
     }
     reader.close();
   }

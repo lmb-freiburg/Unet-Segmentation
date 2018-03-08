@@ -1,3 +1,35 @@
+/**************************************************************************
+ *
+ * Copyright (C) 2018 Thorsten Falk
+ *
+ *        Image Analysis Lab, University of Freiburg, Germany
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ **************************************************************************/
+
+package de.unifreiburg.unet;
+
 import ij.*;
 
 import java.awt.*;
@@ -308,10 +340,6 @@ public class HostConfigurationPanel extends JPanel {
   }
 
   Session sshSession() throws JSchException {
-    return sshSession(null);
-  }
-
-  Session sshSession(UnetJob job) throws JSchException {
 
     if (_sshSession != null) {
 
@@ -323,8 +351,7 @@ public class HostConfigurationPanel extends JPanel {
 
       // Otherwise disconnect
       if (_sshSession.isConnected()) {
-        if (job != null) job.setTaskProgress(
-            "Disconnecting from " + _sshSession.getHost(), 0, 0);
+        IJ.log("Disconnecting from " + _sshSession.getHost());
         _sshSession.disconnect();
       }
 
@@ -334,8 +361,7 @@ public class HostConfigurationPanel extends JPanel {
     if (useRemoteHost()) {
 
       // Open new SSH Session
-      if (job != null) job.setTaskProgress(
-          "Connecting to '" + hostname() + "'", 0, 0);
+      IJ.log("Connecting to '" + hostname() + "'");
       JSch jsch = new JSch();
       jsch.setKnownHosts(new File(System.getProperty("user.home") +
                                   "/.ssh/known_hosts").getAbsolutePath());
@@ -353,7 +379,6 @@ public class HostConfigurationPanel extends JPanel {
         _passwordField.setText("");
       }
       _sshSession.connect();
-      if (job != null) job.setTaskProgress(1, 1);
 
       // Login was successful => save host to preferences
       Prefs.set("unet_segmentation.useRemoteHost", true);
@@ -375,6 +400,7 @@ public class HostConfigurationPanel extends JPanel {
       if (authRSAKey())
           Prefs.set("unet_segmentation.rsaKeyFilename", rsaKeyFile());
     }
+    else Prefs.set("unet_segmentation.useRemoteHost", false);
 
     return _sshSession;
   }

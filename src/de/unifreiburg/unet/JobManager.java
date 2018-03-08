@@ -1,24 +1,34 @@
 /**************************************************************************
  *
- * Copyright (C) 2015 Thorsten Falk
+ * Copyright (C) 2018 Thorsten Falk
  *
  *        Image Analysis Lab, University of Freiburg, Germany
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************/
+
+package de.unifreiburg.unet;
 
 // ImageJ stuff
 import ij.*;
@@ -34,25 +44,25 @@ import javax.swing.event.*;
 import javax.swing.table.*;
 import java.util.*;
 
-public class UnetJobManager extends PlugInFrame {
+public class JobManager extends PlugInFrame {
 
-  private UnetJobTableModel _unetJobTableModel;
-  private static UnetJobManager _instance = null;
+  private JobTableModel _unetJobTableModel;
+  private static JobManager _instance = null;
   private static JDialog helpDialog = null;
 
   // This is a bad-style singleton with public constructor. It will
-  // create new UnetJobManager objects for each plugin
+  // create new JobManager objects for each plugin
   // call but in the run() method only the first is used. Actually
   // the constructor should be private and a static instance() method
-  // should create a UnetJobManager on demand. The static
+  // should create a JobManager on demand. The static
   // _instance reference will be valid as long as the virtual machine
   // is running.
-  public UnetJobManager() {
+  public JobManager() {
     super("U-Net Job Manager");
 
     if (_instance != null) return;
 
-    _unetJobTableModel = new UnetJobTableModel();
+    _unetJobTableModel = new JobTableModel();
 
     setLayout(new GridBagLayout());
 
@@ -73,15 +83,24 @@ public class UnetJobManager extends PlugInFrame {
     table.addMouseListener(new JTableButtonMouseListener(table));
     JScrollPane tableScroller = new JScrollPane(table);
 
-    JButton newSegmentationJobButton = new JButton("New segmentation");
+    JButton newSegmentationJobButton = new JButton("Segmentation");
     newSegmentationJobButton.setToolTipText(
         "Segment the current image (stack) using U-Net");
     newSegmentationJobButton.addActionListener(
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
-            _unetJobTableModel.createSegmentationJob(
-                WindowManager.getCurrentImage());
+            _unetJobTableModel.createSegmentationJob();
+          }});
+
+    JButton newDetectionJobButton = new JButton("Detection");
+    newDetectionJobButton.setToolTipText(
+        "Detect objects in the current image (stack) using U-Net");
+    newDetectionJobButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            _unetJobTableModel.createDetectionJob();
           }});
 
     JButton newFinetuneJobButton = new JButton("Finetuning");
@@ -137,25 +156,30 @@ public class UnetJobManager extends PlugInFrame {
           }});
 
     GridBagConstraints c = new GridBagConstraints();
+
+    // First row: the table
+    c.gridy = 0;
     c.weightx = 1;
     c.weighty = 1;
     c.fill = GridBagConstraints.BOTH;
     c.anchor = GridBagConstraints.CENTER;
     c.gridx = 0;
-    c.gridy = 0;
-    c.gridwidth = 3;
+    c.gridwidth = 4;
     add(tableScroller, c);
     c.weighty = 0;
     c.fill = GridBagConstraints.NONE;
-    c.gridx = 0;
+
+    // Second row: the buttons
     c.gridy = 1;
+    c.gridx = 0;
     c.gridwidth = 1;
     c.anchor = GridBagConstraints.LAST_LINE_START;
     add(newSegmentationJobButton, c);
     c.gridx = 1;
-    add(newFinetuneJobButton, c);
+    add(newDetectionJobButton, c);
     c.gridx = 2;
-    c.gridy = 1;
+    add(newFinetuneJobButton, c);
+    c.gridx = 3;
     c.anchor = GridBagConstraints.LAST_LINE_END;
     add(helpButton, c);
 
@@ -177,26 +201,20 @@ class ProgressCellRenderer extends JProgressBar implements TableCellRenderer {
   public Component getTableCellRendererComponent(
       JTable table, Object value, boolean isSelected, boolean hasFocus,
       int row, int column) {
-    if (value instanceof TaskStatus) {
-      TaskStatus s = (TaskStatus) value;
-      if (!getString().equals(s.name)) setString(s.name);
-      if (getMaximum() != (int) s.maxProgress)
-          setMaximum((int)s.maxProgress);
-      if (getValue() != (int) s.progress) setValue((int) s.progress);
-      if (isIndeterminate() != s.isIndeterminate)
-          setIndeterminate(s.isIndeterminate);
+    if (value instanceof ProgressMonitor) {
+      ProgressMonitor s = (ProgressMonitor)value;
+      if (!getString().equals(s.message())) setString(s.message());
+      if (getMaximum() != (int)s.getMax()) setMaximum((int)s.getMax());
+      if (getValue() != (int)s.getCount()) setValue((int)s.getCount());
+      if (isIndeterminate() != (s.getMax() == 0))
+          setIndeterminate(s.getMax() == 0);
       if (!isStringPainted()) setStringPainted(true);
     }
-
-    if (value instanceof Float || value instanceof Integer) {
-      int progress = 0;
-      if (value instanceof Float)
-          progress = Math.round(((Float) value) * 100f);
-      else if (value instanceof Integer) progress = (Integer) value;
+    else if (value instanceof Float) {
+      int progress = Math.round(((Float) value) * 100f);
       if (getValue() != progress) setValue(progress);
       if (!isStringPainted()) setStringPainted(true);
     }
-
     return this;
   }
 
@@ -256,12 +274,12 @@ class JTableButtonMouseListener implements MouseListener {
 
   public void mouseClicked(MouseEvent e) {
     if (_forwardEventToButton(e)) {
-      if (((UnetJobTableModel)_table.getModel()).getJob(
+      if (((JobTableModel)_table.getModel()).job(
               (String)_table.getValueAt(_row, 0)).ready())
-          ((UnetJobTableModel)_table.getModel()).showAndDequeueJob(
+          ((JobTableModel)_table.getModel()).showAndDequeueJob(
               (String)_table.getValueAt(_row, 0));
       else
-          ((UnetJobTableModel)_table.getModel()).cancelJob(
+          ((JobTableModel)_table.getModel()).cancelJob(
               (String)_table.getValueAt(_row, 0));
     }
   }
