@@ -88,6 +88,11 @@ public abstract class Job extends Thread {
   protected Group _verticalDialogLayoutGroup = null;
   protected final JPanel _configPanel = new JPanel();
 
+  private final JPanel _dialogPanel = new JPanel();
+  private final JPanel _tilingModeSelectorPanel =
+      new JPanel(new BorderLayout());
+  private final JPanel _tilingParametersPanel = new JPanel(new BorderLayout());
+
   private final JComboBox<ModelDefinition> _modelComboBox =
       new JComboBox<ModelDefinition>();
   private final JTextField _weightsFileTextField = new JTextField("", 20);
@@ -97,7 +102,17 @@ public abstract class Job extends Thread {
       "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
       "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
   private final JComboBox<String> _useGPUComboBox = new JComboBox<>(gpuList);
-  private HostConfigurationPanel _hostConfiguration = null;
+  private final HostConfigurationPanel _hostConfiguration =
+      new HostConfigurationPanel();
+  private final JButton _modelFolderChooseButton =
+      (UIManager.get("FileView.directoryIcon") instanceof Icon) ? new JButton(
+          (Icon)UIManager.get("FileView.directoryIcon")) : new JButton("...");
+  private final JButton _weightsFileChooseButton =
+      _hostConfiguration.weightsFileChooseButton();
+  private final JButton _processFolderChooseButton =
+      _hostConfiguration.processFolderChooseButton();
+  private final JButton _okButton = new JButton("OK");
+  private final JButton _cancelButton = new JButton("Cancel");
 
   private Session _sshSession = null;
 
@@ -307,36 +322,61 @@ public abstract class Job extends Thread {
     return gpuParm;
   }
 
-  protected void prepareParametersDialog() {
+  protected void processModelSelectionChange() {
+    _tilingModeSelectorPanel.removeAll();
+    _tilingParametersPanel.removeAll();
+    if (originalModel() != null) {
+      _weightsFileTextField.setText(originalModel().weightFile);
+      _tilingModeSelectorPanel.add(originalModel().tileModeSelector());
+      _tilingModeSelectorPanel.setMinimumSize(
+          originalModel().tileModeSelector().getPreferredSize());
+      _tilingModeSelectorPanel.setMaximumSize(
+          originalModel().tileModeSelector().getPreferredSize());
+      _tilingParametersPanel.add(originalModel().tileModePanel());
+      _tilingParametersPanel.setMinimumSize(
+          originalModel().tileModePanel().getMinimumSize());
+      _tilingParametersPanel.setMaximumSize(
+          new Dimension(
+              Integer.MAX_VALUE,
+              originalModel().tileModeSelector().getPreferredSize().height));
+    }
+    _dialogPanel.setMaximumSize(
+        new Dimension(
+            Integer.MAX_VALUE,
+            _dialogPanel.getPreferredSize().height));
+    _parametersDialog.invalidate();
+    _parametersDialog.setMinimumSize(
+        _parametersDialog.getPreferredSize());
+    _parametersDialog.setMaximumSize(
+        new Dimension(
+            Integer.MAX_VALUE,
+            _parametersDialog.getPreferredSize().height));
+    _parametersDialog.validate();
+  }
+
+  // Create the parameters dialog elements without logic
+  protected void createDialogElements() {
+
     /*******************************************************************
      * Generate the GUI layout without logic
      *******************************************************************/
 
-    // Host configuration
-    _hostConfiguration = new HostConfigurationPanel();
-
     // Model selection
     final JLabel modelLabel = new JLabel("Model:");
     _modelComboBox.setToolTipText("Select a caffe model.");
-    final JButton modelFolderChooseButton;
-    if (UIManager.get("FileView.directoryIcon") instanceof Icon)
-        modelFolderChooseButton = new JButton(
-            (Icon)UIManager.get("FileView.directoryIcon"));
-    else modelFolderChooseButton = new JButton("...");
     int marginTop = (int) Math.ceil(
-        (modelFolderChooseButton.getPreferredSize().getHeight() -
+        (_modelFolderChooseButton.getPreferredSize().getHeight() -
          _modelComboBox.getPreferredSize().getHeight()) / 2.0);
     int marginBottom = (int) Math.floor(
-        (modelFolderChooseButton.getPreferredSize().getHeight() -
+        (_modelFolderChooseButton.getPreferredSize().getHeight() -
          _modelComboBox.getPreferredSize().getHeight()) / 2.0);
-    Insets insets = modelFolderChooseButton.getMargin();
+    Insets insets = _modelFolderChooseButton.getMargin();
     insets.top -= marginTop;
     insets.left = 1;
     insets.bottom -= marginBottom;
     insets.right = 1;
-    modelFolderChooseButton.setMargin(insets);
-    modelFolderChooseButton.setToolTipText(
-        "Select local model definition folder");
+    _modelFolderChooseButton.setMargin(insets);
+    _modelFolderChooseButton.setToolTipText("Select model definition folder");
 
     // Weights
     final JLabel weightsFileLabel = new JLabel("Weight file:");
@@ -344,42 +384,38 @@ public abstract class Job extends Thread {
         "Location of the file containing the trained network weights " +
         "on the backend server.\nIf not yet on the server, on-the-fly " +
         "file upload will be offered.");
-    final JButton weightsFileChooseButton =
-        _hostConfiguration.weightsFileChooseButton();
     marginTop = (int) Math.ceil(
-        (weightsFileChooseButton.getPreferredSize().getHeight() -
+        (_weightsFileChooseButton.getPreferredSize().getHeight() -
          _weightsFileTextField.getPreferredSize().getHeight()) / 2.0);
     marginBottom = (int) Math.floor(
-        (weightsFileChooseButton.getPreferredSize().getHeight() -
+        (_weightsFileChooseButton.getPreferredSize().getHeight() -
          _weightsFileTextField.getPreferredSize().getHeight()) / 2.0);
-    insets = weightsFileChooseButton.getMargin();
+    insets = _weightsFileChooseButton.getMargin();
     insets.top -= marginTop;
     insets.left = 1;
     insets.bottom -= marginBottom;
     insets.right = 1;
-    weightsFileChooseButton.setMargin(insets);
-    weightsFileChooseButton.setToolTipText(
+    _weightsFileChooseButton.setMargin(insets);
+    _weightsFileChooseButton.setToolTipText(
         "Choose the file containing the trained network weights.");
 
     // Processing environment
     final JLabel processFolderLabel = new JLabel("Process Folder:");
     _processFolderTextField.setToolTipText(
         "Folder for temporary files on the backend server.");
-    final JButton processFolderChooseButton =
-        _hostConfiguration.processFolderChooseButton();
     marginTop = (int) Math.ceil(
-        (processFolderChooseButton.getPreferredSize().getHeight() -
+        (_processFolderChooseButton.getPreferredSize().getHeight() -
          _processFolderTextField.getPreferredSize().getHeight()) / 2.0);
     marginBottom = (int) Math.floor(
-        (processFolderChooseButton.getPreferredSize().getHeight() -
+        (_processFolderChooseButton.getPreferredSize().getHeight() -
          _processFolderTextField.getPreferredSize().getHeight()) / 2.0);
-    insets = processFolderChooseButton.getMargin();
+    insets = _processFolderChooseButton.getMargin();
     insets.top -= marginTop;
     insets.left = 1;
     insets.bottom -= marginBottom;
     insets.right = 1;
-    processFolderChooseButton.setMargin(insets);
-    processFolderChooseButton.setToolTipText(
+    _processFolderChooseButton.setMargin(insets);
+    _processFolderChooseButton.setToolTipText(
         "Select the folder to store temporary files.");
 
     // GPU parameters
@@ -389,14 +425,10 @@ public abstract class Job extends Thread {
         "CUDA capable GPU available on the compute host. Select " +
         "<autodetect> to leave the choice to caffe.");
 
-    final JPanel tilingModeSelectorPanel = new JPanel(new BorderLayout());
-    final JPanel tilingParametersPanel = new JPanel(new BorderLayout());
-
     // Create Parameters Panel
-    final JPanel dialogPanel = new JPanel();
-    dialogPanel.setBorder(BorderFactory.createEtchedBorder());
-    _dialogLayout = new GroupLayout(dialogPanel);
-    dialogPanel.setLayout(_dialogLayout);
+    _dialogPanel.setBorder(BorderFactory.createEtchedBorder());
+    _dialogLayout = new GroupLayout(_dialogPanel);
+    _dialogPanel.setLayout(_dialogLayout);
     _dialogLayout.setAutoCreateGaps(true);
     _dialogLayout.setAutoCreateContainerGaps(true);
     _horizontalDialogLayoutGroup =
@@ -414,23 +446,23 @@ public abstract class Job extends Thread {
                 .addComponent(weightsFileLabel)
                 .addComponent(processFolderLabel)
                 .addComponent(useGPULabel)
-                .addComponent(tilingModeSelectorPanel))
+                .addComponent(_tilingModeSelectorPanel))
             .addGroup(
                 _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
                 .addGroup(
                     _dialogLayout.createSequentialGroup()
                     .addComponent(_modelComboBox)
-                    .addComponent(modelFolderChooseButton))
+                    .addComponent(_modelFolderChooseButton))
                 .addGroup(
                     _dialogLayout.createSequentialGroup()
                     .addComponent(_weightsFileTextField)
-                    .addComponent(weightsFileChooseButton))
+                    .addComponent(_weightsFileChooseButton))
                 .addGroup(
                     _dialogLayout.createSequentialGroup()
                     .addComponent(_processFolderTextField)
-                    .addComponent(processFolderChooseButton))
+                    .addComponent(_processFolderChooseButton))
                 .addComponent(_useGPUComboBox)
-                .addComponent(tilingParametersPanel)))
+                .addComponent(_tilingParametersPanel)))
         .addComponent(_hostConfiguration));
 
     _dialogLayout.setVerticalGroup(
@@ -439,17 +471,17 @@ public abstract class Job extends Thread {
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(modelLabel)
             .addComponent(_modelComboBox)
-            .addComponent(modelFolderChooseButton))
+            .addComponent(_modelFolderChooseButton))
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(weightsFileLabel)
             .addComponent(_weightsFileTextField)
-            .addComponent(weightsFileChooseButton))
+            .addComponent(_weightsFileChooseButton))
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(processFolderLabel)
             .addComponent(_processFolderTextField)
-            .addComponent(processFolderChooseButton))
+            .addComponent(_processFolderChooseButton))
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(useGPULabel)
@@ -457,22 +489,20 @@ public abstract class Job extends Thread {
         .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.CENTER)
             .addComponent(
-                tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
+                _tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
                 GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)
             .addComponent(
-                tilingParametersPanel, GroupLayout.PREFERRED_SIZE,
+                _tilingParametersPanel, GroupLayout.PREFERRED_SIZE,
                 GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE))
         .addComponent(_hostConfiguration));
-    dialogPanel.setMaximumSize(
+    _dialogPanel.setMaximumSize(
         new Dimension(
-            Integer.MAX_VALUE, dialogPanel.getPreferredSize().height));
+            Integer.MAX_VALUE, _dialogPanel.getPreferredSize().height));
 
     // OK/Cancel buttons
-    final JButton okButton = new JButton("OK");
-    final JButton cancelButton = new JButton("Cancel");
     final JPanel okCancelPanel = new JPanel();
-    okCancelPanel.add(okButton);
-    okCancelPanel.add(cancelButton);
+    okCancelPanel.add(_okButton);
+    okCancelPanel.add(_cancelButton);
 
     // Assemble button panel
     final JPanel buttonPanel = new JPanel(new BorderLayout());
@@ -482,10 +512,13 @@ public abstract class Job extends Thread {
     // Assemble Dialog
     _parametersDialog = new JDialog(
         WindowManager.getCurrentWindow(), "U-Net Job", true);
-    _parametersDialog.add(dialogPanel, BorderLayout.CENTER);
+    _parametersDialog.add(_dialogPanel, BorderLayout.CENTER);
     _parametersDialog.add(buttonPanel, BorderLayout.SOUTH);
-    _parametersDialog.getRootPane().setDefaultButton(okButton);
+    _parametersDialog.getRootPane().setDefaultButton(_okButton);
+  }
 
+  // Wire the elements and validate the dialog
+  protected void finalizeDialog() {
     /*******************************************************************
      * Wire controls inner to outer before setting values so that
      * value changes trigger all required updates
@@ -497,47 +530,19 @@ public abstract class Job extends Thread {
           @Override
           public void itemStateChanged(ItemEvent e) {
             if (e.getStateChange() == ItemEvent.SELECTED) {
-              tilingModeSelectorPanel.removeAll();
-              tilingParametersPanel.removeAll();
-              if (model() != null) {
-                _weightsFileTextField.setText(model().weightFile);
-                tilingModeSelectorPanel.add(model().tileModeSelector());
-                tilingModeSelectorPanel.setMinimumSize(
-                    model().tileModeSelector().getPreferredSize());
-                tilingModeSelectorPanel.setMaximumSize(
-                    model().tileModeSelector().getPreferredSize());
-                tilingParametersPanel.add(model().tileModePanel());
-                tilingParametersPanel.setMinimumSize(
-                    model().tileModePanel().getMinimumSize());
-                tilingParametersPanel.setMaximumSize(
-                    new Dimension(
-                        Integer.MAX_VALUE,
-                        model().tileModeSelector().getPreferredSize().height));
-              }
-              dialogPanel.setMaximumSize(
-                  new Dimension(
-                      Integer.MAX_VALUE,
-                      dialogPanel.getPreferredSize().height));
-              _parametersDialog.invalidate();
-              _parametersDialog.setMinimumSize(
-                  _parametersDialog.getPreferredSize());
-              _parametersDialog.setMaximumSize(
-                  new Dimension(
-                      Integer.MAX_VALUE,
-                      _parametersDialog.getPreferredSize().height));
-              _parametersDialog.validate();
+              processModelSelectionChange();
             }
           }});
 
     // Model folder selection affects ModelComboBox (critical)
-    modelFolderChooseButton.addActionListener(
+    _modelFolderChooseButton.addActionListener(
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
             File startFolder =
-                (model() == null || model().file == null ||
-                 model().file.getParentFile() == null) ?
-                new File(".") : model().file.getParentFile();
+                (originalModel() == null || originalModel().file == null ||
+                 originalModel().file.getParentFile() == null) ?
+                new File(".") : originalModel().file.getParentFile();
             JFileChooser f = new JFileChooser(startFolder);
             f.setDialogTitle("Select U-Net model folder");
             f.setMultiSelectionEnabled(false);
@@ -554,23 +559,23 @@ public abstract class Job extends Thread {
         new DocumentListener() {
           @Override
           public void insertUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
+            if (originalModel() != null)
+                originalModel().weightFile = _weightsFileTextField.getText();
           }
           @Override
           public void removeUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
+            if (originalModel() != null)
+                originalModel().weightFile = _weightsFileTextField.getText();
           }
           @Override
           public void changedUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
+            if (originalModel() != null)
+                originalModel().weightFile = _weightsFileTextField.getText();
           }
         });
 
     // WeightsFileChooser affects WeightsFileTextField (not critical)
-    weightsFileChooseButton.addActionListener(
+    _weightsFileChooseButton.addActionListener(
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
@@ -588,11 +593,11 @@ public abstract class Job extends Thread {
             if (res != JFileChooser.APPROVE_OPTION) return;
             _weightsFileTextField.setText(
                 f.getSelectedFile().getAbsolutePath());
-            model().weightFile = _weightsFileTextField.getText();
+            originalModel().weightFile = _weightsFileTextField.getText();
           }});
 
     // ProcessFolderChooser affects ProcessFolderTextField (not critical)
-    processFolderChooseButton.addActionListener(
+    _processFolderChooseButton.addActionListener(
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
@@ -607,7 +612,7 @@ public abstract class Job extends Thread {
                 f.getSelectedFile().getAbsolutePath());
           }});
 
-    okButton.addActionListener(
+    _okButton.addActionListener(
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
@@ -617,7 +622,7 @@ public abstract class Job extends Thread {
             _parametersDialog.setVisible(false);
           }});
 
-    cancelButton.addActionListener(
+    _cancelButton.addActionListener(
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
@@ -626,7 +631,6 @@ public abstract class Job extends Thread {
             // disposed here, because isDisplayable() is used
             // to find out that the Dialog was cancelled!
             _parametersDialog.dispose();
-            abort();
           }});
 
     // Search models in currently selected model folder. This
@@ -642,20 +646,32 @@ public abstract class Job extends Thread {
     // Free all resources and make isDisplayable() return false to
     // distinguish dialog close from accept
     _parametersDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+    _parametersDialog.pack();
+    _parametersDialog.setMinimumSize(_parametersDialog.getPreferredSize());
+    _parametersDialog.setMaximumSize(
+        new Dimension(
+            Integer.MAX_VALUE,
+            _parametersDialog.getPreferredSize().height));
+    _parametersDialog.setLocationRelativeTo(WindowManager.getActiveWindow());
+  }
+
+  protected final void prepareParametersDialog() {
+    createDialogElements();
+    finalizeDialog();
   }
 
   public boolean checkParameters() {
 
     Prefs.set("unet_segmentation.gpuId", selectedGPUString());
 
-    if (!model().isValid()) {
+    if (!originalModel().isValid()) {
       IJ.showMessage("Please select a model. Probably you first need " +
                      "to select a folder containing models.");
       return false;
     }
 
-    Prefs.set("unet_segmentation.modelId", model().id);
-    model().savePreferences();
+    Prefs.set("unet_segmentation.modelId", originalModel().id);
+    originalModel().savePreferences();
 
     if (_weightsFileTextField.getText() == "") {
       IJ.showMessage("Please enter the (remote) path to the weights file.");
@@ -674,14 +690,16 @@ public abstract class Job extends Thread {
       return false;
     }
 
+    Prefs.set("unet_segmentation.processfolder", processFolder());
+
     return true;
   }
 
   public void cleanUp() {
     for (int i = 0; i < _createdRemoteFiles.size(); i++) {
       try {
-        Tools.removeFile(
-            _createdRemoteFiles.get(i), _sshSession, this);
+        new SftpFileIO(_sshSession, progressMonitor()).removeFile(
+            _createdRemoteFiles.get(i));
       }
       catch (Exception e) {
         IJ.log("Could not remove temporary file " +
@@ -690,8 +708,8 @@ public abstract class Job extends Thread {
     }
     for (int i = 0; i < _createdRemoteFolders.size(); i++) {
       try {
-        Tools.removeFolder(
-            _createdRemoteFolders.get(i), _sshSession, this);
+        new SftpFileIO(_sshSession, progressMonitor()).removeFolder(
+            _createdRemoteFolders.get(i));
       }
       catch (Exception e) {
         IJ.log("Could not remove temporary folder " +

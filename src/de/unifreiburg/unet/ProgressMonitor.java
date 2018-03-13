@@ -105,6 +105,7 @@ public class ProgressMonitor implements SftpProgressMonitor {
         (_max > 0) ? ((float)_count / (float)_max *
                       (_taskProgressMax - _taskProgressMin)) : 0.0f);
     update();
+    if (_job.interrupted()) setCanceled(true);
     return !_canceled;
   }
 

@@ -94,18 +94,15 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
         @Override
         public void run() {
           try {
-            Tools.loadSegmentationToImagePlus(
-                _localTmpFile, DetectionJob.this,
-                _outputScoresCheckBox.isSelected(),
-                _outputSoftmaxScoresCheckBox.isSelected(), true);
+            loadSegmentationToImagePlus();
             if (Recorder.record) {
               Recorder.setCommand(null);
               String command =
                   "call('de.unifreiburg.unet.DetectionJob." +
                   "processHyperStack', " +
-                  "'modelFilename=" + model().file.getAbsolutePath() +
+                  "'modelFilename=" + originalModel().file.getAbsolutePath() +
                   ",weightsFilename=" + weightsFileName() +
-                  "," + model().getTilingParameterString() +
+                  "," + originalModel().getTilingParameterString() +
                   ",gpuId=" + selectedGPUString() +
                   ",useRemoteHost=" + String.valueOf(sshSession() != null);
               if (sshSession() != null) {
@@ -158,7 +155,7 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
     model.load(new File(parameters.get("modelFilename")));
     job.setModel(model);
     job.setWeightsFileName(parameters.get("weightsFilename"));
-    job.model().setFromTilingParameterString(parameterStrings[2]);
+    job.originalModel().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
     if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
       try {
@@ -224,8 +221,6 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
     job.setInteractive(false);
 
     job.start();
-    job.join();
-    job.finish();
   }
 
 };

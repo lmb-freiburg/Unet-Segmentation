@@ -117,24 +117,18 @@ public class JobTableModel extends AbstractTableModel {
   }
 
   public void createSegmentationJob() {
-    SegmentationJob job = new SegmentationJob(this);
-    job.setImagePlus(WindowManager.getCurrentImage());
-    _jobs.add(job);
-    job.start();
-    fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
+    startJob(new SegmentationJob(this));
   }
 
   public void createDetectionJob() {
-    DetectionJob job = new DetectionJob(this);
-    job.setImagePlus(WindowManager.getCurrentImage());
-    _jobs.add(job);
-    job.start();
-    fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
+    startJob(new DetectionJob(this));
   }
 
   public void createFinetuneJob() {
-    FinetuneJob job = new FinetuneJob(this);
-    job.prepareParametersDialog();
+    startJob(new FinetuneJob(this));
+  }
+
+  private void startJob(Job job) {
     _jobs.add(job);
     job.start();
     fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);

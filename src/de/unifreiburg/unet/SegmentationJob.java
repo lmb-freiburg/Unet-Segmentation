@@ -37,6 +37,10 @@ import ij.ImagePlus;
 import ij.plugin.PlugIn;
 import ij.plugin.frame.Recorder;
 import ij.measure.Calibration;
+import ij.process.ImageProcessor;
+import ij.gui.Overlay;
+import ij.measure.ResultsTable;
+import ij.gui.PointRoi;
 
 import java.awt.Dimension;
 import java.awt.BorderLayout;
@@ -66,6 +70,7 @@ import java.util.Vector;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Arrays;
+import java.util.List;
 
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
@@ -73,6 +78,13 @@ import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.SftpException;
+
+import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
+import ch.systemsx.cisd.hdf5.HDF5FloatStorageFeatures;
+import ch.systemsx.cisd.hdf5.HDF5Factory;
+import ch.systemsx.cisd.hdf5.IHDF5Reader;
+import ch.systemsx.cisd.hdf5.HDF5DataSetInformation;
+import ch.systemsx.cisd.base.mdarray.MDFloatArray;
 
 public class SegmentationJob extends Job implements PlugIn {
 
@@ -96,10 +108,12 @@ public class SegmentationJob extends Job implements PlugIn {
 
   public SegmentationJob() {
     super();
+    setImagePlus(WindowManager.getCurrentImage());
   }
 
   public SegmentationJob(JobTableModel model) {
     super(model);
+    setImagePlus(WindowManager.getCurrentImage());
   }
 
   public void setImagePlus(ImagePlus imp) {
@@ -157,18 +171,15 @@ public class SegmentationJob extends Job implements PlugIn {
         @Override
         public void run() {
           try {
-            Tools.loadSegmentationToImagePlus(
-                _localTmpFile, SegmentationJob.this,
-                _outputScoresCheckBox.isSelected(),
-                _outputSoftmaxScoresCheckBox.isSelected());
+            loadSegmentationToImagePlus();
             if (Recorder.record) {
               Recorder.setCommand(null);
               String command =
                   "call('de.unifreiburg.unet.SegmentationJob." +
                   "processHyperStack', " +
-                  "'modelFilename=" + model().file.getAbsolutePath() +
+                  "'modelFilename=" + originalModel().file.getAbsolutePath() +
                   ",weightsFilename=" + weightsFileName() +
-                  "," + model().getTilingParameterString() +
+                  "," + originalModel().getTilingParameterString() +
                   ",gpuId=" + selectedGPUString() +
                   ",useRemoteHost=" + String.valueOf(sshSession() != null);
               if (sshSession() != null) {
@@ -203,9 +214,10 @@ public class SegmentationJob extends Job implements PlugIn {
   }
 
   @Override
-  public void prepareParametersDialog() {
+  protected void createDialogElements() {
 
-    super.prepareParametersDialog();
+    super.createDialogElements();
+
     _parametersDialog.setTitle("U-Net Segmentation");
 
     JLabel averagingModeLabel = new JLabel("Averaging:");
@@ -231,16 +243,6 @@ public class SegmentationJob extends Job implements PlugIn {
     _configPanel.add(_keepOriginalCheckBox);
     _configPanel.add(_outputScoresCheckBox);
     _configPanel.add(_outputSoftmaxScoresCheckBox);
-
-    // Finalize the dialog
-    _parametersDialog.pack();
-    _parametersDialog.setMinimumSize(
-        _parametersDialog.getPreferredSize());
-    _parametersDialog.setMaximumSize(
-        new Dimension(
-            Integer.MAX_VALUE,
-            _parametersDialog.getPreferredSize().height));
-    _parametersDialog.setLocationRelativeTo(_imp.getWindow());
   }
 
   public boolean getParameters() throws InterruptedException {
@@ -277,6 +279,7 @@ public class SegmentationJob extends Job implements PlugIn {
             res = Tools.execute(cmd, this);
           }
           catch (IOException e) {
+            res = new ProcessResult();
             res.exitStatus = 1;
           }
         }
@@ -313,13 +316,14 @@ public class SegmentationJob extends Job implements PlugIn {
            _imp.getType() == ImagePlus.COLOR_RGB) ? 3 : _imp.getNChannels();
 
       if (sshSession() != null) {
-        model().remoteAbsolutePath = processFolder() + "/" + id() + "_model.h5";
+
         try {
+          originalModel().remoteAbsolutePath =
+              processFolder() + "/" + id() + "_model.h5";
           _createdRemoteFolders.addAll(
-              Tools.put(
-                  model().file, model().remoteAbsolutePath, sshSession(),
-                  this));
-          _createdRemoteFiles.add(model().remoteAbsolutePath);
+              new SftpFileIO(sshSession(), progressMonitor()).put(
+                  originalModel().file, originalModel().remoteAbsolutePath));
+          _createdRemoteFiles.add(originalModel().remoteAbsolutePath);
           Prefs.set("unet_segmentation.processfolder", processFolder());
         }
         catch (SftpException|JSchException e) {
@@ -341,7 +345,7 @@ public class SegmentationJob extends Job implements PlugIn {
             String cmd =
                 Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
                 " check_model_and_weights_h5 -model \"" +
-                model().remoteAbsolutePath + "\" -weights \"" +
+                originalModel().remoteAbsolutePath + "\" -weights \"" +
                 weightsFileName() + "\" -n_channels " + nChannels + " " +
                 caffeGPUParameter();
             res = Tools.execute(cmd, sshSession(), this);
@@ -355,9 +359,9 @@ public class SegmentationJob extends Job implements PlugIn {
               switch (selectedOption) {
               case JOptionPane.YES_OPTION: {
                 File startFile =
-                    (model() == null || model().file == null ||
-                     model().file.getParentFile() == null) ?
-                    new File(".") : model().file.getParentFile();
+                    (originalModel() == null || originalModel().file == null ||
+                     originalModel().file.getParentFile() == null) ?
+                    new File(".") : originalModel().file.getParentFile();
                 JFileChooser f = new JFileChooser(startFile);
                 f.setDialogTitle("Select trained U-Net weights");
                 f.setFileFilter(
@@ -370,9 +374,8 @@ public class SegmentationJob extends Job implements PlugIn {
                 if (res2 != JFileChooser.APPROVE_OPTION)
                     throw new InterruptedException("Aborted by user");
                 try {
-                  Tools.put(
-                      f.getSelectedFile(), weightsFileName(),
-                      sshSession(), this);
+                  new SftpFileIO(sshSession(), progressMonitor()).put(
+                      f.getSelectedFile(), weightsFileName());
                 }
                 catch (SftpException e) {
                   res.exitStatus = 3;
@@ -418,7 +421,7 @@ public class SegmentationJob extends Job implements PlugIn {
           cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
           cmd.add("check_model_and_weights_h5");
           cmd.add("-model");
-          cmd.add(model().file.getAbsolutePath());
+          cmd.add(originalModel().file.getAbsolutePath());
           cmd.add("-weights");
           cmd.add(weightsFileName());
           cmd.add("-n_channels");
@@ -467,7 +470,7 @@ public class SegmentationJob extends Job implements PlugIn {
       throws JSchException, IOException, InterruptedException {
 
     String gpuParm = caffeGPUParameter();
-    String nTilesParm = model().getCaffeTilingParameter();
+    String nTilesParm = originalModel().getCaffeTilingParameter();
     String averagingParm = new String();
     if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
         averagingParm = "-average_mirror";
@@ -478,7 +481,7 @@ public class SegmentationJob extends Job implements PlugIn {
         Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
         " tiled_predict -infileH5 \"" + fileName +
         "\" -outfileH5 \"" + fileName + "\" -model \"" +
-        model().remoteAbsolutePath + "\" -weights \"" +
+        originalModel().remoteAbsolutePath + "\" -weights \"" +
         weightsFileName() + "\" -iterations 0 " +
         nTilesParm + " " + averagingParm + " " + gpuParm;
 
@@ -598,7 +601,8 @@ public class SegmentationJob extends Job implements PlugIn {
     else if (((String)_averagingComboBox.getSelectedItem()).equals("rotate"))
         averagingParm = "-average_rotate";
 
-    String[] parameters = model().getCaffeTilingParameter().split("\\s");
+    String[] parameters = originalModel().getCaffeTilingParameter().split(
+        "\\s");
     String nTilesAttribute = parameters[0];
     String nTilesValue = parameters[1];
 
@@ -609,7 +613,7 @@ public class SegmentationJob extends Job implements PlugIn {
         commandString + " tiled_predict -infileH5 \"" +
         file.getAbsolutePath() + "\" -outfileH5 \"" +
         file.getAbsolutePath() + "\" -model \"" +
-        model().file.getAbsolutePath() + "\" -weights \"" +
+        originalModel().file.getAbsolutePath() + "\" -weights \"" +
         weightsFileName() + "\" -iterations 0 " +
         nTilesAttribute + " " + nTilesValue + " " + averagingParm + " " +
         gpuAttribute + " " + gpuValue);
@@ -619,7 +623,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
+              "-model", originalModel().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue, gpuAttribute,
               gpuValue);
@@ -627,7 +631,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
+              "-model", originalModel().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue);
     }
@@ -636,7 +640,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
+              "-model", originalModel().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue, averagingParm, gpuAttribute,
               gpuValue);
@@ -644,7 +648,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
+              "-model", originalModel().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue, averagingParm);
     }
@@ -738,7 +742,7 @@ public class SegmentationJob extends Job implements PlugIn {
     model.load(new File(parameters.get("modelFilename")));
     job.setModel(model);
     job.setWeightsFileName(parameters.get("weightsFilename"));
-    job.model().setFromTilingParameterString(parameterStrings[2]);
+    job.originalModel().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
     if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
       try {
@@ -804,8 +808,6 @@ public class SegmentationJob extends Job implements PlugIn {
     job.setInteractive(false);
 
     job.start();
-    job.join();
-    job.finish();
   }
 
   @Override
@@ -816,10 +818,6 @@ public class SegmentationJob extends Job implements PlugIn {
       return;
     }
     start();
-    try {
-      join();
-    }
-    catch (InterruptedException e) {}
   }
 
   @Override
@@ -828,15 +826,17 @@ public class SegmentationJob extends Job implements PlugIn {
       prepareParametersDialog();
       if (isInteractive() && !getParameters()) return;
       if (sshSession() != null) {
+
+        SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
+
         progressMonitor().initNewTask("Uploading Model", 0.01f, 1);
         if (!isInteractive()) {
-          model().remoteAbsolutePath =
+          originalModel().remoteAbsolutePath =
               processFolder() + "/" + id() + "_model.h5";
           _createdRemoteFolders.addAll(
-              Tools.put(
-                  model().file, model().remoteAbsolutePath, sshSession(),
-                  this));
-          _createdRemoteFiles.add(model().remoteAbsolutePath);
+              sftp.put(originalModel().file,
+                       originalModel().remoteAbsolutePath));
+          _createdRemoteFiles.add(originalModel().remoteAbsolutePath);
         }
 
         _localTmpFile = File.createTempFile(id(), ".h5");
@@ -851,8 +851,7 @@ public class SegmentationJob extends Job implements PlugIn {
         if (interrupted()) throw new InterruptedException();
 
         progressMonitor().initNewTask("Uploading HDF5 blobs", 0.1f, 1);
-        _createdRemoteFolders.addAll(
-            Tools.put(_localTmpFile, remoteFileName, sshSession(), this));
+        _createdRemoteFolders.addAll(sftp.put(_localTmpFile, remoteFileName));
         _createdRemoteFiles.add(remoteFileName);
         if (interrupted()) throw new InterruptedException();
 
@@ -861,7 +860,7 @@ public class SegmentationJob extends Job implements PlugIn {
         if (interrupted()) throw new InterruptedException();
 
         progressMonitor().initNewTask("Downloading segmentation", 1.0f, 1);
-        Tools.get(remoteFileName, _localTmpFile, sshSession(), this);
+        sftp.get(remoteFileName, _localTmpFile);
         if (interrupted()) throw new InterruptedException();
      }
       else {
@@ -881,13 +880,355 @@ public class SegmentationJob extends Job implements PlugIn {
       setReady(true);
     }
     catch (InterruptedException e) {
-      IJ.showMessage("Job " + id() + " canceled. Cleaning up.");
       abort();
     }
-    catch (Exception e) {
-      IJ.error("U-Net Segmentation", e.toString());
+    catch (JSchException e) {
+      IJ.error(id(), "Connection to remote host failed:\n" + e);
       abort();
     }
+    catch (SftpException e) {
+      IJ.error(id(), "File transfer failed:\n" + e);
+      abort();
+    }
+    catch (IOException e) {
+      IJ.error(id(), "Input/Output error:\n" + e);
+      abort();
+    }
+    catch (NotImplementedException e) {
+      IJ.error(id(), "Sorry, the requested feature is not implemented:\n" + e);
+      abort();
+    }
+ }
+
+  protected void loadSegmentationToImagePlus()
+      throws HDF5Exception, IOException {
+
+    File file = _localTmpFile;
+    boolean outputScores = _outputScoresCheckBox.isSelected();
+    boolean outputSoftmaxScores = _outputSoftmaxScoresCheckBox.isSelected();
+    boolean generateMarkers = (this instanceof DetectionJob);
+
+    progressMonitor().reset();
+    progressMonitor().count("Creating visualization", 0);
+
+    boolean computeSoftmaxScores = outputSoftmaxScores || generateMarkers;
+
+    IHDF5Reader reader =
+        HDF5Factory.configureForReading(file.getAbsolutePath()).reader();
+    List<String> outputs = reader.getGroupMembers("/");
+
+    int dsIdx = 1;
+    for (String dsName : outputs) {
+
+      String title = imageName() + " - " + dsName;
+      HDF5DataSetInformation dsInfo =
+          reader.object().getDataSetInformation(dsName);
+      int nDims    = dsInfo.getDimensions().length - 2;
+      int nFrames  = (int)dsInfo.getDimensions()[0];
+      int nClasses = (int)dsInfo.getDimensions()[1];
+      int nLevs    = (nDims == 2) ? 1 : (int)dsInfo.getDimensions()[2];
+      int nRows    = (int)dsInfo.getDimensions()[2 + ((nDims == 2) ? 0 : 1)];
+      int nCols    = (int)dsInfo.getDimensions()[3 + ((nDims == 2) ? 0 : 1)];
+
+      ImagePlus impScores = null;
+      if (outputScores) {
+        impScores = IJ.createHyperStack(
+            title, nCols, nRows, nClasses, nLevs, nFrames, 32);
+        impScores.setDisplayMode(IJ.GRAYSCALE);
+        impScores.setCalibration(imageCalibration().copy());
+      }
+
+      ImagePlus impSoftmaxScores = null;
+      if (computeSoftmaxScores) {
+        impSoftmaxScores = IJ.createHyperStack(
+            title + " (softmax)", nCols, nRows, nClasses, nLevs, nFrames, 32);
+        impSoftmaxScores.setDisplayMode(IJ.GRAYSCALE);
+        impSoftmaxScores.setCalibration(imageCalibration().copy());
+      }
+
+      ImagePlus impClassification = IJ.createHyperStack(
+          title + " (segmentation)", nCols, nRows, 1, nLevs, nFrames, 16);
+      impClassification.setDisplayMode(IJ.GRAYSCALE);
+      impClassification.setCalibration(imageCalibration().copy());
+
+      int[] blockDims = (nDims == 2) ?
+          (new int[] { 1, 1, nRows, nCols }) :
+          (new int[] { 1, 1, 1, nRows, nCols });
+      long[] blockIdx = (nDims == 2) ?
+          (new long[] { 0, 0, 0, 0 }) : (new long[] { 0, 0, 0, 0, 0 });
+
+      int nOperations = nFrames * nLevs * nClasses;
+      if (generateMarkers) nOperations += 4 * nFrames * nLevs * (nClasses - 1);
+      progressMonitor().initNewTask(
+          "Creating visualization for " + dsName,
+          (float)dsIdx / (float)outputs.size(), nOperations);
+      dsIdx++;
+
+      for (int t = 0; t < nFrames; ++t) {
+        blockIdx[0] = t;
+        for (int z = 0; z < nLevs; ++z) {
+          if (nDims == 3) blockIdx[2] = z;
+          float[] maxScore = new float[nRows * nCols];
+          float[] expScoreSum =
+              computeSoftmaxScores ? new float[nRows * nCols] : null;
+          ImageProcessor ipC = impClassification.getStack().getProcessor(
+              impClassification.getStackIndex(1, z + 1, t + 1));
+          short[] maxIndex = (short[])ipC.getPixels();
+          int c = 0;
+          blockIdx[1] = c;
+          progressMonitor().count(
+              "Classification t=" + (t + 1) + "/" + nFrames +
+              ", z=" + (z + 1) + "/" + nLevs + ", class=" + c + "/" +
+              (nClasses - 1), 1);
+          float[] score = reader.float32().readMDArrayBlock(
+              dsName, blockDims, blockIdx).getAsFlatArray();
+          if (outputScores)
+              System.arraycopy(
+                  score, 0,
+                  impScores.getStack().getProcessor(
+                      impScores.getStackIndex(c + 1, z + 1, t + 1)).getPixels(),
+                  0, nRows * nCols);
+          if (computeSoftmaxScores) {
+            float[] smscores =
+                (float[])impSoftmaxScores.getStack().getProcessor(
+                    impSoftmaxScores.getStackIndex(
+                        c + 1, z + 1, t + 1)).getPixels();
+            for (int i = 0; i < nRows * nCols; ++i) {
+              smscores[i] = (float)Math.exp((double)score[i]);
+              expScoreSum[i] = smscores[i];
+            }
+          }
+          System.arraycopy(score, 0, maxScore, 0, nRows * nCols);
+          Arrays.fill(maxIndex, (short) c);
+          ++c;
+          for (; c < nClasses; ++c) {
+            blockIdx[1] = c;
+            progressMonitor().count(
+                "Classification t=" + (t + 1) + "/" + nFrames +
+                ", z=" + (z + 1) + "/" + nLevs + ", class=" + c + "/" +
+                (nClasses - 1), 1);
+            score = reader.float32().readMDArrayBlock(
+                dsName, blockDims, blockIdx).getAsFlatArray();
+            if (outputScores)
+                System.arraycopy(
+                    score, 0, impScores.getStack().getProcessor(
+                        impScores.getStackIndex(
+                            c + 1, z + 1, t + 1)).getPixels(),
+                    0, nRows * nCols);
+            if (computeSoftmaxScores) {
+              float[] smscores =
+                  (float[])impSoftmaxScores.getStack().getProcessor(
+                  impSoftmaxScores.getStackIndex(
+                      c + 1, z + 1, t + 1)).getPixels();
+              for (int i = 0; i < nRows * nCols; ++i) {
+                smscores[i] = (float)Math.exp((double)score[i]);
+                expScoreSum[i] += smscores[i];
+              }
+            }
+            for (int i = 0; i < nRows * nCols; ++i) {
+              if (score[i] > maxScore[i]) {
+                maxScore[i] = score[i];
+                maxIndex[i] = (short) c;
+              }
+            }
+          }
+          if (computeSoftmaxScores) {
+            for (c = 0; c < nClasses; ++c) {
+              float[] smscores =
+                  (float[])impSoftmaxScores.getStack().getProcessor(
+                      impSoftmaxScores.getStackIndex(
+                          c + 1, z + 1, t + 1)).getPixels();
+              for (int i = 0; i < nRows * nCols; ++i)
+                  smscores[i] /= expScoreSum[i];
+            }
+          }
+        }
+      }
+
+      if (outputScores) {
+        for (int i = 0; i < impScores.getStackSize(); ++i) {
+          impScores.setSlice(i + 1);
+          impScores.resetDisplayRange();
+        }
+        impScores.setSlice(1);
+        impScores.show();
+      }
+      if (outputSoftmaxScores) {
+        for (int i = 0; i < impSoftmaxScores.getStackSize(); ++i) {
+          impSoftmaxScores.setSlice(i + 1);
+          impSoftmaxScores.setDisplayRange(0.0, 1.0);
+        }
+        impSoftmaxScores.setSlice(1);
+        impSoftmaxScores.show();
+      }
+      if (impClassification.getStackSize() > 1) {
+        for (int i = 0; i < impClassification.getStackSize(); ++i) {
+          impClassification.setSlice(i + 1);
+          impClassification.resetDisplayRange();
+        }
+        impClassification.setSlice(1);
+      }
+      else impClassification.resetDisplayRange();
+      impClassification.show();
+
+      if (generateMarkers) {
+
+        // Create multi-channel image of per class binary masks
+        ImagePlus impMCClassification = IJ.createHyperStack(
+            title + " (classes)", nCols, nRows, nClasses - 1,
+            nLevs, nFrames, 8);
+        impMCClassification.setCalibration(imageCalibration().copy());
+
+        for (int t = 0; t < nFrames; ++t) {
+          for (int z = 0; z < nLevs; ++z) {
+            short[] cl = (short[])impClassification.getStack().getProcessor(
+                impClassification.getStackIndex(1, z + 1, t + 1)).getPixels();
+            byte[][] mccl = new byte[nClasses - 1][];
+            for (int c = 0; c < nClasses - 1; ++c)
+            {
+              progressMonitor().count(
+                  "Generating masks t=" + (t + 1) + "/" + nFrames +
+                  ", z=" + (z + 1) + "/" + nLevs + ", class=" + (c + 1) + "/" +
+                  (nClasses - 1), 1);
+              ImageProcessor impMccl =
+                  impMCClassification.getStack().getProcessor(
+                      impMCClassification.getStackIndex(c + 1, z + 1, t + 1));
+              impMccl.setValue(0);
+              impMccl.fill();
+              mccl[c] = (byte[])impMccl.getPixels();
+            }
+            for (int i = 0; i < nRows * nCols; ++i)
+                if (cl[i] != 0) mccl[cl[i] - 1][i] = (byte)255;
+          }
+        }
+
+        // Connected component labeling
+        progressMonitor().count("Connected component labeling", 0);
+        Pair< Integer[], Blob<Integer> > connComps =
+            ConnectedComponentLabeling.label(
+                impMCClassification,
+                ConnectedComponentLabeling.SIMPLE_NEIGHBORHOOD,
+                progressMonitor());
+
+        // Compute centers of mass of connected components
+        float[][][] centerPosUm = new float[nFrames * (nClasses - 1)][][];
+        float[][] weightSum = new float[nFrames * (nClasses - 1)][];
+        int[][] nPixels = new int[nFrames * (nClasses - 1)][];
+        for (int i = 0; i < nFrames * (nClasses - 1); ++i) {
+          centerPosUm[i] = new float[connComps.first[i]][nDims];
+          weightSum[i] = new float[connComps.first[i]];
+          nPixels[i] = new int[connComps.first[i]];
+          for (int j = 0; j < connComps.first[i]; ++j) {
+            for (int d = 0; d < nDims; ++d) centerPosUm[i][j][d] = 0.0f;
+            weightSum[i][j] = 0.0f;
+            nPixels[i][j] = 0;
+          }
+        }
+        Integer[] labels = connComps.second.data();
+        double[] elSize = connComps.second.elementSizeUm();
+        int lblIdx = 0;
+        for (int t = 0; t < nFrames; ++t) {
+          for (int c = 0; c < nClasses - 1; ++c) {
+            float[][] cPosUm = centerPosUm[t * (nClasses - 1) + c];
+            float[] ws = weightSum[t * (nClasses - 1) + c];
+            int[] np = nPixels[t * (nClasses - 1) + c];
+            for (int z = 0; z < nLevs; ++z) {
+              progressMonitor().count(
+                  "Computing positions t=" + (t + 1) + "/" + nFrames +
+                  ", z=" + (z + 1) + "/" + nLevs + ", class=" + (c + 1) + "/" +
+                  (nClasses - 1), 1);
+              float[] smscore = (float[])
+                  impSoftmaxScores.getStack().getProcessor(
+                      impSoftmaxScores.getStackIndex(
+                          c + 2, z + 1, t + 1)).getPixels();
+              int smIdx = 0;
+              for (int y = 0; y < nRows; ++y) {
+                for (int x = 0; x < nCols; ++x, ++lblIdx, ++smIdx) {
+                  if (labels[lblIdx] == 0) continue;
+                  if (nDims == 2) {
+                    cPosUm[labels[lblIdx] - 1][0] +=
+                        smscore[smIdx] * y * elSize[0];
+                    cPosUm[labels[lblIdx] - 1][1] +=
+                        smscore[smIdx] * x * elSize[1];
+                  }
+                  else {
+                    cPosUm[labels[lblIdx] - 1][0] +=
+                        smscore[smIdx] * z * elSize[0];
+                    cPosUm[labels[lblIdx] - 1][1] +=
+                        smscore[smIdx] * y * elSize[1];
+                    cPosUm[labels[lblIdx] - 1][2] +=
+                        smscore[smIdx] * x * elSize[2];
+                  }
+                  ws[labels[lblIdx] - 1] += smscore[smIdx];
+                  np[labels[lblIdx] - 1]++;
+                }
+              }
+            }
+          }
+        }
+
+        Overlay overlay = new Overlay();
+        ResultsTable table = new ResultsTable();
+        int volIdx = 0;
+        for (int t = 0; t < nFrames; ++t) {
+          for (int c = 0; c < nClasses - 1; ++c, ++volIdx) {
+            PointRoi[] detections = new PointRoi[nLevs];
+            for (int j = 0; j < connComps.first[volIdx]; ++j) {
+              table.incrementCounter();
+              table.addValue("frame", t + 1);
+              for (int d = 0; d < nDims; ++d)
+                  centerPosUm[volIdx][j][d] /= weightSum[volIdx][j];
+              if (nDims == 2) {
+                table.addValue("x [µm]", centerPosUm[volIdx][j][1]);
+                table.addValue("y [µm]", centerPosUm[volIdx][j][0]);
+                if (detections[0] == null) {
+                  detections[0] = new PointRoi(
+                      centerPosUm[volIdx][j][1] / elSize[1],
+                      centerPosUm[volIdx][j][0] / elSize[0]);
+                  detections[0].setPosition(t + 1);
+                }
+                else detections[0].addPoint(
+                    centerPosUm[volIdx][j][1] / elSize[1],
+                    centerPosUm[volIdx][j][0] / elSize[0]);
+              }
+              else {
+                table.addValue("x [µm]", centerPosUm[volIdx][j][2]);
+                table.addValue("y [µm]", centerPosUm[volIdx][j][1]);
+                table.addValue("z [µm]", centerPosUm[volIdx][j][0]);
+                int z = (int)Math.round(centerPosUm[volIdx][j][0] / elSize[0]);
+                if (z < 0) z = 0;
+                if (z >= nLevs) z = nLevs - 1;
+                if (detections[z] == null) {
+                  detections[z] = new PointRoi(
+                      centerPosUm[volIdx][j][2] / elSize[2],
+                      centerPosUm[volIdx][j][1] / elSize[1]);
+                  if (nFrames > 1)
+                      detections[z].setPosition(1, z + 1, t + 1);
+                  else
+                      detections[z].setPosition(z + 1);
+                }
+                else detections[z].addPoint(
+                    centerPosUm[volIdx][j][2] / elSize[2],
+                    centerPosUm[volIdx][j][1] / elSize[1]);
+              }
+              table.addValue("class", c + 1);
+              table.addValue(
+                  "confidence", weightSum[volIdx][j] / nPixels[volIdx][j]);
+            }
+            for (int z = 0; z < nLevs; ++z) {
+              if (detections[z] != null) overlay.add(
+                  detections[z], "Class " + (c + 1));
+            }
+          }
+        }
+
+        table.show(title + " (detections)");
+        impClassification.setOverlay(overlay);
+
+        progressMonitor().end();
+      }
+    }
+    reader.close();
   }
 
 };

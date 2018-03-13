@@ -42,10 +42,8 @@ import ij.process.ImageProcessor;
 import ij.process.FloatProcessor;
 import ij.process.ByteProcessor;
 import ij.measure.Calibration;
-import ij.measure.ResultsTable;
 import ij.plugin.CompositeConverter;
 import ij.plugin.filter.ParticleAnalyzer;
-import ij.plugin.frame.RoiManager;
 
 import java.awt.Color;
 import java.awt.Point;
@@ -59,7 +57,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.Vector;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Locale;
 
 // For remote SSH connections
@@ -85,240 +82,6 @@ public class Tools {
 
 /*======================================================================*/
 /*!
- *   Remove the file with given path from the remote host via sftp.
- *
- *   \param path The absolute file path on the remote host
- *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given Job
- *     otherwise it will be shown in the ImageJ status bar
- *
- *   \exception JSchException if the SSH session is not open
- *   \exception IOException if the remote file could not be removed
- *   \exception InterruptedException if the user requests thread termination
- *   \exception SftpException if the Sftp connection fails
- */
-/*======================================================================*/
-  public static void removeFile(String path, Session session, Job job)
-      throws JSchException, IOException, InterruptedException, SftpException {
-    job.progressMonitor().init(0, "", "", 1);
-    job.progressMonitor().count(
-        "Removing file '" + session.getHost() + ":" + path + "'", 0);
-    IJ.log(session.getUserName() + "@" + session.getHost() + " $ rm \"" +
-           path + "\"");
-    Channel channel = session.openChannel("sftp");
-    channel.connect();
-    ChannelSftp c = (ChannelSftp)channel;
-    c.rm(path);
-    channel.disconnect();
-    job.progressMonitor().count(1);
-  }
-
-/*======================================================================*/
-/*!
- *   Rename the file with given path from the remote host via sftp.
- *
- *   \param oldpath The absolute file path on the remote host
- *   \param newpath The new absolute file path on the remote host
- *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given Job
- *     otherwise it will be shown in the ImageJ status bar
- *
- *   \exception JSchException if the SSH session is not open
- *   \exception IOException if the remote file could not be removed
- *   \exception InterruptedException if the user requests thread termination
- *   \exception SftpException if the Sftp connection fails
- */
-/*======================================================================*/
-  public static void renameFile(
-      String oldpath, String newpath, Session session, Job job)
-      throws JSchException, IOException, InterruptedException, SftpException {
-    job.progressMonitor().init(0, "", "", 1);
-    job.progressMonitor().count(
-        "Renaming file '" + session.getHost() + ":" + oldpath + "' to '" +
-        newpath + "'", 0);
-    IJ.log(session.getUserName() + "@" + session.getHost() + " $ mv \"" +
-           oldpath + "\" \"" + newpath + "\"");
-    Channel channel = session.openChannel("sftp");
-    channel.connect();
-    ChannelSftp c = (ChannelSftp)channel;
-    c.rename(oldpath, newpath);
-    channel.disconnect();
-    job.progressMonitor().count(1);
-  }
-
-/*======================================================================*/
-/*!
- *   Remove the folder with given path from the remote host via sftp.
- *   The folder must be empty before it can be removed.
- *
- *   \param path The absolute folder path on the remote host
- *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given Job
- *     otherwise it will be shown in the ImageJ status bar
- *
- *   \exception JSchException if the SSH session is not open
- *   \exception IOException if the remote folder could not be removed
- *   \exception InterruptedException if the user requests thread termination
- *   \exception SftpException if the Sftp connection fails
- */
-/*======================================================================*/
-  public static void removeFolder(String path, Session session, Job job)
-      throws JSchException, IOException, InterruptedException, SftpException {
-    job.progressMonitor().init(0, "", "", 1);
-    job.progressMonitor().count(
-        "Removing folder '" + session.getHost() + ":" + path + "'", 0);
-    IJ.log(session.getUserName() + "@" + session.getHost() + " $ rmdir \"" +
-           path + "\"");
-    Channel channel = session.openChannel("sftp");
-    channel.connect();
-    ChannelSftp c = (ChannelSftp)channel;
-    c.rmdir(path);
-    channel.disconnect();
-    job.progressMonitor().count(1);
-  }
-
-/*======================================================================*/
-/*!
- *   Upload the given local file to the remote host via sftp. Required
- *   folders on the remote host will be created and returned in reverse
- *   creation order to allow to easily clean up again later.
- *
- *   \param inFile The file to copy on the local host
- *   \param outFileName The absolute file path on the remote host
- *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given Job
- *     otherwise it will be shown in the ImageJ status bar
- *
- *   \exception JSchException if the SSH session is not open
- *   \exception IOException if the file could not be copied
- *   \exception InterruptedException if the user requests thread termination
- *   \exception SftpException if the Sftp connection fails
- *
- *   \return A Vector containing the absolute paths of created folders on
- *     the remote host. The vector is sorted in reverse creation order to
- *     allow simple forward iteration for removing the folders again
- */
-/*======================================================================*/
-  public static Vector<String> put(
-      File inFile, String outFileName, Session session, Job job)
-      throws JSchException, IOException, InterruptedException, SftpException {
-    Channel channel = session.openChannel("sftp");
-    channel.connect();
-    ChannelSftp c = (ChannelSftp)channel;
-
-    // Recursively create parent folders
-    String[] folders = outFileName.split("/");
-    Vector<String> createdFolders = new Vector<String>();
-    String currentFolder = "/";
-    c.cd("/");
-    for (int i = 0; i < folders.length - 1; ++i) {
-      if (folders[i].length() > 0) {
-        try {
-          c.cd(folders[i]);
-          currentFolder += "/" + folders[i];
-        }
-        catch (SftpException e) {
-          job.progressMonitor().count(
-              "Creating folder '" + currentFolder + "/" + folders[i] +
-              "' on host '" + session.getHost() + "'", 0);
-          IJ.log(
-              session.getUserName() + "@" + session.getHost() +
-              " $ mkdir \"" + currentFolder + "/" + folders[i] + "\"");
-          c.mkdir(folders[i]);
-          c.cd(folders[i]);
-          if (!currentFolder.endsWith("/")) currentFolder += "/";
-          currentFolder += folders[i];
-          createdFolders.add(0, currentFolder);
-        }
-      }
-    }
-
-    // Copy the file
-    job.progressMonitor().count(
-        "Copying '" + inFile.getName() + "' to host '" +
-        session.getHost() + "'", 0);
-    IJ.log(
-        "$ sftp \"" + inFile.getAbsolutePath() + "\" \"" +
-        session.getUserName() + "@" + session.getHost() + ":" +
-        session.getPort() + ":" + outFileName + "\"");
-    c.put(inFile.getAbsolutePath(), outFileName, job.progressMonitor(),
-          ChannelSftp.OVERWRITE);
-    if (job.progressMonitor().canceled()) {
-      c.rm(outFileName);
-      for (int i = 0; i < createdFolders.size(); ++i)
-          c.rmdir(createdFolders.get(i));
-      channel.disconnect();
-      throw new InterruptedException("Upload canceled by user");
-    }
-    channel.disconnect();
-
-    return createdFolders;
-  }
-
-/*======================================================================*/
-/*!
- *   Fetch the remote file with given path via sftp. The file will be marked
- *   for deletion (deleteOnExit()) on Java virtual machine shutdown. So if
- *   you want to keep it you have to explicitly remove this flag from the
- *   File after the copy process.
- *
- *   \param inFileName The file to copy on the remote host
- *   \param outFile The File on the local host to create
- *   \param session The open SSH session
- *   \param job If not null, progress will be reported to the given Job
- *     otherwise it will be shown in the ImageJ status bar
- *
- *   \exception JSchException if the SSH session is not open
- *   \exception IOException if the file could not be copied
- *   \exception InterruptedException if the user requests thread termination
- *   \exception SftpException if the Sftp connection fails
- */
-/*======================================================================*/
-  public static void get(
-      String inFileName, File outFile, Session session, Job job)
-      throws JSchException, IOException, InterruptedException, SftpException {
-    Channel channel = session.openChannel("sftp");
-    channel.connect();
-    ChannelSftp c = (ChannelSftp)channel;
-
-    // Recursively create parent folders
-    Vector<File> createdFolders = new Vector<File>();
-    File folder = outFile.getParentFile();
-    while (folder != null && !folder.isDirectory()) {
-      createdFolders.add(folder);
-      folder = folder.getParentFile();
-    }
-    for (int i = createdFolders.size() - 1; i >= 0; --i) {
-      job.progressMonitor().count(
-          "Creating folder '" + createdFolders.get(i) + "'", 0);
-      IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
-      if (!createdFolders.get(i).mkdir())
-          throw new IOException(
-              "Could not create folder '" +
-              createdFolders.get(i).getAbsolutePath() + "'");
-      createdFolders.get(i).deleteOnExit();
-    }
-
-    // Copy the file
-    job.progressMonitor().count(
-        "Fetching '" + inFileName + "' from host '" + session.getHost() + "'",
-        0);
-    IJ.log(
-        "$ sftp \"" + session.getUserName() +
-        "@" + session.getHost() + ":" + session.getPort() + ":" +
-        inFileName + "\" \"" + outFile.getAbsolutePath() + "\"");
-    outFile.deleteOnExit();
-    c.get(inFileName, outFile.getAbsolutePath(), job.progressMonitor(),
-          ChannelSftp.OVERWRITE);
-
-    channel.disconnect();
-
-    if (job.progressMonitor().canceled())
-        throw new InterruptedException("Download canceled by user");
-  }
-
-/*======================================================================*/
-/*!
  *   If the given ImagePlus is a color image (stack), a new ImagePlus will be
  *   created with color components split to individual channels.
  *   For grayscale images calling this method is a noop and a reference to
@@ -338,7 +101,7 @@ public class Tools {
     job.progressMonitor().count("Splitting color channels", 0);
     ImagePlus out = CompositeConverter.makeComposite(imp);
     out.setTitle(imp.getTitle() + " - composite");
-    out.setCalibration(imp.getCalibration());
+    out.setCalibration(imp.getCalibration().copy());
     return out;
   }
 
@@ -365,7 +128,7 @@ public class Tools {
     ImagePlus out = IJ.createHyperStack(
         imp.getTitle() + " - 32-Bit", imp.getWidth(), imp.getHeight(),
         imp.getNChannels(), imp.getNSlices(), imp.getNFrames(), 32);
-    out.setCalibration(imp.getCalibration());
+    out.setCalibration(imp.getCalibration().copy());
 
     if (imp.getStackSize() == 1) {
       job.progressMonitor().count(1);
@@ -430,9 +193,10 @@ public class Tools {
       ImagePlus imp, int interpolationMethod, Job job)
       throws InterruptedException {
     Calibration cal = imp.getCalibration().copy();
-    int offs = (job.model().elementSizeUm.length == 2) ? 0 : 1;
-    cal.pixelHeight = job.model().elementSizeUm[offs];
-    cal.pixelWidth = job.model().elementSizeUm[offs + 1];
+    int offs = (job.model().nDims() == 2) ? 0 : 1;
+    float[] elSize = job.model().elementSizeUm();
+    cal.pixelHeight = elSize[offs];
+    cal.pixelWidth = elSize[offs + 1];
 
     float[] scales = new float[2];
     scales[0] = (float)(imp.getCalibration().pixelHeight / cal.pixelHeight);
@@ -498,15 +262,14 @@ public class Tools {
   public static ImagePlus rescaleZ(
       ImagePlus imp, int interpolationMethod, Job job)
       throws InterruptedException {
-    if (job.model().elementSizeUm.length == 2 || imp.getNSlices() == 1)
-        return imp;
+    if (job.model().nDims() == 2 || imp.getNSlices() == 1) return imp;
 
-    double scale = imp.getCalibration().pixelDepth /
-        job.model().elementSizeUm[0];
+    float elSizeZ = job.model().elementSizeUm()[0];
+    double scale = imp.getCalibration().pixelDepth / elSizeZ;
     if (scale == 1) return imp;
 
     Calibration cal = imp.getCalibration().copy();
-    cal.pixelDepth = job.model().elementSizeUm[0];
+    cal.pixelDepth = elSizeZ;
     ImagePlus out = IJ.createHyperStack(
         imp.getTitle() + " - rescaled (z)",
         imp.getWidth(), imp.getHeight(), imp.getNChannels(),
@@ -806,14 +569,14 @@ public class Tools {
     if (nDims != 2) throw new NotImplementedException(
         "Sorry, " + nDims + "D finetuning is not implemented yet");
 
+    float[] elSizeModel = job.model().elementSizeUm();
     float foregroundBackgroundRatio = job.model().foregroundBackgroundRatio;
-    float sigma1_px = job.model().sigma1Um / job.model().elementSizeUm[1];
+    float sigma1_px = job.model().sigma1Um / elSizeModel[1];
     float borderWeightFactor = job.model().borderWeightFactor;
-    float sigma2_px = job.model().borderWeightSigmaUm /
-        job.model().elementSizeUm[1];
-    double diskRadiusXPx = 2.0 * job.model().elementSizeUm[nDims - 1] /
+    float sigma2_px = job.model().borderWeightSigmaUm / elSizeModel[1];
+    double diskRadiusXPx = 2.0 * elSizeModel[nDims - 1] /
         imp.getCalibration().pixelWidth;
-    double diskRadiusYPx = 2.0 * job.model().elementSizeUm[nDims - 2] /
+    double diskRadiusYPx = 2.0 * elSizeModel[nDims - 2] /
         imp.getCalibration().pixelHeight;
 
     ImagePlus[] blobs = new ImagePlus[3];
@@ -1033,7 +796,7 @@ public class Tools {
               throw new InterruptedException("Aborted by user");
           job.progressMonitor().count(
               "Processing slice " + t + " / " + T + ": object " + i +
-              " / " + nObjects[t], 1);
+              " / " + nObjects[t - 1], 1);
           float[] d = (float[])DistanceTransform.getDistanceToForegroundPixels(
               (FloatProcessor)ip.duplicate(), i).getPixels();
           for (int j = 0; j < H * W; j++) {
@@ -1088,28 +851,21 @@ public class Tools {
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
 
+    // Create HDF5 Multi-dimensional Array (memory space)
+    MDFloatArray data = new MDFloatArray(blockDims);
+    float[] dataFlat = data.getAsFlatArray();
+
+    ImageStack stack = imp.getStack();
+
     for (int t = 0; t < T; ++t) {
-      for (int z = 0; z < Z; ++z) {
-        blockIdx[0] = t * Z + z;
+      for (int z = 0; z < Z; ++z, ++blockIdx[0]) {
         for (int c = 0; c < C; ++c) {
-          if (job.interrupted())
+          if (!job.progressMonitor().count(
+                  "Saving " + dsName + " t=" + t + ", z=" + z + ", c=" + c, 1))
               throw new InterruptedException("Aborted by user");
-          job.progressMonitor().count(
-              "Saving " + dsName + " t=" + t + ", z=" + z + ", c=" + c, 1);
-
-           blockIdx[1] = c;
-
-          // Create HDF5 Multi-dimensional Array (memory space)
-          MDFloatArray data = new MDFloatArray(blockDims);
-          float[] dataFlat = data.getAsFlatArray();
-
-          // Get IJ index to processed slice
-          ImageStack stack = imp.getStack();
+          blockIdx[1] = c;
           int stackIndex = imp.getStackIndex(c + 1, z + 1, t + 1);
-
           System.arraycopy(stack.getPixels(stackIndex), 0, dataFlat, 0, H * W);
-
-         // save it
           writer.float32().writeMDArrayBlock(dsName, data, blockIdx);
         }
       }
@@ -1133,29 +889,23 @@ public class Tools {
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
 
+    // Create HDF5 Multi-dimensional Array (memory space)
+    MDFloatArray data = new MDFloatArray(blockDims);
+    float[] dataFlat = data.getAsFlatArray();
+
+    ImageStack stack = imp.getStack();
+
     for (int t = 0; t < T; ++t) {
       blockIdx[0] = t;
       for (int z = 0; z < Z; ++z) {
         blockIdx[2] = z;
         for (int c = 0; c < C; ++c) {
           blockIdx[1] = c;
-          if (job.interrupted())
+          if (!job.progressMonitor().count(
+                  "Saving " + dsName + " t=" + t + ", z=" + z + ", c=" + c, 1))
               throw new InterruptedException("Aborted by user");
-
-          // Create HDF5 Multi-dimensional Array (memory space)
-          MDFloatArray data = new MDFloatArray(blockDims);
-          float[] dataFlat = data.getAsFlatArray();
-
-          // Get IJ index to processed slice
-          ImageStack stack = imp.getStack();
           int stackIndex = imp.getStackIndex(c + 1, z + 1, t + 1);
-
           System.arraycopy(stack.getPixels(stackIndex), 0, dataFlat, 0, H * W);
-
-          job.progressMonitor().count(
-              "Saving t=" + t + ", z=" + z + ", c=" + c, 1);
-
-          // save it
           writer.float32().writeMDArrayBlock(dsName, data, blockIdx);
         }
       }
@@ -1221,7 +971,7 @@ public class Tools {
         .useSimpleDataSpaceForAttributes().overwrite().writer();
     outFile.deleteOnExit();
 
-    if (job.model().elementSizeUm.length == 2)
+    if (job.model().nDims() == 2)
         save2DBlob(impScaled, writer, dsName, job);
     else save3DBlob(impScaled, writer, dsName, job);
 
@@ -1229,7 +979,7 @@ public class Tools {
       ImagePlus[] blobs =
           convertAnnotationsToLabelsAndWeights(imp, classes, job);
 
-      if (job.model().elementSizeUm.length == 2) {
+      if (job.model().nDims() == 2) {
         save2DBlob(blobs[0], writer, "labels", job);
         save2DBlob(blobs[1], writer, "weights", job);
         save2DBlob(blobs[2], writer, "weights2", job);
@@ -1514,365 +1264,6 @@ public class Tools {
       }
       Thread.sleep(100);
     }
-  }
-
-  public static void loadSegmentationToImagePlus(
-      File file, SegmentationJob job, boolean outputScores,
-      boolean outputSoftmaxScores)
-      throws HDF5Exception, IOException {
-    loadSegmentationToImagePlus(
-        file, job, outputScores, outputSoftmaxScores, false);
-  }
-
-  public static void loadSegmentationToImagePlus(
-      File file, SegmentationJob job, boolean outputScores,
-      boolean outputSoftmaxScores, boolean generateMarkers)
-      throws HDF5Exception, IOException {
-
-    job.progressMonitor().reset();
-    job.progressMonitor().count("Creating visualization", 0);
-
-    boolean computeSoftmaxScores = outputSoftmaxScores || generateMarkers;
-
-    IHDF5Reader reader =
-        HDF5Factory.configureForReading(file.getAbsolutePath()).reader();
-    List<String> outputs = reader.getGroupMembers("/");
-
-    int dsIdx = 1;
-    for (String dsName : outputs) {
-
-      String title = job.imageName() + " - " + dsName;
-      HDF5DataSetInformation dsInfo =
-          reader.object().getDataSetInformation(dsName);
-      int nDims    = dsInfo.getDimensions().length - 2;
-      int nFrames  = (int)dsInfo.getDimensions()[0];
-      int nClasses = (int)dsInfo.getDimensions()[1];
-      int nLevs    = (nDims == 2) ? 1 : (int)dsInfo.getDimensions()[2];
-      int nRows    = (int)dsInfo.getDimensions()[2 + ((nDims == 2) ? 0 : 1)];
-      int nCols    = (int)dsInfo.getDimensions()[3 + ((nDims == 2) ? 0 : 1)];
-
-      ImagePlus impScores = null;
-      if (outputScores) {
-        impScores = IJ.createHyperStack(
-            title, nCols, nRows, nClasses, nLevs, nFrames, 32);
-        impScores.setDisplayMode(IJ.GRAYSCALE);
-        impScores.setCalibration(job.imageCalibration().copy());
-      }
-
-      ImagePlus impSoftmaxScores = null;
-      if (computeSoftmaxScores) {
-        impSoftmaxScores = IJ.createHyperStack(
-            title + " (softmax)", nCols, nRows, nClasses, nLevs, nFrames, 32);
-        impSoftmaxScores.setDisplayMode(IJ.GRAYSCALE);
-        impSoftmaxScores.setCalibration(job.imageCalibration().copy());
-      }
-
-      ImagePlus impClassification = IJ.createHyperStack(
-          title + " (segmentation)", nCols, nRows, 1, nLevs, nFrames, 16);
-      impClassification.setDisplayMode(IJ.GRAYSCALE);
-      impClassification.setCalibration(job.imageCalibration().copy());
-
-      int[] blockDims = (nDims == 2) ?
-          (new int[] { 1, 1, nRows, nCols }) :
-          (new int[] { 1, 1, 1, nRows, nCols });
-      long[] blockIdx = (nDims == 2) ?
-          (new long[] { 0, 0, 0, 0 }) : (new long[] { 0, 0, 0, 0, 0 });
-
-      int nOperations = nFrames * nLevs * nClasses;
-      if (generateMarkers) nOperations += 4 * nFrames * nLevs * (nClasses - 1);
-      job.progressMonitor().initNewTask(
-          "Creating visualization for " + dsName,
-          (float)dsIdx / (float)outputs.size(), nOperations);
-      dsIdx++;
-
-      for (int t = 0; t < nFrames; ++t) {
-        blockIdx[0] = t;
-        for (int z = 0; z < nLevs; ++z) {
-          if (nDims == 3) blockIdx[2] = z;
-          float[] maxScore = new float[nRows * nCols];
-          float[] expScoreSum =
-              computeSoftmaxScores ? new float[nRows * nCols] : null;
-          ImageProcessor ipC = impClassification.getStack().getProcessor(
-              impClassification.getStackIndex(1, z + 1, t + 1));
-          short[] maxIndex = (short[])ipC.getPixels();
-          int c = 0;
-          blockIdx[1] = c;
-          job.progressMonitor().count(
-              "Classification t=" + (t + 1) + "/" + nFrames +
-              ", z=" + (z + 1) + "/" + nLevs + ", class=" + c + "/" +
-              (nClasses - 1), 1);
-          float[] score = reader.float32().readMDArrayBlock(
-              dsName, blockDims, blockIdx).getAsFlatArray();
-          if (outputScores)
-              System.arraycopy(
-                  score, 0,
-                  impScores.getStack().getProcessor(
-                      impScores.getStackIndex(c + 1, z + 1, t + 1)).getPixels(),
-                  0, nRows * nCols);
-          if (computeSoftmaxScores) {
-            float[] smscores =
-                (float[])impSoftmaxScores.getStack().getProcessor(
-                    impSoftmaxScores.getStackIndex(
-                        c + 1, z + 1, t + 1)).getPixels();
-            for (int i = 0; i < nRows * nCols; ++i) {
-              smscores[i] = (float)Math.exp((double)score[i]);
-              expScoreSum[i] = smscores[i];
-            }
-          }
-          System.arraycopy(score, 0, maxScore, 0, nRows * nCols);
-          Arrays.fill(maxIndex, (short) c);
-          ++c;
-          for (; c < nClasses; ++c) {
-            blockIdx[1] = c;
-            job.progressMonitor().count(
-                "Classification t=" + (t + 1) + "/" + nFrames +
-                ", z=" + (z + 1) + "/" + nLevs + ", class=" + c + "/" +
-                (nClasses - 1), 1);
-            score = reader.float32().readMDArrayBlock(
-                dsName, blockDims, blockIdx).getAsFlatArray();
-            if (outputScores)
-                System.arraycopy(
-                    score, 0, impScores.getStack().getProcessor(
-                        impScores.getStackIndex(
-                            c + 1, z + 1, t + 1)).getPixels(),
-                    0, nRows * nCols);
-            if (computeSoftmaxScores) {
-              float[] smscores =
-                  (float[])impSoftmaxScores.getStack().getProcessor(
-                  impSoftmaxScores.getStackIndex(
-                      c + 1, z + 1, t + 1)).getPixels();
-              for (int i = 0; i < nRows * nCols; ++i) {
-                smscores[i] = (float)Math.exp((double)score[i]);
-                expScoreSum[i] += smscores[i];
-              }
-            }
-            for (int i = 0; i < nRows * nCols; ++i) {
-              if (score[i] > maxScore[i]) {
-                maxScore[i] = score[i];
-                maxIndex[i] = (short) c;
-              }
-            }
-          }
-          if (computeSoftmaxScores) {
-            for (c = 0; c < nClasses; ++c) {
-              float[] smscores =
-                  (float[])impSoftmaxScores.getStack().getProcessor(
-                      impSoftmaxScores.getStackIndex(
-                          c + 1, z + 1, t + 1)).getPixels();
-              for (int i = 0; i < nRows * nCols; ++i)
-                  smscores[i] /= expScoreSum[i];
-            }
-          }
-        }
-      }
-
-      if (outputScores) {
-        for (int i = 0; i < impScores.getStackSize(); ++i) {
-          impScores.setSlice(i + 1);
-          impScores.resetDisplayRange();
-        }
-        impScores.setSlice(1);
-        impScores.show();
-      }
-      if (outputSoftmaxScores) {
-        for (int i = 0; i < impSoftmaxScores.getStackSize(); ++i) {
-          impSoftmaxScores.setSlice(i + 1);
-          impSoftmaxScores.setDisplayRange(0.0, 1.0);
-        }
-        impSoftmaxScores.setSlice(1);
-        impSoftmaxScores.show();
-      }
-      if (impClassification.getStackSize() > 1) {
-        for (int i = 0; i < impClassification.getStackSize(); ++i) {
-          impClassification.setSlice(i + 1);
-          impClassification.resetDisplayRange();
-        }
-        impClassification.setSlice(1);
-      }
-      else impClassification.resetDisplayRange();
-      impClassification.show();
-
-      if (generateMarkers) {
-
-        // Create multi-channel image of per class binary masks
-        ImagePlus impMCClassification = IJ.createHyperStack(
-            title + " (classes)", nCols, nRows, nClasses - 1,
-            nLevs, nFrames, 8);
-        impMCClassification.setCalibration(job.imageCalibration().copy());
-
-        for (int t = 0; t < nFrames; ++t) {
-          for (int z = 0; z < nLevs; ++z) {
-            short[] cl = (short[])impClassification.getStack().getProcessor(
-                impClassification.getStackIndex(1, z + 1, t + 1)).getPixels();
-            byte[][] mccl = new byte[nClasses - 1][];
-            for (int c = 0; c < nClasses - 1; ++c)
-            {
-              job.progressMonitor().count(
-                  "Generating masks t=" + (t + 1) + "/" + nFrames +
-                  ", z=" + (z + 1) + "/" + nLevs + ", class=" + (c + 1) + "/" +
-                  (nClasses - 1), 1);
-              ImageProcessor impMccl =
-                  impMCClassification.getStack().getProcessor(
-                      impMCClassification.getStackIndex(c + 1, z + 1, t + 1));
-              impMccl.setValue(0);
-              impMccl.fill();
-              mccl[c] = (byte[])impMccl.getPixels();
-            }
-            for (int i = 0; i < nRows * nCols; ++i)
-                if (cl[i] != 0) mccl[cl[i] - 1][i] = (byte)255;
-          }
-        }
-
-        // Connected component labeling
-        job.progressMonitor().count("Connected component labeling", 0);
-        Pair< Integer[], Blob<Integer> > connComps =
-            ConnectedComponentLabeling.label(
-                impMCClassification,
-                ConnectedComponentLabeling.SIMPLE_NEIGHBORHOOD,
-                job.progressMonitor());
-
-        // Compute centers of mass of connected components
-        float[][][] centerPosUm = new float[nFrames * (nClasses - 1)][][];
-        float[][] weightSum = new float[nFrames * (nClasses - 1)][];
-        int[][] nPixels = new int[nFrames * (nClasses - 1)][];
-        for (int i = 0; i < nFrames * (nClasses - 1); ++i) {
-          centerPosUm[i] = new float[connComps.first[i]][nDims];
-          weightSum[i] = new float[connComps.first[i]];
-          nPixels[i] = new int[connComps.first[i]];
-          for (int j = 0; j < connComps.first[i]; ++j) {
-            for (int d = 0; d < nDims; ++d) centerPosUm[i][j][d] = 0.0f;
-            weightSum[i][j] = 0.0f;
-            nPixels[i][j] = 0;
-          }
-        }
-        Integer[] labels = connComps.second.data();
-        double[] elSize = connComps.second.elementSizeUm();
-        int lblIdx = 0;
-        for (int t = 0; t < nFrames; ++t) {
-          for (int c = 0; c < nClasses - 1; ++c) {
-            float[][] cPosUm = centerPosUm[t * (nClasses - 1) + c];
-            float[] ws = weightSum[t * (nClasses - 1) + c];
-            int[] np = nPixels[t * (nClasses - 1) + c];
-            for (int z = 0; z < nLevs; ++z) {
-              job.progressMonitor().count(
-                  "Computing positions t=" + (t + 1) + "/" + nFrames +
-                  ", z=" + (z + 1) + "/" + nLevs + ", class=" + (c + 1) + "/" +
-                  (nClasses - 1), 1);
-              float[] smscore = (float[])
-                  impSoftmaxScores.getStack().getProcessor(
-                      impSoftmaxScores.getStackIndex(
-                          c + 2, z + 1, t + 1)).getPixels();
-              int smIdx = 0;
-              for (int y = 0; y < nRows; ++y) {
-                for (int x = 0; x < nCols; ++x, ++lblIdx, ++smIdx) {
-                  if (labels[lblIdx] == 0) continue;
-                  if (nDims == 2) {
-                    cPosUm[labels[lblIdx] - 1][0] +=
-                        smscore[smIdx] * y * elSize[0];
-                    cPosUm[labels[lblIdx] - 1][1] +=
-                        smscore[smIdx] * x * elSize[1];
-                  }
-                  else {
-                    cPosUm[labels[lblIdx] - 1][0] +=
-                        smscore[smIdx] * z * elSize[0];
-                    cPosUm[labels[lblIdx] - 1][1] +=
-                        smscore[smIdx] * y * elSize[1];
-                    cPosUm[labels[lblIdx] - 1][2] +=
-                        smscore[smIdx] * x * elSize[2];
-                  }
-                  ws[labels[lblIdx] - 1] += smscore[smIdx];
-                  np[labels[lblIdx] - 1]++;
-                }
-              }
-            }
-          }
-        }
-
-        Overlay overlay = new Overlay();
-        ResultsTable table = new ResultsTable();
-        int volIdx = 0;
-        for (int t = 0; t < nFrames; ++t) {
-          for (int c = 0; c < nClasses - 1; ++c, ++volIdx) {
-            PointRoi[] detections = new PointRoi[nLevs];
-            for (int j = 0; j < connComps.first[volIdx]; ++j) {
-              table.incrementCounter();
-              table.addValue("frame", t + 1);
-              for (int d = 0; d < nDims; ++d)
-                  centerPosUm[volIdx][j][d] /= weightSum[volIdx][j];
-              if (nDims == 2) {
-                table.addValue("x [µm]", centerPosUm[volIdx][j][1]);
-                table.addValue("y [µm]", centerPosUm[volIdx][j][0]);
-                if (detections[0] == null) {
-                  detections[0] = new PointRoi(
-                      centerPosUm[volIdx][j][1] / elSize[1],
-                      centerPosUm[volIdx][j][0] / elSize[0]);
-                  detections[0].setPosition(t + 1);
-                }
-                else detections[0].addPoint(
-                    centerPosUm[volIdx][j][1] / elSize[1],
-                    centerPosUm[volIdx][j][0] / elSize[0]);
-              }
-              else {
-                table.addValue("x [µm]", centerPosUm[volIdx][j][2]);
-                table.addValue("y [µm]", centerPosUm[volIdx][j][1]);
-                table.addValue("z [µm]", centerPosUm[volIdx][j][0]);
-                int z = (int)Math.round(centerPosUm[volIdx][j][0] / elSize[0]);
-                if (z < 0) z = 0;
-                if (z >= nLevs) z = nLevs - 1;
-                if (detections[z] == null) {
-                  detections[z] = new PointRoi(
-                      centerPosUm[volIdx][j][2] / elSize[2],
-                      centerPosUm[volIdx][j][1] / elSize[1]);
-                  if (nFrames > 1)
-                      detections[z].setPosition(1, z + 1, t + 1);
-                  else
-                      detections[z].setPosition(z + 1);
-                }
-                else detections[z].addPoint(
-                    centerPosUm[volIdx][j][2] / elSize[2],
-                    centerPosUm[volIdx][j][1] / elSize[1]);
-              }
-              table.addValue("class", c + 1);
-              table.addValue(
-                  "confidence", weightSum[volIdx][j] / nPixels[volIdx][j]);
-            }
-            for (int z = 0; z < nLevs; ++z) {
-              if (detections[z] != null) overlay.add(
-                  detections[z], "Class " + (c + 1));
-            }
-          }
-        }
-
-        table.show(title + " (detections)");
-        impClassification.setOverlay(overlay);
-
-        job.progressMonitor().end();
-      }
-    }
-    reader.close();
-  }
-
-  static int checkAck(InputStream in) throws IOException {
-    int b = in.read();
-    // b may be 0 for success,
-    //          1 for error,
-    //          2 for fatal error,
-    //          -1
-    if (b == 0) return b;
-    if (b == -1) return b;
-
-    if (b == 1 || b == 2) {
-      StringBuffer sb = new StringBuffer();
-      int c;
-      do {
-        c = in.read();
-        sb.append((char)c);
-      }
-      while (c != '\n');
-      if (b == 1) IJ.log(sb.toString());
-      if (b == 2) IJ.log(sb.toString());
-    }
-    return b;
   }
 
 }

@@ -201,6 +201,7 @@ class ProgressCellRenderer extends JProgressBar implements TableCellRenderer {
   public Component getTableCellRendererComponent(
       JTable table, Object value, boolean isSelected, boolean hasFocus,
       int row, int column) {
+    setDoubleBuffered(true);
     if (value instanceof ProgressMonitor) {
       ProgressMonitor s = (ProgressMonitor)value;
       if (!getString().equals(s.message())) setString(s.message());

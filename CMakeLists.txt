@@ -38,6 +38,7 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/JobManager.java
   src/de/unifreiburg/unet/JobTableModel.java
   src/de/unifreiburg/unet/HostConfigurationPanel.java
+  src/de/unifreiburg/unet/SftpFileIO.java
   src/de/unifreiburg/unet/Job.java
   src/de/unifreiburg/unet/SegmentationJob.java
   src/de/unifreiburg/unet/DetectionJob.java

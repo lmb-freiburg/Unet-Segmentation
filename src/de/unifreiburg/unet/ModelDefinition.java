@@ -73,7 +73,6 @@ public class ModelDefinition {
   public int[] downsampleFactor = null;
   public int[] padInput = null;
   public int[] padOutput = null;
-  public float[] elementSizeUm = null;
   public int[][] memoryMap = null;
   public float borderWeightFactor = 50.0f;
   public float borderWeightSigmaUm = 3.0f;
@@ -99,18 +98,17 @@ public class ModelDefinition {
   private JSpinner _gridZSpinner = null;
   private JSpinner _gpuMemSpinner = null;
 
+  private final JPanel _elementSizeUmPanel = new JPanel(
+      new FlowLayout(FlowLayout.LEFT, 0, 0));
+  private final JSpinner _elSizeXSpinner = new JSpinner(
+      new SpinnerNumberModel(0.5, 0.0001, 1000000.0, 0.01));
+  private final JSpinner _elSizeYSpinner = new JSpinner(
+      new SpinnerNumberModel(0.5, 0.0001, 1000000.0, 0.01));
+  private final JSpinner _elSizeZSpinner = new JSpinner(
+      new SpinnerNumberModel(0.5, 0.0001, 1000000.0, 0.01));
+
   public ModelDefinition() {
-    // Prepare empty GUI elements for this model
-    _tileModePanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-    _tileModeSelector.addItemListener(
-        new ItemListener() {
-          @Override
-          public void itemStateChanged(ItemEvent e) {
-            if (e.getStateChange() == ItemEvent.SELECTED) {
-              ((CardLayout)_tileModePanel.getLayout()).show(
-                  _tileModePanel, (String)_tileModeSelector.getSelectedItem());
-            }
-          }});
+    this(null);
   }
 
   public ModelDefinition(Job job) {
@@ -127,6 +125,9 @@ public class ModelDefinition {
                   _tileModePanel, (String)_tileModeSelector.getSelectedItem());
             }
           }});
+    _elementSizeUmPanel.setBorder(
+        BorderFactory.createEmptyBorder(0, 0, 0, 0));
+    ((FlowLayout)_elementSizeUmPanel.getLayout()).setAlignOnBaseline(true);
   }
 
   private void _initGUIElements() {
@@ -146,9 +147,51 @@ public class ModelDefinition {
     }
   }
 
+  public void setElementSizeUm(float[] elSize) {
+    if (elSize == null || elSize.length < 2 || elSize.length > 3) return;
+
+    if (elSize.length != _nDims) {
+
+      _nDims = elSize.length;
+      _elementSizeUmPanel.removeAll();
+      _elementSizeUmPanel.add(new JLabel(" x: "));
+      _elementSizeUmPanel.add(_elSizeXSpinner);
+      _elementSizeUmPanel.add(new JLabel(" y: "));
+      _elementSizeUmPanel.add(_elSizeYSpinner);
+      if (_nDims == 3) {
+        _elementSizeUmPanel.add(new JLabel(" z: "));
+        _elementSizeUmPanel.add(_elSizeZSpinner);
+      }
+    }
+
+    if (_nDims == 2) {
+      _elSizeXSpinner.setValue((double)elSize[1]);
+      _elSizeYSpinner.setValue((double)elSize[0]);
+    }
+    else {
+      _elSizeXSpinner.setValue((double)elSize[2]);
+      _elSizeYSpinner.setValue((double)elSize[1]);
+      _elSizeZSpinner.setValue((double)elSize[0]);
+    }
+  }
+
+  public float[] elementSizeUm() {
+    if (!isValid()) return null;
+    float[] res = new float[_nDims];
+    if (_nDims == 2) {
+      res[0] = ((Double)_elSizeYSpinner.getValue()).floatValue();
+      res[1] = ((Double)_elSizeXSpinner.getValue()).floatValue();
+    }
+    else {
+      res[0] = ((Double)_elSizeZSpinner.getValue()).floatValue();
+      res[1] = ((Double)_elSizeYSpinner.getValue()).floatValue();
+      res[2] = ((Double)_elSizeXSpinner.getValue()).floatValue();
+    }
+    return res;
+  }
+
   public ModelDefinition duplicate() {
     ModelDefinition dup = new ModelDefinition(_job);
-    dup._nDims = _nDims;
     dup._minOutTileShape = _minOutTileShape;
     dup.remoteAbsolutePath = remoteAbsolutePath;
     dup.modelPrototxtAbsolutePath = modelPrototxtAbsolutePath;
@@ -162,6 +205,7 @@ public class ModelDefinition {
     dup.modelPrototxt = modelPrototxt;
     dup.padding = padding;
     dup.normalizationType = normalizationType;
+    if (elementSizeUm() != null) dup.setElementSizeUm(elementSizeUm());
     if (downsampleFactor != null) {
       dup.downsampleFactor = new int[downsampleFactor.length];
       dup.downsampleFactor = Arrays.copyOf(
@@ -174,10 +218,6 @@ public class ModelDefinition {
     if (padOutput != null) {
       dup.padOutput = new int[padOutput.length];
       dup.padOutput = Arrays.copyOf(padOutput, padInput.length);
-    }
-    if (elementSizeUm != null) {
-      dup.elementSizeUm = new float[elementSizeUm.length];
-      dup.elementSizeUm = Arrays.copyOf(elementSizeUm, elementSizeUm.length);
     }
     if (memoryMap != null) {
       dup.memoryMap = new int[memoryMap.length][memoryMap[0].length];
@@ -225,10 +265,10 @@ public class ModelDefinition {
     modelPrototxt = reader.string().read("/model_prototxt");
     padding = reader.string().read("/unet_param/padding");
     normalizationType = reader.int32().read("/unet_param/normalization_type");
+    setElementSizeUm(reader.float32().readArray("/unet_param/element_size_um"));
     downsampleFactor = reader.int32().readArray("/unet_param/downsampleFactor");
     padInput = reader.int32().readArray("/unet_param/padInput");
     padOutput = reader.int32().readArray("/unet_param/padOutput");
-    elementSizeUm = reader.float32().readArray("/unet_param/element_size_um");
     try {
       borderWeightFactor = reader.float32().read(
           "/unet_param/pixelwise_loss_weights/borderWeightFactor");
@@ -249,8 +289,6 @@ public class ModelDefinition {
       memoryMap = null;
     }
     reader.close();
-
-    _nDims = elementSizeUm.length;
 
     // Convert scalar parameters to vectors
     if (downsampleFactor.length == 1) {
@@ -297,6 +335,10 @@ public class ModelDefinition {
     return _tileModePanel;
   }
 
+  public JPanel elementSizeUmPanel() {
+    return _elementSizeUmPanel;
+  }
+
   public int[] getOutputTileShape(int[] inputTileShape) {
     int[] res = new int[_nDims];
     for (int d = 0; d < _nDims; d++)
@@ -316,6 +358,9 @@ public class ModelDefinition {
     panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
     ((FlowLayout)panel.getLayout()).setAlignOnBaseline(true);
 
+    String prefsPrefix = (_job != null && _job instanceof FinetuneJob) ?
+        "unet_finetuning." : "unet_segmentation.";
+
     panel.add(new JLabel(" x: "));
     {
       int dsFactor = downsampleFactor[_nDims - 1];
@@ -325,10 +370,7 @@ public class ModelDefinition {
           getInputTileShape(_minOutTileShape)[_nDims - 1];
       _shapeXSpinner = new JSpinner(
           new SpinnerNumberModel(
-              (int)Prefs.get(
-                  "unet_segmentation." + id + ".tileShapeX",
-                  minValue + 10 * dsFactor),
-              minValue, (int)Integer.MAX_VALUE, dsFactor));
+              minValue, minValue, (int)Integer.MAX_VALUE, dsFactor));
       _shapeXSpinner.addChangeListener(new ChangeListener() {
             @Override
             public void stateChanged(ChangeEvent e) {
@@ -340,6 +382,9 @@ public class ModelDefinition {
               _shapeXSpinner.setValue(nextValidSize);
             }
           });
+      _shapeXSpinner.setValue(
+          (int)Prefs.get(
+              prefsPrefix + id + ".tileShapeX", minValue + 10 * dsFactor));
     }
     panel.add(_shapeXSpinner);
 
@@ -352,9 +397,7 @@ public class ModelDefinition {
           getInputTileShape(_minOutTileShape)[_nDims - 2];
       _shapeYSpinner = new JSpinner(
           new SpinnerNumberModel(
-              (int)Prefs.get("unet_segmentation." + id + ".tileShapeY",
-                             minValue + 10 * dsFactor),
-              minValue, (int)Integer.MAX_VALUE, dsFactor));
+              minValue, minValue, (int)Integer.MAX_VALUE, dsFactor));
       _shapeYSpinner.addChangeListener(new ChangeListener() {
             @Override
             public void stateChanged(ChangeEvent e) {
@@ -366,6 +409,9 @@ public class ModelDefinition {
               _shapeYSpinner.setValue(nextValidSize);
             }
           });
+      _shapeYSpinner.setValue(
+          (int)Prefs.get(
+              prefsPrefix + id + ".tileShapeY", minValue + 10 * dsFactor));
     }
     panel.add(_shapeYSpinner);
 
@@ -378,9 +424,7 @@ public class ModelDefinition {
           getInputTileShape(_minOutTileShape)[_nDims - 3];
       _shapeZSpinner = new JSpinner(
           new SpinnerNumberModel(
-              (int)Prefs.get("unet_segmentation." + id + ".tileShapeZ",
-                             minValue + 10 * dsFactor),
-              minValue, (int)Integer.MAX_VALUE, dsFactor));
+              minValue, minValue, (int)Integer.MAX_VALUE, dsFactor));
       _shapeZSpinner.addChangeListener(new ChangeListener() {
             @Override
             public void stateChanged(ChangeEvent e) {
@@ -392,6 +436,9 @@ public class ModelDefinition {
               _shapeZSpinner.setValue(nextValidSize);
             }
           });
+      _shapeZSpinner.setValue(
+          (int)Prefs.get(
+              prefsPrefix + id + ".tileShapeZ", minValue + 10 * dsFactor));
       panel.add(_shapeZSpinner);
     }
     _tileModePanel.add(panel, SHAPE);
@@ -484,7 +531,7 @@ public class ModelDefinition {
     writer.int32().writeArray("/unet_param/downsampleFactor", downsampleFactor);
     writer.int32().writeArray("/unet_param/padInput", padInput);
     writer.int32().writeArray("/unet_param/padOutput", padOutput);
-    writer.float32().writeArray("/unet_param/element_size_um", elementSizeUm);
+    writer.float32().writeArray("/unet_param/element_size_um", elementSizeUm());
     writer.float32().write(
         "/unet_param/pixelwise_loss_weights/borderWeightFactor",
         borderWeightFactor);
@@ -640,13 +687,15 @@ public class ModelDefinition {
       return;
     }
 
+    String prefsPrefix = (_job != null && _job instanceof FinetuneJob) ?
+        "unet_finetuning." : "unet_segmentation.";
     if (((String)_tileModeSelector.getSelectedItem()).equals(SHAPE)) {
-      Prefs.set("unet_segmentation." + id + ".tileShapeX",
+      Prefs.set(prefsPrefix + id + ".tileShapeX",
                 (Integer)_shapeXSpinner.getValue());
-      Prefs.set("unet_segmentation." + id + ".tileShapeY",
+      Prefs.set(prefsPrefix + id + ".tileShapeY",
                 (Integer)_shapeYSpinner.getValue());
       if (_nDims == 3)
-          Prefs.set("unet_segmentation." + id + ".tileShapeZ",
+          Prefs.set(prefsPrefix + id + ".tileShapeZ",
                     (Integer)_shapeZSpinner.getValue());
       return;
     }
