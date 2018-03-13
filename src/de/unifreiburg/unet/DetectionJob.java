@@ -31,48 +31,27 @@
 package de.unifreiburg.unet;
 
 import ij.IJ;
-import ij.Prefs;
 import ij.WindowManager;
-import ij.ImagePlus;
 import ij.plugin.PlugIn;
 import ij.plugin.frame.Recorder;
-import ij.measure.Calibration;
 
-import java.awt.Dimension;
 import java.awt.BorderLayout;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 import javax.swing.JPanel;
 import javax.swing.JLabel;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
-import javax.swing.JComboBox;
 import javax.swing.JPasswordField;
-import javax.swing.JSeparator;
-import javax.swing.SwingConstants;
-import javax.swing.SwingUtilities;
-import javax.swing.JOptionPane;
-import javax.swing.JFileChooser;
-import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.JDialog;
-import javax.swing.GroupLayout;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.BufferedReader;
-import java.util.Vector;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Arrays;
 
 import com.jcraft.jsch.JSch;
-import com.jcraft.jsch.Session;
-import com.jcraft.jsch.Channel;
-import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSchException;
-import com.jcraft.jsch.SftpException;
 
 public class DetectionJob extends SegmentationJob implements PlugIn {
 

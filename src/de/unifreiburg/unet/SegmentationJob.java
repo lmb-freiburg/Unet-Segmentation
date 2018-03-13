@@ -99,12 +99,12 @@ public class SegmentationJob extends Job implements PlugIn {
   protected JComboBox<String> _averagingComboBox =
       new JComboBox<String>(_averagingModes);
   protected JCheckBox _keepOriginalCheckBox = new JCheckBox(
-      "Keep original", Prefs.get("unet_segmentation.keepOriginal", false));
+      "Keep original", Prefs.get("unet.segmentation.keepOriginal", false));
   protected JCheckBox _outputScoresCheckBox = new JCheckBox(
-      "Show scores", Prefs.get("unet_segmentation.outputScores", false));
+      "Show scores", Prefs.get("unet.segmentation.outputScores", false));
   protected JCheckBox _outputSoftmaxScoresCheckBox = new JCheckBox(
       "Show softmax scores",
-      Prefs.get("unet_segmentation.outputSoftmaxScores", false));
+      Prefs.get("unet.segmentation.outputSoftmaxScores", false));
 
   public SegmentationJob() {
     super();
@@ -268,14 +268,17 @@ public class SegmentationJob extends Job implements PlugIn {
       dialogOK = checkParameters();
       if (!dialogOK) continue;
 
-      // Check whether caffe binary exists and is executable
+      // Check whether caffe_unet binary exists and is executable
       ProcessResult res = null;
+      String caffeBinaryPath = Prefs.get("unet.caffeBinary", "caffe");
+      String caffeBaseDir = caffeBinaryPath.replaceFirst("[^/]*$", "");
       while (res == null)
       {
         if (sshSession() == null) {
           try {
             Vector<String> cmd = new Vector<String>();
-            cmd.add(Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+            cmd.add(Prefs.get(
+                        "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
             res = Tools.execute(cmd, this);
           }
           catch (IOException e) {
@@ -285,7 +288,8 @@ public class SegmentationJob extends Job implements PlugIn {
         }
         else {
           try {
-            String cmd = Prefs.get("unet_finetuning.caffeBinary", "caffe");
+            String cmd = Prefs.get(
+                "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
             res = Tools.execute(cmd, sshSession(), this);
           }
           catch (JSchException e) {
@@ -297,14 +301,14 @@ public class SegmentationJob extends Job implements PlugIn {
         }
         if (res.exitStatus != 0) {
           String caffePath = JOptionPane.showInputDialog(
-              WindowManager.getActiveWindow(), "caffe was not found.\n" +
-              "Please specify your caffe binary\n",
-              Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+              WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
+              "Please specify your caffe_unet binary\n",
+              Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
           if (caffePath == null)
               throw new InterruptedException("Dialog canceled");
           if (caffePath.equals(""))
-              Prefs.set("unet_finetuning.caffeBinary", "caffe");
-          else Prefs.set("unet_finetuning.caffeBinary", caffePath);
+              Prefs.set("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
+          else Prefs.set("unet.caffe_unetBinary", caffePath);
           res = null;
         }
       }
@@ -324,7 +328,7 @@ public class SegmentationJob extends Job implements PlugIn {
               new SftpFileIO(sshSession(), progressMonitor()).put(
                   originalModel().file, originalModel().remoteAbsolutePath));
           _createdRemoteFiles.add(originalModel().remoteAbsolutePath);
-          Prefs.set("unet_segmentation.processfolder", processFolder());
+          Prefs.set("unet.processfolder", processFolder());
         }
         catch (SftpException|JSchException e) {
           IJ.showMessage(
@@ -343,7 +347,8 @@ public class SegmentationJob extends Job implements PlugIn {
         try {
           do {
             String cmd =
-                Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
+                Prefs.get("unet.caffe_unetBinary",
+                          caffeBaseDir + "caffe_unet") +
                 " check_model_and_weights_h5 -model \"" +
                 originalModel().remoteAbsolutePath + "\" -weights \"" +
                 weightsFileName() + "\" -n_channels " + nChannels + " " +
@@ -418,7 +423,8 @@ public class SegmentationJob extends Job implements PlugIn {
       else {
         try {
           Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
+          cmd.add(Prefs.get(
+                      "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
           cmd.add("check_model_and_weights_h5");
           cmd.add("-model");
           cmd.add(originalModel().file.getAbsolutePath());
@@ -451,11 +457,11 @@ public class SegmentationJob extends Job implements PlugIn {
       }
     }
 
-    Prefs.set("unet_segmentation.keepOriginal",
+    Prefs.set("unet.segmentation.keepOriginal",
               _keepOriginalCheckBox.isSelected());
-    Prefs.set("unet_segmentation.outputScores",
+    Prefs.set("unet.segmentation.outputScores",
               _outputScoresCheckBox.isSelected());
-    Prefs.set("unet_segmentation.outputSoftmaxScores",
+    Prefs.set("unet.segmentation.outputSoftmaxScores",
               _outputSoftmaxScoresCheckBox.isSelected());
 
     _parametersDialog.dispose();
@@ -478,7 +484,7 @@ public class SegmentationJob extends Job implements PlugIn {
         averagingParm = "-average_rotate";
 
     String commandString =
-        Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
+        Prefs.get("unet.caffe_unetBinary", "caffe_unet") +
         " tiled_predict -infileH5 \"" + fileName +
         "\" -outfileH5 \"" + fileName + "\" -model \"" +
         originalModel().remoteAbsolutePath + "\" -weights \"" +
@@ -607,7 +613,7 @@ public class SegmentationJob extends Job implements PlugIn {
     String nTilesValue = parameters[1];
 
     String commandString =
-        Prefs.get("unet_segmentation.caffeBinary", "caffe_unet");
+        Prefs.get("unet.caffe_unetBinary", "caffe_unet");
 
     IJ.log(
         commandString + " tiled_predict -infileH5 \"" +

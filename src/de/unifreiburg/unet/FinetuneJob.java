@@ -105,31 +105,31 @@ public class FinetuneJob extends Job implements PlugIn {
       new JFormattedTextField(
           new NumberFormatter(new DecimalFormat("0.###E0")));
   private final JTextField _outModeldefTextField = new JTextField(
-      Prefs.get("unet_finetuning.outModeldef", "finetuned-modeldef.h5"));
+      Prefs.get("unet.finetuning.outModeldef", "finetuned-modeldef.h5"));
   private final JButton _outModeldefChooseButton =
       (UIManager.get("FileView.directoryIcon") instanceof Icon) ?
       new JButton((Icon)UIManager.get("FileView.directoryIcon")) :
       new JButton("...");
   private final JTextField _outweightsTextField = new JTextField(
-      Prefs.get("unet_finetuning.outweights", "finetuned.caffemodel.h5"));
+      Prefs.get("unet.finetuning.outweights", "finetuned.caffemodel.h5"));
   private final JButton _outweightsChooseButton =
       hostConfiguration().finetunedFileChooseButton();
   private final JSpinner _iterationsSpinner =
       new JSpinner(
           new SpinnerNumberModel(
-              (int)Prefs.get("unet_finetuning.iterations", 1000),
+              (int)Prefs.get("unet.finetuning.iterations", 1000),
               1, (int)Integer.MAX_VALUE, 1));
   private final JSpinner _validationStepSpinner =
       new JSpinner(
           new SpinnerNumberModel(
-              (int)Prefs.get("unet_finetuning.validation_step", 1),
+              (int)Prefs.get("unet.finetuning.validation_step", 1),
               1, (int)Integer.MAX_VALUE, 1));
   private final JCheckBox _treatRoiNamesAsClassesCheckBox =
       new JCheckBox(
           "ROI names are classes",
-          Prefs.get("unet_finetuning.roiNamesAreClasses", false));
+          Prefs.get("unet.finetuning.roiNamesAreClasses", false));
   private final JTextField _modelNameTextField = new JTextField(
-      Prefs.get("unet_finetuning.modelName", "finetuned model"));
+      Prefs.get("unet.finetuning.modelName", "finetuned model"));
 
   private boolean _trainFromScratch = false;
   private int _currentTestIteration = 0;
@@ -213,7 +213,7 @@ public class FinetuneJob extends Job implements PlugIn {
         "Use native image element size for finetuning");
     JLabel learningRateLabel = new JLabel("Learning rate:");
     _learningRateTextField.setValue(
-        (Double)Prefs.get("unet_finetuning.base_learning_rate", 1e-4));
+        (Double)Prefs.get("unet.finetuning.base_learning_rate", 1e-4));
     _learningRateTextField.setToolTipText(
         "Learning rate of the optimizer. You may use scientific notation, " +
         "(e.g. 1E-4 = 0.0001, note the capital E)");
@@ -485,26 +485,23 @@ public class FinetuneJob extends Job implements PlugIn {
       ProcessResult res = null;
       while (res == null)
       {
+        res = new ProcessResult();
         if (sshSession() == null) {
           try {
             Vector<String> cmd = new Vector<String>();
-            cmd.add(Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+            cmd.add(Prefs.get("unet.caffeBinary", "caffe"));
             res = Tools.execute(cmd, this);
           }
           catch (IOException e) {
-            res = new ProcessResult();
             res.exitStatus = 1;
           }
         }
         else {
           try {
-            String cmd = Prefs.get("unet_finetuning.caffeBinary", "caffe");
-            res = Tools.execute(cmd, sshSession(), this);
+            res = Tools.execute(
+                Prefs.get("unet.caffeBinary", "caffe"), sshSession(), this);
           }
-          catch (JSchException e) {
-            res.exitStatus = 1;
-          }
-          catch (IOException e) {
+          catch (JSchException|IOException e) {
             res.exitStatus = 1;
           }
         }
@@ -512,12 +509,54 @@ public class FinetuneJob extends Job implements PlugIn {
           String caffePath = JOptionPane.showInputDialog(
               WindowManager.getActiveWindow(), "caffe was not found.\n" +
               "Please specify your caffe binary\n",
-              Prefs.get("unet_finetuning.caffeBinary", "caffe"));
+              Prefs.get("unet.caffeBinary", "caffe"));
           if (caffePath == null)
               throw new InterruptedException("Dialog canceled");
           if (caffePath.equals(""))
-              Prefs.set("unet_finetuning.caffeBinary", "caffe");
-          else Prefs.set("unet_finetuning.caffeBinary", caffePath);
+              Prefs.set("unet.caffeBinary", "caffe");
+          else Prefs.set("unet.caffeBinary", caffePath);
+          res = null;
+        }
+      }
+
+      // Check whether caffe_unet binary exists and is executable
+      res = null;
+      String caffeBinaryPath = Prefs.get("unet.caffeBinary", "caffe");
+      String caffeBaseDir = caffeBinaryPath.replaceFirst("[^/]*$", "");
+      while (res == null)
+      {
+        res = new ProcessResult();
+        if (sshSession() == null) {
+          try {
+            Vector<String> cmd = new Vector<String>();
+            cmd.add(Prefs.get(
+                        "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
+            res = Tools.execute(cmd, this);
+          }
+          catch (IOException e) {
+            res.exitStatus = 1;
+          }
+        }
+        else {
+          try {
+            res = Tools.execute(
+                Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"),
+                sshSession(), this);
+          }
+          catch (JSchException|IOException e) {
+            res.exitStatus = 1;
+          }
+        }
+        if (res.exitStatus != 0) {
+          String caffePath = JOptionPane.showInputDialog(
+              WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
+              "Please specify your caffe_unet binary\n",
+              Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
+          if (caffePath == null)
+              throw new InterruptedException("Dialog canceled");
+          if (caffePath.equals(""))
+              Prefs.set("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
+          else Prefs.set("unet.caffe_unetBinary", caffePath);
           res = null;
         }
       }
@@ -532,13 +571,12 @@ public class FinetuneJob extends Job implements PlugIn {
               new SftpFileIO(sshSession(), progressMonitor()).put(
                   originalModel().file, model().remoteAbsolutePath));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
-          Prefs.set("unet_segmentation.processfolder", processFolder());
+          Prefs.set("unet.processfolder", processFolder());
         }
         catch (SftpException|JSchException e) {
           IJ.showMessage(
-              "Model upload failed.\nDo you have sufficient " +
-              "permissions to create the processing folder on " +
-              "the remote host?");
+              "Model upload failed.\nPlease select a folder with " +
+              "write permissions!");
           dialogOK = false;
           continue;
         }
@@ -550,7 +588,7 @@ public class FinetuneJob extends Job implements PlugIn {
 
         try {
           String cmd =
-              Prefs.get("unet_segmentation.caffeBinary", "caffe_unet") +
+              Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet") +
               " check_model_and_weights_h5 -model \"" +
               model().remoteAbsolutePath + "\" -weights \"" +
               weightsFileName() + "\" -n_channels " + nChannels + " " +
@@ -560,7 +598,7 @@ public class FinetuneJob extends Job implements PlugIn {
             int selectedOption = JOptionPane.showConfirmDialog(
                 WindowManager.getActiveWindow(),
                 "No compatible pre-trained weights found at the given " +
-                "location on the backend server.\n" +
+                "location on the server.\n" +
                 "Do you want to train from scratch?",
                 "Start new Training?", JOptionPane.YES_NO_CANCEL_OPTION,
                 JOptionPane.QUESTION_MESSAGE);
@@ -595,7 +633,8 @@ public class FinetuneJob extends Job implements PlugIn {
       else {
         try {
           Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get("unet_segmentation.caffeBinary", "caffe_unet"));
+          cmd.add(Prefs.get(
+                      "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
           cmd.add("check_model_and_weights_h5");
           cmd.add("-model");
           cmd.add(originalModel().file.getAbsolutePath());
@@ -651,16 +690,16 @@ public class FinetuneJob extends Job implements PlugIn {
       }
     }
 
-    Prefs.set("unet_finetuning.base_learning_rate",
+    Prefs.set("unet.finetuning.base_learning_rate",
               (Double)_learningRateTextField.getValue());
-    Prefs.set("unet_finetuning.modelName", _modelNameTextField.getText());
-    Prefs.set("unet_finetuning.outModeldef", _outModeldefTextField.getText());
-    Prefs.set("unet_finetuning.outweights", _outweightsTextField.getText());
-    Prefs.set("unet_finetuning.iterations",
+    Prefs.set("unet.finetuning.modelName", _modelNameTextField.getText());
+    Prefs.set("unet.finetuning.outModeldef", _outModeldefTextField.getText());
+    Prefs.set("unet.finetuning.outweights", _outweightsTextField.getText());
+    Prefs.set("unet.finetuning.iterations",
               (Integer)_iterationsSpinner.getValue());
-    Prefs.set("unet_finetuning.validation_step",
+    Prefs.set("unet.finetuning.validation_step",
               (Integer)_validationStepSpinner.getValue());
-    Prefs.set("unet_finetuning.roiNamesAreClasses",
+    Prefs.set("unet.finetuning.roiNamesAreClasses",
               _treatRoiNamesAsClassesCheckBox.isSelected());
 
     _parametersDialog.dispose();
@@ -747,7 +786,7 @@ public class FinetuneJob extends Job implements PlugIn {
       weightsAttribute = "-weights";
       weightsValue = weightsFileName();
     }
-    String commandString = Prefs.get("unet_finetuning.caffeBinary", "caffe");
+    String commandString = Prefs.get("unet.caffeBinary", "caffe");
     String commandLineString =
         commandString + " train -solver " +
         model().solverPrototxtAbsolutePath + " " +

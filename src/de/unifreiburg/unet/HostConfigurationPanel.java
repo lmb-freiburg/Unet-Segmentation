@@ -58,7 +58,7 @@ public class HostConfigurationPanel extends JPanel {
       new JComboBox<>(authMethods);
   private JPasswordField _passwordField = null;
   private JTextField _rsaKeyTextField = new JTextField(
-      Prefs.get("unet_segmentation.rsaKeyFilename", ""));
+      Prefs.get("unet.rsaKeyFilename", ""));
   private Session _sshSession = null;
 
   private JButton _weightsFileChooseButton = null;
@@ -235,25 +235,25 @@ public class HostConfigurationPanel extends JPanel {
 
     // Load preferences
     _authMethodComboBox.setSelectedItem(
-        Prefs.get("unet_segmentation.authMethod", "Password:"));
+        Prefs.get("unet.authMethod", "Password:"));
 
-    int nHosts = (int)Prefs.get("unet_segmentation.hosts_size", 0);
+    int nHosts = (int)Prefs.get("unet.hosts_size", 0);
     if (nHosts != 0) {
       for (int i = 0; i < nHosts; ++i) {
-        String host = Prefs.get("unet_segmentation.hosts_" + i, "");
+        String host = Prefs.get("unet.hosts_" + i, "");
         if (!host.equals("")) _hostComboBox.addItem(host);
       }
     }
-    String hostname = Prefs.get("unet_segmentation.hostname", "");
+    String hostname = Prefs.get("unet.hostname", "");
     if (hostname != "") _hostComboBox.setSelectedItem(hostname);
-    _portSpinner.setValue((int)Prefs.get("unet_segmentation.port", 22));
-    _userTextField.setText(Prefs.get("unet_segmentation.username",
-                                     System.getProperty("user.name")));
+    _portSpinner.setValue((int)Prefs.get("unet.port", 22));
+    _userTextField.setText(
+        Prefs.get("unet.username", System.getProperty("user.name")));
 
     // The initial CheckBox status is true, if the stored setting indicate
     // false, update and disable server controls
     _useRemoteHostCheckBox.setSelected(
-        (boolean)Prefs.get("unet_segmentation.useRemoteHost", false));
+        (boolean)Prefs.get("unet.useRemoteHost", false));
   }
 
   boolean useRemoteHost() {
@@ -381,26 +381,26 @@ public class HostConfigurationPanel extends JPanel {
       _sshSession.connect();
 
       // Login was successful => save host to preferences
-      Prefs.set("unet_segmentation.useRemoteHost", true);
+      Prefs.set("unet.useRemoteHost", true);
       int nHosts = _hostComboBox.getItemCount();
       boolean found = false;
       for (int i = 0; i < nHosts; ++i) {
-        Prefs.set("unet_segmentation.hosts_" + i, _hostComboBox.getItemAt(i));
+        Prefs.set("unet.hosts_" + i, _hostComboBox.getItemAt(i));
         found |= _sshSession.getHost().equals(_hostComboBox.getItemAt(i));
       }
       if (!found) {
-        Prefs.set("unet_segmentation.hosts_" + nHosts, hostname());
+        Prefs.set("unet.hosts_" + nHosts, hostname());
         nHosts++;
       }
-      Prefs.set("unet_segmentation.hosts_size", nHosts);
-      Prefs.set("unet_segmentation.hostname", hostname());
-      Prefs.set("unet_segmentation.port", port());
-      Prefs.set("unet_segmentation.username", username());
-      Prefs.set("unet_segmentation.authMethod", authMethod());
+      Prefs.set("unet.hosts_size", nHosts);
+      Prefs.set("unet.hostname", hostname());
+      Prefs.set("unet.port", port());
+      Prefs.set("unet.username", username());
+      Prefs.set("unet.authMethod", authMethod());
       if (authRSAKey())
-          Prefs.set("unet_segmentation.rsaKeyFilename", rsaKeyFile());
+          Prefs.set("unet.rsaKeyFilename", rsaKeyFile());
     }
-    else Prefs.set("unet_segmentation.useRemoteHost", false);
+    else Prefs.set("unet.useRemoteHost", false);
 
     return _sshSession;
   }

@@ -34,7 +34,7 @@ import ij.process.FloatProcessor;
 
 public class DistanceTransform {
 
-  public static final float BG_VALUE = Float.POSITIVE_INFINITY;
+  public static final float BG_VALUE = 1.0e20f;
 
   private static float[] dt(float[] f, int n) {
     float[] d = new float[n];

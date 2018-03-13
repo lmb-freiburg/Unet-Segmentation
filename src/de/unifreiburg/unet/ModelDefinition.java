@@ -31,25 +31,33 @@
 package de.unifreiburg.unet;
 
 import ij.Prefs;
-import ij.IJ;
 
-import java.io.*;
-import java.util.*;
+import java.io.File;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.Arrays;
 
-import java.awt.*;
-import java.awt.event.*;
-import javax.swing.*;
-import javax.swing.event.*;
+import java.awt.CardLayout;
+import java.awt.FlowLayout;
+import java.awt.event.ItemListener;
+import java.awt.event.ItemEvent;
+import javax.swing.JComponent;
+import javax.swing.JComboBox;
+import javax.swing.JPanel;
+import javax.swing.JLabel;
+import javax.swing.JSpinner;
+import javax.swing.BorderFactory;
+import javax.swing.SpinnerNumberModel;
+import javax.swing.event.ChangeListener;
+import javax.swing.event.ChangeEvent;
 
 // HDF5 stuff
 import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
-import ch.systemsx.cisd.hdf5.HDF5FloatStorageFeatures;
 import ch.systemsx.cisd.hdf5.HDF5Factory;
 import ch.systemsx.cisd.hdf5.IHDF5Writer;
 import ch.systemsx.cisd.hdf5.IHDF5WriterConfigurator;
 import ch.systemsx.cisd.hdf5.IHDF5Reader;
-import ch.systemsx.cisd.hdf5.HDF5DataSetInformation;
-import ch.systemsx.cisd.base.mdarray.MDFloatArray;
 
 public class ModelDefinition {
 
@@ -142,7 +150,7 @@ public class ModelDefinition {
       }
       if (memoryMap != null) createMemoryCard();
       _tileModeSelector.setSelectedItem(
-          (String)Prefs.get("unet_segmentation." + id + ".tilingOption",
+          (String)Prefs.get("unet." + id + ".tilingOption",
                             (String)_tileModeSelector.getSelectedItem()));
     }
   }
@@ -316,7 +324,7 @@ public class ModelDefinition {
           _minOutTileShape[d] += downsampleFactor[d];
     }
 
-    weightFile = Prefs.get("unet_segmentation." + id + ".weightFile", "");
+    weightFile = Prefs.get("unet." + id + ".weightFile", "");
   }
 
   public boolean isValid() {
@@ -359,7 +367,7 @@ public class ModelDefinition {
     ((FlowLayout)panel.getLayout()).setAlignOnBaseline(true);
 
     String prefsPrefix = (_job != null && _job instanceof FinetuneJob) ?
-        "unet_finetuning." : "unet_segmentation.";
+        "unet.finetuning." : "unet.segmentation.";
 
     panel.add(new JLabel(" x: "));
     {
@@ -448,7 +456,7 @@ public class ModelDefinition {
   private void createNTilesCard() {
     _nTilesSpinner = new JSpinner(
         new SpinnerNumberModel(
-            (int)Prefs.get("unet_segmentation." + id + ".nTiles", 1), 1,
+            (int)Prefs.get("unet." + id + ".nTiles", 1), 1,
             (int)Integer.MAX_VALUE, 1));
     _tileModePanel.add(_nTilesSpinner, NTILES);
     _tileModeSelector.addItem(NTILES);
@@ -461,20 +469,20 @@ public class ModelDefinition {
     panel.add(new JLabel(" x: "));
     _gridXSpinner = new JSpinner(
         new SpinnerNumberModel(
-            (int)Prefs.get("unet_segmentation." + id + ".tileGridX", 5), 1,
+            (int)Prefs.get("unet." + id + ".tileGridX", 5), 1,
             (int)Integer.MAX_VALUE, 1));
     panel.add(_gridXSpinner);
     panel.add(new JLabel(" y: "));
     _gridYSpinner = new JSpinner(
         new SpinnerNumberModel(
-            (int)Prefs.get("unet_segmentation." + id + ".tileGridY", 5), 1,
+            (int)Prefs.get("unet." + id + ".tileGridY", 5), 1,
             (int)Integer.MAX_VALUE, 1));
     panel.add(_gridYSpinner);
     if (_nDims == 3) {
       panel.add(new JLabel(" z: "));
       _gridZSpinner = new JSpinner(
           new SpinnerNumberModel(
-              (int)Prefs.get("unet_segmentation." + id + ".tileGridZ", 5), 1,
+              (int)Prefs.get("unet." + id + ".tileGridZ", 5), 1,
               (int)Integer.MAX_VALUE, 1));
       panel.add(_gridZSpinner);
     }
@@ -485,7 +493,7 @@ public class ModelDefinition {
   private void createMemoryCard() {
     _gpuMemSpinner = new JSpinner(
         new SpinnerNumberModel(
-            (int)Prefs.get("unet_segmentation." + id + ".GPUMemoryMB", 1000), 1,
+            (int)Prefs.get("unet." + id + ".GPUMemoryMB", 1000), 1,
             (int)Integer.MAX_VALUE, 1));
     _tileModePanel.add(_gpuMemSpinner, MEMORY);
     _tileModeSelector.addItem(MEMORY);
@@ -665,30 +673,29 @@ public class ModelDefinition {
   }
 
   public void savePreferences() {
-    Prefs.set("unet_segmentation." + id + ".weightFile", weightFile);
+    Prefs.set("unet." + id + ".weightFile", weightFile);
     if (_job != null && _job instanceof SegmentationJob)
-        Prefs.set("unet_segmentation." + id + ".tilingOption",
+        Prefs.set("unet." + id + ".tilingOption",
                   (String)_tileModeSelector.getSelectedItem());
 
     if (((String)_tileModeSelector.getSelectedItem()).equals(NTILES)) {
-      Prefs.set("unet_segmentation." + id + ".nTiles",
-                (Integer)_nTilesSpinner.getValue());
+      Prefs.set("unet." + id + ".nTiles", (Integer)_nTilesSpinner.getValue());
       return;
     }
 
     if (((String)_tileModeSelector.getSelectedItem()).equals(GRID)) {
-      Prefs.set("unet_segmentation." + id + ".tileGridX",
+      Prefs.set("unet." + id + ".tileGridX",
                 (Integer)_gridXSpinner.getValue());
-      Prefs.set("unet_segmentation." + id + ".tileGridY",
+      Prefs.set("unet." + id + ".tileGridY",
                 (Integer)_gridYSpinner.getValue());
       if (_nDims == 3)
-          Prefs.set("unet_segmentation." + id + ".tileGridZ",
+          Prefs.set("unet." + id + ".tileGridZ",
                     (Integer)_gridZSpinner.getValue());
       return;
     }
 
     String prefsPrefix = (_job != null && _job instanceof FinetuneJob) ?
-        "unet_finetuning." : "unet_segmentation.";
+        "unet.finetuning." : "unet.segmentation.";
     if (((String)_tileModeSelector.getSelectedItem()).equals(SHAPE)) {
       Prefs.set(prefsPrefix + id + ".tileShapeX",
                 (Integer)_shapeXSpinner.getValue());
@@ -701,7 +708,7 @@ public class ModelDefinition {
     }
 
     if (((String)_tileModeSelector.getSelectedItem()).equals(MEMORY)) {
-      Prefs.set("unet_segmentation." + id + ".GPUMemoryMB",
+      Prefs.set("unet." + id + ".GPUMemoryMB",
                 (Integer)_gpuMemSpinner.getValue());
       return;
     }

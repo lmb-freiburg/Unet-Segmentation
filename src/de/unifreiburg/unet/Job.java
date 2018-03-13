@@ -60,12 +60,14 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.FileFilter;
 import java.util.Vector;
 import java.util.UUID;
 
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.SftpException;
 
 import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
 
@@ -97,7 +99,7 @@ public abstract class Job extends Thread {
       new JComboBox<ModelDefinition>();
   private final JTextField _weightsFileTextField = new JTextField("", 20);
   private final JTextField _processFolderTextField = new JTextField(
-      Prefs.get("unet_segmentation.processfolder", ""), 20);
+      Prefs.get("unet.processfolder", System.getProperty("user.home")), 20);
   private final String[] gpuList = {
       "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
       "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
@@ -286,15 +288,14 @@ public abstract class Job extends Thread {
     if (_modelComboBox.getItemCount() == 0)
         _modelComboBox.addItem(new ModelDefinition());
     else {
-      String modelId = Prefs.get("unet_segmentation.modelId", "");
+      String modelId = Prefs.get("unet.modelId", "");
       for (int i = 0; i < _modelComboBox.getItemCount(); i++) {
         if (_modelComboBox.getItemAt(i).id.equals(modelId)) {
           _modelComboBox.setSelectedIndex(i);
           break;
         }
       }
-      Prefs.set(
-          "unet_segmentation.modelDefinitionFolder", folder.getAbsolutePath());
+      Prefs.set("unet.modelDefinitionFolder", folder.getAbsolutePath());
     }
     _parametersDialog.invalidate();
     _parametersDialog.pack();
@@ -579,7 +580,9 @@ public abstract class Job extends Thread {
         new ActionListener() {
           @Override
           public void actionPerformed(ActionEvent e) {
-            File startFile = new File(_weightsFileTextField.getText());
+            File startFile = (!_weightsFileTextField.getText().equals("")) ?
+                new File(_weightsFileTextField.getText()) :
+                originalModel().file;
             JFileChooser f = new JFileChooser(startFile);
             f.setDialogTitle("Select trained U-Net weights");
             f.setFileFilter(
@@ -637,11 +640,10 @@ public abstract class Job extends Thread {
     // populates the model combobox and sets _model if a model was
     // found. This should also implicitly update the tiling fields.
     searchModels(
-        new File(Prefs.get("unet_segmentation.modelDefinitionFolder", ".")));
+        new File(Prefs.get("unet.modelDefinitionFolder", ".")));
 
     // Set uncritical fields
-    _useGPUComboBox.setSelectedItem(
-        Prefs.get("unet_segmentation.gpuId", "none"));
+    _useGPUComboBox.setSelectedItem(Prefs.get("unet.gpuId", "none"));
 
     // Free all resources and make isDisplayable() return false to
     // distinguish dialog close from accept
@@ -660,9 +662,9 @@ public abstract class Job extends Thread {
     finalizeDialog();
   }
 
-  public boolean checkParameters() {
+  public boolean checkParameters() throws InterruptedException {
 
-    Prefs.set("unet_segmentation.gpuId", selectedGPUString());
+    Prefs.set("unet.gpuId", selectedGPUString());
 
     if (!originalModel().isValid()) {
       IJ.showMessage("Please select a model. Probably you first need " +
@@ -670,7 +672,7 @@ public abstract class Job extends Thread {
       return false;
     }
 
-    Prefs.set("unet_segmentation.modelId", originalModel().id);
+    Prefs.set("unet.modelId", originalModel().id);
     originalModel().savePreferences();
 
     if (_weightsFileTextField.getText() == "") {
@@ -682,15 +684,65 @@ public abstract class Job extends Thread {
       _sshSession = _hostConfiguration.sshSession();
     }
     catch (JSchException e) {
-      IJ.log("SSH connection to '" + _hostConfiguration.hostname() +
-             "' failed: " + e);
-      IJ.showMessage(
-          "Could not connect to remote host '" + _hostConfiguration.hostname() +
-          "'\nPlease check your login credentials.\n" + e);
+      if (_hostConfiguration.hostname() == null) {
+        IJ.log("No hostname specified");
+        IJ.showMessage("Please enter the server name for remote processing.");
+      }
+      else
+      {
+        IJ.log("SSH connection to '" + _hostConfiguration.hostname() +
+               "' failed: " + e);
+        IJ.showMessage(
+            "Could not connect to remote host '" +
+            _hostConfiguration.hostname() +
+            "'\nPlease check your login credentials.\n" + e);
+      }
       return false;
     }
 
-    Prefs.set("unet_segmentation.processfolder", processFolder());
+    if (sshSession() != null) {
+      try {
+        File tmpFile = File.createTempFile(id(), null);
+        SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
+        _createdRemoteFolders.addAll(
+            sftp.put(tmpFile, processFolder() + "/" + tmpFile.getName()));
+        sftp.removeFile(processFolder() + "/" + tmpFile.getName());
+        tmpFile.delete();
+      }
+      catch (IOException e) {
+        IJ.log("Creation of local temporary file failed.");
+        IJ.error("Cannot create files in the temporary folder of your " +
+                 "local file system.\n" +
+                 "Check write permissions and avaliable disk space.");
+        return false;
+      }
+      catch (JSchException e) {
+        IJ.log("SSH connection failed.");
+        IJ.error("The SSH session has been prematurely disconnected.\n" +
+                 "This should not happen and indicates general network " +
+                 "problems.");
+        return false;
+      }
+      catch (SftpException e) {
+        IJ.log("Sftp transfer failed.");
+        IJ.error("File upload to " + processFolder() + " failed.\n" +
+                 "Please select a folder with write permissions.");
+        return false;
+      }
+    }
+    else {
+      try {
+        File tmpFile = new File(processFolder() + "/" + id() + ".tmp");
+        tmpFile.createNewFile();
+        tmpFile.delete();
+      }
+      catch (IOException e) {
+        IJ.log("Could not write to " + processFolder());
+        IJ.error("Cannot write to " + processFolder() + ".\n" +
+                 "Check write permissions and avaliable disk space.");
+        return false;
+      }
+    }
 
     return true;
   }
