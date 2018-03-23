@@ -664,6 +664,8 @@ public abstract class Job extends Thread {
 
   public boolean checkParameters() throws InterruptedException {
 
+    Prefs.set("unet.processfolder", _processFolderTextField.getText());
+
     Prefs.set("unet.gpuId", selectedGPUString());
 
     if (!originalModel().isValid()) {

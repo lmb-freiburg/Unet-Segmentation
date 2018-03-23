@@ -624,7 +624,8 @@ public class Tools {
       }
     }
 
-    Roi[] rois = imp.getOverlay().toArray();
+    Roi[] rois = (imp.getOverlay() == null) ?
+        (new Roi[] { imp.getRoi() }) : imp.getOverlay().toArray();
     int[] nObjects = new int[T];
     int nObjectsTotal = 0;
     Arrays.fill(nObjects, 0);
@@ -735,99 +736,87 @@ public class Tools {
 
     job.progressMonitor().init(0, "", "", nObjectsTotal);
 
-    if (nDims == 2) {
+    for (int t = 1; t <= T; ++t) {
 
-      // Piece of cake, just process slicewise :-D
+      ImageProcessor ip, wp, w2p, lp;
+      if (blobs[0].getStackSize() == 1) {
+        lp = blobs[0].getProcessor();
+        wp = blobs[1].getProcessor();
+        w2p = blobs[2].getProcessor();
+        ip = instanceLabels.getProcessor();
+      }
+      else {
+        lp = blobs[0].getStack().getProcessor(t);
+        wp = blobs[1].getStack().getProcessor(t);
+        w2p = blobs[2].getStack().getProcessor(t);
+        ip = instanceLabels.getStack().getProcessor(t);
+      }
 
-      for (int t = 1; t <= T; ++t) {
-
-        ImageProcessor ip, wp, w2p, lp;
-        if (blobs[0].getStackSize() == 1) {
-          lp = blobs[0].getProcessor();
-          wp = blobs[1].getProcessor();
-          w2p = blobs[2].getProcessor();
-          ip = instanceLabels.getProcessor();
-        }
-        else {
-          lp = blobs[0].getStack().getProcessor(t);
-          wp = blobs[1].getStack().getProcessor(t);
-          w2p = blobs[2].getStack().getProcessor(t);
-          ip = instanceLabels.getStack().getProcessor(t);
-        }
-
-        // Create background ridges between touching instances
-        for (int y = 0; y < H; y++) {
-          for (int x = 0; x < W; x++) {
-            float instanceLabel = ip.getf(x, y);
-            if (instanceLabel == 0 || wp.getf(x, y) == 0.0f) continue;
-            float classLabel = lp.getf(x, y);
-            for (int dy = -1; dy <= 0 && instanceLabel != 0; dy++) {
-              if (y + dy < 0 || y + dy >= H) continue;
-              for (int dx = -1; dx <= 1 && instanceLabel != 0; dx++) {
-                if ((dy == 0 && dx >= 0) || x + dx < 0 || x + dx >= W)
-                    continue;
-                float nbInstanceLabel = ip.getf(x + dx, y + dy);
-                float nbClassLabel = lp.getf(x + dx, y + dy);
-                if (nbInstanceLabel == 0 ||
-                    nbInstanceLabel == instanceLabel ||
-                    classLabel != nbClassLabel) continue;
-                instanceLabel = 0;
-                ip.setf(x, y, instanceLabel);
-                lp.setf(x, y, 0);
-                // Mark as "pixel needs extraweight computation"
-                wp.setf(x, y, -1.0f);
-                w2p.setf(x, y, foregroundBackgroundRatio);
-              }
+      // Create background ridges between touching instances
+      for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+          float instanceLabel = ip.getf(x, y);
+          if (instanceLabel == 0 || wp.getf(x, y) == 0.0f) continue;
+          float classLabel = lp.getf(x, y);
+          for (int dy = -1; dy <= 0 && instanceLabel != 0; dy++) {
+            if (y + dy < 0 || y + dy >= H) continue;
+            for (int dx = -1; dx <= 1 && instanceLabel != 0; dx++) {
+              if ((dy == 0 && dx >= 0) || x + dx < 0 || x + dx >= W)
+                  continue;
+              float nbInstanceLabel = ip.getf(x + dx, y + dy);
+              float nbClassLabel = lp.getf(x + dx, y + dy);
+              if (nbInstanceLabel == 0 ||
+                  nbInstanceLabel == instanceLabel ||
+                  classLabel != nbClassLabel) continue;
+              instanceLabel = 0;
+              ip.setf(x, y, instanceLabel);
+              lp.setf(x, y, 0);
+              // Mark as "pixel needs extraweight computation"
+              wp.setf(x, y, -1.0f);
+              w2p.setf(x, y, foregroundBackgroundRatio);
             }
           }
         }
+      }
 
-        // Compute extra weights
-        ImageProcessor impMin1Dist = ip.duplicate();
-        impMin1Dist.setValue(DistanceTransform.BG_VALUE);
-        impMin1Dist.fill();
-        float[] min1Dist = (float[])impMin1Dist.getPixels();
-        ImageProcessor impMin2Dist = ip.duplicate();
-        impMin2Dist.setValue(DistanceTransform.BG_VALUE);
-        impMin2Dist.fill();
-        float[] min2Dist = (float[])impMin2Dist.getPixels();
-        for (int i = 1; i <= nObjects[t - 1]; i++, objIdx++) {
-          if (job.interrupted())
-              throw new InterruptedException("Aborted by user");
-          job.progressMonitor().count(
-              "Processing slice " + t + " / " + T + ": object " + i +
-              " / " + nObjects[t - 1], 1);
-          float[] d = (float[])DistanceTransform.getDistanceToForegroundPixels(
-              (FloatProcessor)ip.duplicate(), i).getPixels();
-          for (int j = 0; j < H * W; j++) {
-            float min1dist = min1Dist[j];
-            float min2dist = Math.min(min2Dist[j], d[j]);
-            min1Dist[j] = Math.min(min1dist, min2dist);
-            min2Dist[j] = Math.max(min1dist, min2dist);
-          }
-        }
-
-        float va = 1 - foregroundBackgroundRatio;
-        float[] w = (float[])wp.getPixels();
-        for (int i = 0; i < W * H; ++i) {
-          if (w[i] >= 0.0f) continue;
-          float d1 = min1Dist[i];
-          float d2 = min2Dist[i];
-          float wa = (float)Math.exp(
-              -(d1 * d1) / (2 * sigma1_px * sigma1_px));
-          float we = (float)Math.exp(
-              -(d1 + d2) * (d1 + d2) / (2 * sigma2_px * sigma2_px));
-          w[i] = borderWeightFactor * we + va * wa +
-              foregroundBackgroundRatio;
+      // Compute extra weights
+      ImageProcessor impMin1Dist = ip.duplicate();
+      impMin1Dist.setValue(DistanceTransform.BG_VALUE);
+      impMin1Dist.fill();
+      float[] min1Dist = (float[])impMin1Dist.getPixels();
+      ImageProcessor impMin2Dist = ip.duplicate();
+      impMin2Dist.setValue(DistanceTransform.BG_VALUE);
+      impMin2Dist.fill();
+      float[] min2Dist = (float[])impMin2Dist.getPixels();
+      for (int i = 1; i <= nObjects[t - 1]; i++, objIdx++) {
+        if (job.interrupted())
+            throw new InterruptedException("Aborted by user");
+        job.progressMonitor().count(
+            "Processing slice " + t + " / " + T + ": object " + i +
+            " / " + nObjects[t - 1], 1);
+        float[] d = (float[])DistanceTransform.getDistanceToForegroundPixels(
+            (FloatProcessor)ip.duplicate(), i).getPixels();
+        for (int j = 0; j < H * W; j++) {
+          float min1dist = min1Dist[j];
+          float min2dist = Math.min(min2Dist[j], d[j]);
+          min1Dist[j] = Math.min(min1dist, min2dist);
+          min2Dist[j] = Math.max(min1dist, min2dist);
         }
       }
-    }
-    else {
 
-      // Uh, real 3D data... what a mess :-(
-
-      throw new NotImplementedException(
-          "Sorry, 3D finetuning is not implemented yet");
+      float va = 1 - foregroundBackgroundRatio;
+      float[] w = (float[])wp.getPixels();
+      for (int i = 0; i < W * H; ++i) {
+        if (w[i] >= 0.0f) continue;
+        float d1 = min1Dist[i];
+        float d2 = min2Dist[i];
+        float wa = (float)Math.exp(
+            -(d1 * d1) / (2 * sigma1_px * sigma1_px));
+        float we = (float)Math.exp(
+            -(d1 + d2) * (d1 + d2) / (2 * sigma2_px * sigma2_px));
+        w[i] = borderWeightFactor * we + va * wa +
+            foregroundBackgroundRatio;
+      }
     }
 
     return blobs;

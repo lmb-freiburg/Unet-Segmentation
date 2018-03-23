@@ -68,7 +68,7 @@ add_custom_command(TARGET Unet_Segmentation
   )
 
 add_custom_command(OUTPUT ${PROJECT_SOURCE_DIR}/caffe/Caffe.java
-  COMMAND ${PROTOBUF_COMPILER} -I${PROJECT_SOURCE_DIR}/src --java_out=${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/caffe/caffe.proto
+  COMMAND ${PROTOBUF_COMPILER} -I${PROJECT_SOURCE_DIR}/caffe --java_out=${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/caffe/caffe.proto
   )
 
 install_jar(Unet_Segmentation ${CMAKE_INSTALL_PREFIX})

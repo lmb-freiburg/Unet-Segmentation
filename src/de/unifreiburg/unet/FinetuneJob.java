@@ -133,8 +133,17 @@ public class FinetuneJob extends Job implements PlugIn {
 
   private boolean _trainFromScratch = false;
   private int _currentTestIteration = 0;
+  private int _currentIouClass = 0;
+  private int _currentF1DetectionClass = 0;
+  private int _currentF1SegmentationClass = 0;
+  private Vector<String> _classNames = null;
 
   private ModelDefinition _finetunedModel = null;
+
+  private final Color[] colormap = new Color[] {
+      new Color(0, 0, 0), new Color(0, 0, 0.5f), new Color(0, 0.5f, 0),
+      new Color(0.5f, 0, 0), new Color(0.5f, 0.5f, 0),
+      new Color(0.5f, 0, 0.5f), new Color(0, 0.5f, 0.5f) };
 
   public FinetuneJob() {
     super();
@@ -192,7 +201,8 @@ public class FinetuneJob extends Job implements PlugIn {
     // Create Train/Test split Configurator
     int[] ids = WindowManager.getIDList();
     for (int i = 0; i < ids.length; i++)
-        if (WindowManager.getImage(ids[i]).getOverlay() != null)
+        if (WindowManager.getImage(ids[i]).getRoi() != null ||
+            WindowManager.getImage(ids[i]).getOverlay() != null)
             ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).addElement(
                 WindowManager.getImage(ids[i]));
 
@@ -710,10 +720,15 @@ public class FinetuneJob extends Job implements PlugIn {
   }
 
   private void parseCaffeOutputString(
-      String msg, ImagePlus lossImage, double[] xTrain, double[] yTrain,
-      double[] xValid, double[] yValid) {
+      String msg, ImagePlus lossImage, ImagePlus iouImage,
+      ImagePlus f1DetectionImage, ImagePlus f1SegmentationImage,
+      double[] xTrain, double[] yTrain, double[] xValid, double[] yValid,
+      double[][] iou, double[][] f1Detection, double[][] f1Segmentation) {
     int idx = -1;
     String line = null;
+    boolean showIoU = false;
+    boolean showF1Detection = false;
+    boolean showF1Segmentation = false;
     while (msg.length() > 0) {
       if ((idx = msg.indexOf('\n')) != -1) {
         line = msg.substring(0, idx);
@@ -738,16 +753,58 @@ public class FinetuneJob extends Job implements PlugIn {
       if (line.matches("^.*Iteration [0-9]+, Testing net.*$")) {
         _currentTestIteration = Integer.valueOf(
             line.split("Iteration ")[1].split(",")[0]);
+        _currentIouClass = 0;
+        _currentF1DetectionClass = 0;
+        _currentF1SegmentationClass = 0;
       }
-      if (line.matches("^.*Test net output #0: loss_valid = .*$")) {
+      if (line.matches("^.*Test net output #[0-9]*: loss_valid = .*$")) {
         double loss = Double.valueOf(
             line.split("loss_valid = ")[1].split(" ")[0]);
         yValid[_currentTestIteration /
                (Integer)_validationStepSpinner.getValue()] = loss;
         updatePlot = true;
       }
+      if (line.matches("^.*Test net output #[0-9]*: IoU = .*$")) {
+        int k = Integer.valueOf(
+            line.split(": IoU = ")[0].split("Test net output #")[1]);
+        Double iouValue = Double.valueOf(line.split("IoU = ")[1]);
+        if (_currentIouClass < _classNames.size() - 1) {
+          iou[_currentIouClass++][
+              _currentTestIteration /
+              (Integer)_validationStepSpinner.getValue()] = iouValue;
+          updatePlot = true;
+          showIoU = true;
+        }
+      }
+      if (line.matches("^.*Test net output #[0-9]*: F1_detection = .*$")) {
+        int k = Integer.valueOf(
+            line.split(": F1_detection = ")[0].split("Test net output #")[1]);
+        Double f1Value = Double.valueOf(line.split("F1_detection = ")[1]);
+        if (_currentF1DetectionClass < _classNames.size() - 1) {
+          f1Detection[_currentF1DetectionClass++][
+              _currentTestIteration /
+              (Integer)_validationStepSpinner.getValue()] = f1Value;
+          updatePlot = true;
+          showF1Detection = true;
+        }
+      }
+      if (line.matches("^.*Test net output #[0-9]*: F1_segmentation = .*$")) {
+        int k = Integer.valueOf(
+            line.split(": F1_segmentation = ")[0].split(
+                "Test net output #")[1]);
+        Double f1Value = Double.valueOf(line.split("F1_segmentation = ")[1]);
+        if (_currentF1SegmentationClass < _classNames.size() - 1) {
+          f1Segmentation[_currentF1SegmentationClass++][
+              _currentTestIteration /
+              (Integer)_validationStepSpinner.getValue()] = f1Value;
+          updatePlot = true;
+          showF1Segmentation = true;
+        }
+      }
 
       if (updatePlot) {
+
+        // Update loss plot
         Plot plot = new Plot("Finetuning Evolution", "Iteration", "Loss");
         plot.setColor(Color.black);
         plot.addPoints(xTrain, yTrain, Plot.LINE);
@@ -759,6 +816,62 @@ public class FinetuneJob extends Job implements PlugIn {
         ImageProcessor plotProcessor = plot.getProcessor();
         lossImage.setProcessor(null, plotProcessor);
         lossImage.updateAndDraw();
+        if (!lossImage.isVisible()) lossImage.show();
+
+        // Update IoU plot
+        plot = new Plot(
+            "Finetuning Evolution", "Iteration", "Intersection over Union");
+        for (int k = 0; k < _classNames.size() - 1; ++k) {
+          plot.setColor(colormap[k % colormap.length]);
+          plot.addPoints(xValid, iou[k], Plot.LINE);
+        }
+        plot.setColor(Color.black);
+        String legendString = "";
+        for (int k = 1; k < _classNames.size() - 1; ++k)
+            legendString += "IoU " + _classNames.get(k) + "\n";
+        legendString += "IoU " + _classNames.get(_classNames.size() - 1);
+        plot.addLegend(legendString);
+        plot.setLimits(0.0, (double)(xTrain.length - 1), 0.0, 1.0);
+        plotProcessor = plot.getProcessor();
+        iouImage.setProcessor(null, plotProcessor);
+        iouImage.updateAndDraw();
+        if (!iouImage.isVisible() && showIoU) iouImage.show();
+
+        // Update F1 Detection plot
+        plot = new Plot(
+            "Finetuning Evolution", "Iteration", "F1 (Detection)");
+        for (int k = 0; k < _classNames.size() - 1; ++k) {
+          plot.setColor(colormap[k % colormap.length]);
+          plot.addPoints(xValid, f1Detection[k], Plot.LINE);
+        }
+        plot.setColor(Color.black);
+        legendString = "";
+        for (int k = 1; k < _classNames.size() - 1; ++k)
+            legendString += "F1 " + _classNames.get(k) + "\n";
+        legendString += "F1 " + _classNames.get(_classNames.size() - 1);
+        plot.addLegend(legendString);
+        plot.setLimits(0.0, (double)(xTrain.length - 1), 0.0, 1.0);
+        plotProcessor = plot.getProcessor();
+        f1DetectionImage.setProcessor(null, plotProcessor);
+        f1DetectionImage.updateAndDraw();
+        if (!f1DetectionImage.isVisible() && showF1Detection)
+            f1DetectionImage.show();
+
+        // Update F1 Segmentation plot
+        plot = new Plot(
+            "Finetuning Evolution", "Iteration", "F1 (Segmentation)");
+        for (int k = 0; k < _classNames.size() - 1; ++k) {
+          plot.setColor(colormap[k % colormap.length]);
+          plot.addPoints(xValid, f1Segmentation[k], Plot.LINE);
+        }
+        plot.setColor(Color.black);
+        plot.addLegend(legendString);
+        plot.setLimits(0.0, (double)(xTrain.length - 1), 0.0, 1.0);
+        plotProcessor = plot.getProcessor();
+        f1SegmentationImage.setProcessor(null, plotProcessor);
+        f1SegmentationImage.updateAndDraw();
+        if (!f1SegmentationImage.isVisible() && showF1Segmentation)
+            f1SegmentationImage.show();
       }
     }
   }
@@ -801,10 +914,18 @@ public class FinetuneJob extends Job implements PlugIn {
 
     // Set up ImagePlus for plotting the loss curves
     ImagePlus plotImage = null;
+    ImagePlus iouImage = null;
+    ImagePlus f1DetectionImage = null;
+    ImagePlus f1SegmentationImage = null;
     double[] xTrain = new double[nIter + 1];
     double[] yTrain = new double[nIter + 1];
     double[] xValid = new double[nValidations + 1];
     double[] yValid = new double[nValidations + 1];
+    double[][] iou = new double[_classNames.size() - 1][nValidations + 1];
+    double[][] f1Segmentation =
+        new double[_classNames.size() - 1][nValidations + 1];
+    double[][] f1Detection =
+        new double[_classNames.size() - 1][nValidations + 1];
     for (int i = 0; i <= nIter; i++) {
       xTrain[i] = i + 1;
       yTrain[i] = Double.NaN;
@@ -812,6 +933,11 @@ public class FinetuneJob extends Job implements PlugIn {
     for (int i = 0; i <= nValidations ; i++) {
       xValid[i] = i * (Integer)_validationStepSpinner.getValue();
       yValid[i] = Double.NaN;
+      for (int k = 0; k < _classNames.size() - 1; ++k) {
+        iou[k][i] = Double.NaN;
+        f1Segmentation[k][i] = Double.NaN;
+        f1Detection[k][i] = Double.NaN;
+      }
     }
     {
       Plot plot = new Plot("Finetuning " + id(), "Iteration", "Loss");
@@ -819,7 +945,28 @@ public class FinetuneJob extends Job implements PlugIn {
       ImageProcessor plotProcessor = plot.getProcessor();
       plotImage = new ImagePlus("Finetuning " + id(), plotProcessor);
       plotImage.setProcessor(null, plotProcessor);
-      plotImage.show();
+    }
+    {
+      Plot plot = new Plot("Finetuning " + id(), "Iteration", "IoU");
+      plot.setLimits(0.0, (double)nIter, 0.0, 1.0);
+      ImageProcessor plotProcessor = plot.getProcessor();
+      iouImage = new ImagePlus("Finetuning " + id(), plotProcessor);
+      iouImage.setProcessor(null, plotProcessor);
+    }
+    {
+      Plot plot = new Plot("Finetuning " + id(), "Iteration", "F1 (detection)");
+      plot.setLimits(0.0, (double)nIter, 0.0, 1.0);
+      ImageProcessor plotProcessor = plot.getProcessor();
+      f1DetectionImage = new ImagePlus("Finetuning " + id(), plotProcessor);
+      f1DetectionImage.setProcessor(null, plotProcessor);
+    }
+    {
+      Plot plot = new Plot(
+          "Finetuning " + id(), "Iteration", "F1 (segmentation)");
+      plot.setLimits(0.0, (double)nIter, 0.0, 1.0);
+      ImageProcessor plotProcessor = plot.getProcessor();
+      f1SegmentationImage = new ImagePlus("Finetuning " + id(), plotProcessor);
+      f1SegmentationImage.setProcessor(null, plotProcessor);
     }
 
     Channel channel = null;
@@ -880,7 +1027,8 @@ public class FinetuneJob extends Job implements PlugIn {
         while (stdOutput.ready()) {
           line = stdOutput.readLine();
           parseCaffeOutputString(
-              line, plotImage, xTrain, yTrain, xValid, yValid);
+              line, plotImage, iouImage, f1DetectionImage, f1SegmentationImage,
+              xTrain, yTrain, xValid, yValid, iou, f1Detection, f1Segmentation);
         }
         // Also read error stream to avoid stream overflow that leads
         // to process stalling
@@ -888,7 +1036,8 @@ public class FinetuneJob extends Job implements PlugIn {
           line = stdError.readLine();
           errorMsg += line + "\n";
           parseCaffeOutputString(
-              line, plotImage, xTrain, yTrain, xValid, yValid);
+              line, plotImage, iouImage, f1DetectionImage, f1SegmentationImage,
+              xTrain, yTrain, xValid, yValid, iou, f1Detection, f1Segmentation);
         }
 
         if (sshSession() != null) {
@@ -1003,7 +1152,6 @@ public class FinetuneJob extends Job implements PlugIn {
       int nTrainImages = _trainFileList.getModel().getSize();
       int nValidImages = _validFileList.getModel().getSize();
       int nImages = nTrainImages + nValidImages;
-      int nClasses = 2;
 
       String[] trainBlobFileNames = new String[nTrainImages];
       Vector<String> validBlobFileNames = new Vector<String>();
@@ -1018,42 +1166,86 @@ public class FinetuneJob extends Job implements PlugIn {
       // Get class label information from annotations
       progressMonitor().initNewTask(
           "Searching class labels", progressMonitor().taskProgressMax(), 0);
-      Vector<String> classes = new Vector<String>();
+      _classNames = new Vector<String>();
       boolean roiNamesAreClasses =
           _treatRoiNamesAsClassesCheckBox.isSelected();
-      classes.add("background");
-      for (int i = 0; i < nTrainImages; i++) {
+      _classNames.add("background");
+      for (int i = 0; i < nTrainImages && roiNamesAreClasses; i++) {
         ImagePlus imp = ((DefaultListModel<ImagePlus>)
                          _trainFileList.getModel()).get(i);
-        for (Roi roi: imp.getOverlay().toArray()) {
-          if (roi.getName() == null) roiNamesAreClasses = false;
-          if (roi.getName() == null ||
-              roi.getName().toLowerCase(Locale.ROOT).contains("ignore") ||
-              classes.contains(roi.getName()))
+        if (imp.getOverlay() == null) {
+          Roi roi = imp.getRoi();
+          if (roi.getName() == null) {
+            roiNamesAreClasses = false;
+            break;
+          }
+          if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
               continue;
-          classes.add(roi.getName());
-          IJ.log("  Adding class " + roi.getName());
+          String className = roi.getName().replaceFirst("-[0-9]*$", "");
+          if (_classNames.contains(className)) continue;
+          _classNames.add(className);
+          IJ.log("  Adding class " + className);
+        }
+        else {
+          for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi.getName() == null) {
+              roiNamesAreClasses = false;
+              break;
+            }
+            if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
+                continue;
+            String className = roi.getName().replaceFirst("-[0-9]*$", "");
+            if (_classNames.contains(className)) continue;
+            _classNames.add(className);
+            IJ.log("  Adding class " + className);
+          }
         }
       }
       for (int i = 0; i < nValidImages && roiNamesAreClasses; i++) {
         ImagePlus imp = ((DefaultListModel<ImagePlus>)
                          _validFileList.getModel()).get(i);
-        for (Roi roi: imp.getOverlay().toArray()) {
-          if (roi.getName() == null) roiNamesAreClasses = false;
-          if (roi.getName() == null ||
-              roi.getName().toLowerCase(Locale.ROOT).contains("ignore") ||
-              classes.contains(roi.getName()))
+        if (imp.getOverlay() == null) {
+          Roi roi = imp.getRoi();
+          if (roi.getName() == null) {
+            roiNamesAreClasses = false;
+            break;
+          }
+          if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
               continue;
-          classes.add(roi.getName());
-          IJ.log("  Adding class " + roi.getName());
+          String className = roi.getName().replaceFirst("-[0-9]*$", "");
+          if (_classNames.contains(className)) continue;
+          _classNames.add(className);
+          IJ.log("  Adding class " + className);
           IJ.log("  WARNING: Training set does not contain instances of " +
-                 "class " + roi.getName() + " switching to instance " +
+                 "class " + className + " switching to instance " +
                  "segmentation mode");
           roiNamesAreClasses = false;
         }
+        else {
+          for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi.getName() == null) {
+              roiNamesAreClasses = false;
+              break;
+            }
+            if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
+                continue;
+            String className = roi.getName().replaceFirst("-[0-9]*$", "");
+            if (_classNames.contains(className)) continue;
+            _classNames.add(className);
+            IJ.log("  Adding class " + className);
+            IJ.log("  WARNING: Training set does not contain instances of " +
+                   "class " + className + " switching to instance " +
+                   "segmentation mode");
+            roiNamesAreClasses = false;
+          }
+        }
       }
 
-      nClasses = roiNamesAreClasses ? classes.size() : 2;
+      if (!roiNamesAreClasses) {
+        _classNames = new Vector<String>();
+        _classNames.add("Background");
+        _classNames.add("Foreground");
+      }
 
       // Process train files
       for (int i = 0; i < nTrainImages; i++) {
@@ -1067,7 +1259,7 @@ public class FinetuneJob extends Job implements PlugIn {
             processFolder() + "/" + id() + "_train_" + i + ".h5";
         if (sshSession() == null) outfile = new File(trainBlobFileNames[i]);
         Tools.saveHDF5Blob(
-            imp, roiNamesAreClasses ? classes : null, outfile, this, true,
+            imp, roiNamesAreClasses ? _classNames : null, outfile, this, true,
             false);
         if (interrupted()) throw new InterruptedException();
         if (sshSession() != null) {
@@ -1095,7 +1287,7 @@ public class FinetuneJob extends Job implements PlugIn {
         String fileNameStub = (sshSession() == null) ?
             processFolder() + "/" + id() + "_valid_" + i : null;
         File[] generatedFiles = Tools.saveHDF5TiledBlob(
-            imp, roiNamesAreClasses ? classes : null, fileNameStub, this);
+            imp, roiNamesAreClasses ? _classNames : null, fileNameStub, this);
 
         if (sshSession() == null)
             for (File f : generatedFiles)
@@ -1225,8 +1417,8 @@ public class FinetuneJob extends Job implements PlugIn {
             return;
           }
           int nClassesModel = lb.getConvolutionParam().getNumOutput();
-          if (nClassesModel != nClasses)
-              lb.getConvolutionParamBuilder().setNumOutput(nClasses);
+          if (nClassesModel != _classNames.size())
+              lb.getConvolutionParamBuilder().setNumOutput(_classNames.size());
         }
       }
 
@@ -1254,6 +1446,31 @@ public class FinetuneJob extends Job implements PlugIn {
             .addBottom("score").addBottom("labels")
             .addBottom("weights").setName("loss_valid")
             .addTop("loss_valid")
+            .addInclude(
+                Caffe.NetStateRule.newBuilder().setPhase(Caffe.Phase.TEST)));
+        nb.addLayer(
+            Caffe.LayerParameter.newBuilder().setType("IoU")
+            .addBottom("score").addBottom("labels")
+            .addBottom("weights").setName("IoU")
+            .addTop("IoU")
+            .addInclude(
+                Caffe.NetStateRule.newBuilder().setPhase(Caffe.Phase.TEST)));
+        nb.addLayer(
+            Caffe.LayerParameter.newBuilder().setType("F1")
+            .addBottom("score").addBottom("labels")
+            .addBottom("weights").setName("F1_detection")
+            .addTop("F1_detection")
+            .setF1Param(
+                Caffe.F1Parameter.newBuilder().setDistanceMode(
+                    Caffe.F1Parameter.DistanceMode.EUCLIDEAN)
+                .setDistanceThreshold(3.0f))
+            .addInclude(
+                Caffe.NetStateRule.newBuilder().setPhase(Caffe.Phase.TEST)));
+        nb.addLayer(
+            Caffe.LayerParameter.newBuilder().setType("F1")
+            .addBottom("score").addBottom("labels")
+            .addBottom("weights").setName("F1_segmentation")
+            .addTop("F1_segmentation")
             .addInclude(
                 Caffe.NetStateRule.newBuilder().setPhase(Caffe.Phase.TEST)));
       }

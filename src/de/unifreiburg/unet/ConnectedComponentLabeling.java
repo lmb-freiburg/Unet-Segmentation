@@ -266,14 +266,12 @@ public class ConnectedComponentLabeling implements PlugIn {
               if (ip.getf(x, y) == 0) continue;
               int val = labels[outIdx];
               for (int nbIdx = 0; nbIdx < dx.length; ++nbIdx) {
-                if (x + dx[nbIdx] < 0 || x + dx[nbIdx] >= W ||
-                    y + dy[nbIdx] < 0 || y + dy[nbIdx] >= H ||
-                    z + dz[nbIdx] < 0 || z + dz[nbIdx] >= D) continue;
+                if (x + dx[nbIdx] < 0 || y + dy[nbIdx] < 0 ||
+                    z + dz[nbIdx] < 0) continue;
                 int nbVal = labels[
                     outIdx + (dz[nbIdx] * H + dy[nbIdx]) * W + dx[nbIdx]];
                 if (nbVal == 0 || val == nbVal) continue;
-                if (val == 0)
-                {
+                if (val == 0) {
                   labels[outIdx] = nbVal;
                   val = nbVal;
                   continue;
