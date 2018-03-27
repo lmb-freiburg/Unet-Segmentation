@@ -132,18 +132,26 @@ public class FinetuneJob extends Job implements PlugIn {
       Prefs.get("unet.finetuning.modelName", "finetuned model"));
 
   private boolean _trainFromScratch = false;
-  private int _currentTestIteration = 0;
-  private int _currentIouClass = 0;
-  private int _currentF1DetectionClass = 0;
-  private int _currentF1SegmentationClass = 0;
+  private int _currentTestIterationIdx = 0;
+  private double[][] _intersection = null;
+  private double[][] _union = null;
+  private double[][] _iou = null;
+  private double[][] _nTPDetection = null;
+  private double[][] _nPredDetection = null;
+  private double[][] _nObjDetection = null;
+  private double[][] _f1Detection = null;
+  private double[][] _nTPSegmentation = null;
+  private double[][] _nPredSegmentation = null;
+  private double[][] _nObjSegmentation = null;
+  private double[][] _f1Segmentation = null;
   private Vector<String> _classNames = null;
 
   private ModelDefinition _finetunedModel = null;
 
   private final Color[] colormap = new Color[] {
-      new Color(0, 0, 0), new Color(0, 0, 0.5f), new Color(0, 0.5f, 0),
-      new Color(0.5f, 0, 0), new Color(0.5f, 0.5f, 0),
-      new Color(0.5f, 0, 0.5f), new Color(0, 0.5f, 0.5f) };
+      new Color(0, 0, 0), new Color(1.0f, 0, 0), new Color(0, 1.0f, 0),
+      new Color(0, 0, 1.0f), new Color(0.5f, 0.5f, 0), new Color(1.0f, 0, 1.0f),
+      new Color(0, 1.0f, 1.0f) };
 
   public FinetuneJob() {
     super();
@@ -722,13 +730,9 @@ public class FinetuneJob extends Job implements PlugIn {
   private void parseCaffeOutputString(
       String msg, ImagePlus lossImage, ImagePlus iouImage,
       ImagePlus f1DetectionImage, ImagePlus f1SegmentationImage,
-      double[] xTrain, double[] yTrain, double[] xValid, double[] yValid,
-      double[][] iou, double[][] f1Detection, double[][] f1Segmentation) {
+      double[] xTrain, double[] yTrain, double[] xValid, double[] yValid) {
     int idx = -1;
     String line = null;
-    boolean showIoU = false;
-    boolean showF1Detection = false;
-    boolean showF1Segmentation = false;
     while (msg.length() > 0) {
       if ((idx = msg.indexOf('\n')) != -1) {
         line = msg.substring(0, idx);
@@ -738,73 +742,110 @@ public class FinetuneJob extends Job implements PlugIn {
         line = msg;
         msg = "";
       }
-      boolean updatePlot = false;
+
+      // Increment test iteration counter and reset class counters
+      if (line.matches("^.*Iteration [0-9]+, Testing net.*$")) {
+        _currentTestIterationIdx = Integer.valueOf(
+            line.split("Iteration ")[1].split(",")[0]) /
+            (Integer)_validationStepSpinner.getValue();
+      }
+
+      // Accumulate nTP Detection
+      if (line.matches(
+              "^.*F1_detection - Per class true positive count: .*$")) {
+        String[] values =
+            line.split(
+                "F1_detection - Per class true positive count: ")[1].split(" ");
+        for (int c = 0; c < values.length; ++c)
+            _nTPDetection[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Accumulate nPredictions Detection
+      if (line.matches(
+              "^.*F1_detection - Per class prediction count: .*$")) {
+        String[] values =
+            line.split(
+                "F1_detection - Per class prediction count: ")[1].split(" ");
+        for (int c = 0; c < values.length; ++c)
+            _nPredDetection[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Accumulate nObjects Detection
+      if (line.matches(
+              "^.*F1_detection - Per class object count: .*$")) {
+        String[] values =
+            line.split("F1_detection - Per class object count: ")[1].split(" ");
+        for (int c = 0; c < values.length; ++c)
+            _nObjDetection[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Accumulate nTP Segmentation
+      if (line.matches(
+              "^.*F1_segmentation - Per class true positive count: .*$")) {
+        String[] values =
+            line.split(
+                "F1_segmentation - Per class true positive count: ")[1].split(
+                    " ");
+        for (int c = 0; c < values.length; ++c)
+            _nTPSegmentation[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Accumulate nPredictions Segmentation
+      if (line.matches(
+              "^.*F1_segmentation - Per class prediction count: .*$")) {
+        String[] values =
+            line.split(
+                "F1_segmentation - Per class prediction count: ")[1].split(" ");
+        for (int c = 0; c < values.length; ++c)
+            _nPredSegmentation[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Accumulate nObjects Segmentation
+      if (line.matches(
+              "^.*F1_segmentation - Per class object count: .*$")) {
+        String[] values =
+            line.split(
+                "F1_segmentation - Per class object count: ")[1].split(" ");
+        for (int c = 0; c < values.length; ++c)
+            _nObjSegmentation[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Accumulate intersections
+      if (line.matches("^.*IoU - Per class intersection: .*$")) {
+        String[] values =
+            line.split("IoU - Per class intersection: ")[1].split(" ");
+        for (int c = 0; c < values.length; ++c)
+            _intersection[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Accumulate unions
+      if (line.matches("^.*IoU - Per class union: .*$")) {
+        String[] values =
+            line.split("IoU - Per class union: ")[1].split(" ");
+        for (int c = 0; c < values.length; ++c)
+            _union[c][_currentTestIterationIdx] +=
+                Double.valueOf(values[c]);
+      }
+
+      // Update validation loss
+      if (line.matches("^.*Test net output #[0-9]*: loss_valid = .*$")) {
+        double loss = Double.valueOf(
+            line.split("loss_valid = ")[1].split(" ")[0]);
+        yValid[_currentTestIterationIdx] = loss;
+      }
+
+      // Update loss plot and progress
       if (line.matches("^.*Iteration [0-9]+ .* loss = .*$")) {
         int iter = Integer.valueOf(line.split("Iteration ")[1].split(" ")[0]);
         double loss = Double.valueOf(line.split("loss = ")[1]);
         yTrain[iter] = loss;
-        updatePlot = true;
-
-        // Update progress
-        progressMonitor().count(
-            "Finetuning iteration " + iter + "/" + (xTrain.length - 1) +
-            " loss = " + loss, 1);
-      }
-      if (line.matches("^.*Iteration [0-9]+, Testing net.*$")) {
-        _currentTestIteration = Integer.valueOf(
-            line.split("Iteration ")[1].split(",")[0]);
-        _currentIouClass = 0;
-        _currentF1DetectionClass = 0;
-        _currentF1SegmentationClass = 0;
-      }
-      if (line.matches("^.*Test net output #[0-9]*: loss_valid = .*$")) {
-        double loss = Double.valueOf(
-            line.split("loss_valid = ")[1].split(" ")[0]);
-        yValid[_currentTestIteration /
-               (Integer)_validationStepSpinner.getValue()] = loss;
-        updatePlot = true;
-      }
-      if (line.matches("^.*Test net output #[0-9]*: IoU = .*$")) {
-        int k = Integer.valueOf(
-            line.split(": IoU = ")[0].split("Test net output #")[1]);
-        Double iouValue = Double.valueOf(line.split("IoU = ")[1]);
-        if (_currentIouClass < _classNames.size() - 1) {
-          iou[_currentIouClass++][
-              _currentTestIteration /
-              (Integer)_validationStepSpinner.getValue()] = iouValue;
-          updatePlot = true;
-          showIoU = true;
-        }
-      }
-      if (line.matches("^.*Test net output #[0-9]*: F1_detection = .*$")) {
-        int k = Integer.valueOf(
-            line.split(": F1_detection = ")[0].split("Test net output #")[1]);
-        Double f1Value = Double.valueOf(line.split("F1_detection = ")[1]);
-        if (_currentF1DetectionClass < _classNames.size() - 1) {
-          f1Detection[_currentF1DetectionClass++][
-              _currentTestIteration /
-              (Integer)_validationStepSpinner.getValue()] = f1Value;
-          updatePlot = true;
-          showF1Detection = true;
-        }
-      }
-      if (line.matches("^.*Test net output #[0-9]*: F1_segmentation = .*$")) {
-        int k = Integer.valueOf(
-            line.split(": F1_segmentation = ")[0].split(
-                "Test net output #")[1]);
-        Double f1Value = Double.valueOf(line.split("F1_segmentation = ")[1]);
-        if (_currentF1SegmentationClass < _classNames.size() - 1) {
-          f1Segmentation[_currentF1SegmentationClass++][
-              _currentTestIteration /
-              (Integer)_validationStepSpinner.getValue()] = f1Value;
-          updatePlot = true;
-          showF1Segmentation = true;
-        }
-      }
-
-      if (updatePlot) {
-
-        // Update loss plot
         Plot plot = new Plot("Finetuning Evolution", "Iteration", "Loss");
         plot.setColor(Color.black);
         plot.addPoints(xTrain, yTrain, Plot.LINE);
@@ -817,61 +858,84 @@ public class FinetuneJob extends Job implements PlugIn {
         lossImage.setProcessor(null, plotProcessor);
         lossImage.updateAndDraw();
         if (!lossImage.isVisible()) lossImage.show();
+        progressMonitor().count(
+            "Finetuning iteration " + iter + "/" + (xTrain.length - 1) +
+            " loss = " + loss, 1);
+      }
 
-        // Update IoU plot
-        plot = new Plot(
+      // Update IoU plot
+      if (line.matches("^.*Test net output #[0-9]*: IoU = .*$")) {
+        Plot plot = new Plot(
             "Finetuning Evolution", "Iteration", "Intersection over Union");
-        for (int k = 0; k < _classNames.size() - 1; ++k) {
-          plot.setColor(colormap[k % colormap.length]);
-          plot.addPoints(xValid, iou[k], Plot.LINE);
+        String legendString = "";
+        for (int c = 0; c < _classNames.size() - 1; ++c) {
+          _iou[c][_currentTestIterationIdx] =
+              _intersection[c][_currentTestIterationIdx] /
+              _union[c][_currentTestIterationIdx];
+          plot.setColor(colormap[c % colormap.length]);
+          plot.addPoints(xValid, _iou[c], Plot.LINE);
+          legendString += _classNames.get(c + 1) +
+              ((c < _classNames.size() - 1) ? "\n" : "");
         }
         plot.setColor(Color.black);
-        String legendString = "";
-        for (int k = 1; k < _classNames.size() - 1; ++k)
-            legendString += "IoU " + _classNames.get(k) + "\n";
-        legendString += "IoU " + _classNames.get(_classNames.size() - 1);
         plot.addLegend(legendString);
         plot.setLimits(0.0, (double)(xTrain.length - 1), 0.0, 1.0);
-        plotProcessor = plot.getProcessor();
+        ImageProcessor plotProcessor = plot.getProcessor();
         iouImage.setProcessor(null, plotProcessor);
         iouImage.updateAndDraw();
-        if (!iouImage.isVisible() && showIoU) iouImage.show();
+        if (!iouImage.isVisible()) iouImage.show();
+      }
 
-        // Update F1 Detection plot
-        plot = new Plot(
+      // Update F1 Detection plot
+      if (line.matches("^.*Test net output #[0-9]*: F1_detection = .*$")) {
+        Plot plot = new Plot(
             "Finetuning Evolution", "Iteration", "F1 (Detection)");
-        for (int k = 0; k < _classNames.size() - 1; ++k) {
-          plot.setColor(colormap[k % colormap.length]);
-          plot.addPoints(xValid, f1Detection[k], Plot.LINE);
+        String legendString = "";
+        for (int c = 0; c < _classNames.size() - 1; ++c) {
+          double prec = _nTPDetection[c][_currentTestIterationIdx] /
+              _nPredDetection[c][_currentTestIterationIdx];
+          double rec = _nTPDetection[c][_currentTestIterationIdx] /
+              _nObjDetection[c][_currentTestIterationIdx];
+          _f1Detection[c][_currentTestIterationIdx] =
+              2.0 * prec * rec / (prec + rec);
+          plot.setColor(colormap[c % colormap.length]);
+          plot.addPoints(xValid, _f1Detection[c], Plot.LINE);
+          legendString += _classNames.get(c + 1) +
+              ((c < _classNames.size() - 1) ? "\n" : "");
         }
         plot.setColor(Color.black);
-        legendString = "";
-        for (int k = 1; k < _classNames.size() - 1; ++k)
-            legendString += "F1 " + _classNames.get(k) + "\n";
-        legendString += "F1 " + _classNames.get(_classNames.size() - 1);
         plot.addLegend(legendString);
         plot.setLimits(0.0, (double)(xTrain.length - 1), 0.0, 1.0);
-        plotProcessor = plot.getProcessor();
+        ImageProcessor plotProcessor = plot.getProcessor();
         f1DetectionImage.setProcessor(null, plotProcessor);
         f1DetectionImage.updateAndDraw();
-        if (!f1DetectionImage.isVisible() && showF1Detection)
-            f1DetectionImage.show();
+        if (!f1DetectionImage.isVisible()) f1DetectionImage.show();
+      }
 
-        // Update F1 Segmentation plot
-        plot = new Plot(
+      // Update F1 Segmentation plot
+      if (line.matches("^.*Test net output #[0-9]*: F1_segmentation = .*$")) {
+        Plot plot = new Plot(
             "Finetuning Evolution", "Iteration", "F1 (Segmentation)");
-        for (int k = 0; k < _classNames.size() - 1; ++k) {
-          plot.setColor(colormap[k % colormap.length]);
-          plot.addPoints(xValid, f1Segmentation[k], Plot.LINE);
+        String legendString = "";
+        for (int c = 0; c < _classNames.size() - 1; ++c) {
+          double prec = _nTPSegmentation[c][_currentTestIterationIdx] /
+              _nPredSegmentation[c][_currentTestIterationIdx];
+          double rec = _nTPSegmentation[c][_currentTestIterationIdx] /
+              _nObjSegmentation[c][_currentTestIterationIdx];
+          _f1Segmentation[c][_currentTestIterationIdx] =
+              2.0 * prec * rec / (prec + rec);
+          plot.setColor(colormap[c % colormap.length]);
+          plot.addPoints(xValid, _f1Segmentation[c], Plot.LINE);
+          legendString += _classNames.get(c + 1) +
+              ((c < _classNames.size() - 1) ? "\n" : "");
         }
         plot.setColor(Color.black);
         plot.addLegend(legendString);
         plot.setLimits(0.0, (double)(xTrain.length - 1), 0.0, 1.0);
-        plotProcessor = plot.getProcessor();
+        ImageProcessor plotProcessor = plot.getProcessor();
         f1SegmentationImage.setProcessor(null, plotProcessor);
         f1SegmentationImage.updateAndDraw();
-        if (!f1SegmentationImage.isVisible() && showF1Segmentation)
-            f1SegmentationImage.show();
+        if (!f1SegmentationImage.isVisible()) f1SegmentationImage.show();
       }
     }
   }
@@ -921,11 +985,17 @@ public class FinetuneJob extends Job implements PlugIn {
     double[] yTrain = new double[nIter + 1];
     double[] xValid = new double[nValidations + 1];
     double[] yValid = new double[nValidations + 1];
-    double[][] iou = new double[_classNames.size() - 1][nValidations + 1];
-    double[][] f1Segmentation =
-        new double[_classNames.size() - 1][nValidations + 1];
-    double[][] f1Detection =
-        new double[_classNames.size() - 1][nValidations + 1];
+    _intersection = new double[_classNames.size() - 1][nValidations + 1];
+    _union = new double[_classNames.size() - 1][nValidations + 1];
+    _iou = new double[_classNames.size() - 1][nValidations + 1];
+    _nTPDetection = new double[_classNames.size() - 1][nValidations + 1];
+    _nPredDetection = new double[_classNames.size() - 1][nValidations + 1];
+    _nObjDetection = new double[_classNames.size() - 1][nValidations + 1];
+    _f1Detection = new double[_classNames.size() - 1][nValidations + 1];
+    _nTPSegmentation = new double[_classNames.size() - 1][nValidations + 1];
+    _nPredSegmentation = new double[_classNames.size() - 1][nValidations + 1];
+    _nObjSegmentation = new double[_classNames.size() - 1][nValidations + 1];
+    _f1Segmentation = new double[_classNames.size() - 1][nValidations + 1];
     for (int i = 0; i <= nIter; i++) {
       xTrain[i] = i + 1;
       yTrain[i] = Double.NaN;
@@ -934,9 +1004,17 @@ public class FinetuneJob extends Job implements PlugIn {
       xValid[i] = i * (Integer)_validationStepSpinner.getValue();
       yValid[i] = Double.NaN;
       for (int k = 0; k < _classNames.size() - 1; ++k) {
-        iou[k][i] = Double.NaN;
-        f1Segmentation[k][i] = Double.NaN;
-        f1Detection[k][i] = Double.NaN;
+        _intersection[k][i] = 0.0;
+        _union[k][i] = 0.0;
+        _iou[k][i] = Double.NaN;
+        _nTPDetection[k][i] = 0.0;
+        _nPredDetection[k][i] = 0.0;
+        _nObjDetection[k][i] = 0.0;
+        _f1Detection[k][i] = Double.NaN;
+        _nTPSegmentation[k][i] = 0.0;
+        _nPredSegmentation[k][i] = 0.0;
+        _nObjSegmentation[k][i] = 0.0;
+        _f1Segmentation[k][i] = Double.NaN;
       }
     }
     {
@@ -1028,7 +1106,7 @@ public class FinetuneJob extends Job implements PlugIn {
           line = stdOutput.readLine();
           parseCaffeOutputString(
               line, plotImage, iouImage, f1DetectionImage, f1SegmentationImage,
-              xTrain, yTrain, xValid, yValid, iou, f1Detection, f1Segmentation);
+              xTrain, yTrain, xValid, yValid);
         }
         // Also read error stream to avoid stream overflow that leads
         // to process stalling
@@ -1037,7 +1115,7 @@ public class FinetuneJob extends Job implements PlugIn {
           errorMsg += line + "\n";
           parseCaffeOutputString(
               line, plotImage, iouImage, f1DetectionImage, f1SegmentationImage,
-              xTrain, yTrain, xValid, yValid, iou, f1Detection, f1Segmentation);
+              xTrain, yTrain, xValid, yValid);
         }
 
         if (sshSession() != null) {
