@@ -1092,7 +1092,7 @@ public class Tools {
 
             // Copy data tile for sample t
             for (int c = 0; c < C; c++) {
-              int stackIdx = data.getStackIndex(c, 1, t);
+              int stackIdx = data.getStackIndex(c + 1, 1, t + 1);
               ImageProcessor ipDataIn =
                   data.getStack().getProcessor(stackIdx);
               ImageProcessor ipDataOut =
@@ -1115,7 +1115,7 @@ public class Tools {
             }
 
             // Copy labels and weights tiles for sample t
-            int stackIdx = annotations[0].getStackIndex(1, 1, t);
+            int stackIdx = annotations[0].getStackIndex(1, 1, t + 1);
             ImageProcessor ipLabelsIn =
                 annotations[0].getStack().getProcessor(stackIdx);
             ImageProcessor ipLabelsOut =
