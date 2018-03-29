@@ -78,12 +78,14 @@ public class SftpFileIO {
   public void removeFile(String path)
       throws JSchException, IOException, InterruptedException, SftpException {
     _pr.init(0, "", "", 1);
-    _pr.count("Removing file '" + _session.getHost() + ":" + path + "'", 0);
-    IJ.log(_session.getUserName() + "@" + _session.getHost() + " $ rm \"" +
-           path + "\"");
     ChannelSftp channel = (ChannelSftp)_session.openChannel("sftp");
     channel.connect();
-    channel.rm(path);
+    channel.cd(channel.getHome());
+    _pr.count("Removing file '" + _session.getHost() + ":" +
+              channel.realpath(path) + "'", 0);
+    IJ.log(_session.getUserName() + "@" + _session.getHost() + " $ rm \"" +
+           channel.realpath(path) + "\"");
+    channel.rm(channel.realpath(path));
     channel.disconnect();
     _pr.count(1);
   }
@@ -104,14 +106,17 @@ public class SftpFileIO {
   public void renameFile(String oldpath, String newpath)
       throws JSchException, IOException, InterruptedException, SftpException {
     _pr.init(0, "", "", 1);
-    _pr.count(
-        "Renaming file '" + _session.getHost() + ":" + oldpath + "' to '" +
-        newpath + "'", 0);
-    IJ.log(_session.getUserName() + "@" + _session.getHost() + " $ mv \"" +
-           oldpath + "\" \"" + newpath + "\"");
     ChannelSftp channel = (ChannelSftp)_session.openChannel("sftp");
     channel.connect();
-    channel.rename(oldpath, newpath);
+    channel.cd(channel.getHome());
+    _pr.count(
+        "Renaming file '" + _session.getHost() + ":" +
+        channel.realpath(oldpath) + "' to '" + channel.realpath(newpath) +
+        "'", 0);
+    IJ.log(_session.getUserName() + "@" + _session.getHost() + " $ mv \"" +
+           channel.realpath(oldpath) + "\" \"" +
+           channel.realpath(newpath) + "\"");
+    channel.rename(channel.realpath(oldpath), channel.realpath(newpath));
     channel.disconnect();
     _pr.count(1);
   }
@@ -132,12 +137,14 @@ public class SftpFileIO {
   public void removeFolder(String path)
       throws JSchException, IOException, InterruptedException, SftpException {
     _pr.init(0, "", "", 1);
-    _pr.count("Removing folder '" + _session.getHost() + ":" + path + "'", 0);
-    IJ.log(_session.getUserName() + "@" + _session.getHost() + " $ rmdir \"" +
-           path + "\"");
     ChannelSftp channel = (ChannelSftp)_session.openChannel("sftp");
     channel.connect();
-    channel.rmdir(path);
+    channel.cd(channel.getHome());
+    _pr.count("Removing folder '" + _session.getHost() + ":" +
+              channel.realpath(path) + "'", 0);
+    IJ.log(_session.getUserName() + "@" + _session.getHost() + " $ rmdir \"" +
+           channel.realpath(path) + "\"");
+    channel.rmdir(channel.realpath(path));
     channel.disconnect();
     _pr.count(1);
   }
@@ -169,7 +176,9 @@ public class SftpFileIO {
     String currentFolder = "/";
     ChannelSftp channel = (ChannelSftp)_session.openChannel("sftp");
     channel.connect();
-    channel.cd("/");
+    if (outFileName.startsWith("/")) currentFolder = "/";
+    else currentFolder = channel.getHome();
+    channel.cd(currentFolder);
     for (int i = 0; i < folders.length - 1; ++i) {
       if (folders[i].length() > 0) {
         try {
@@ -247,18 +256,17 @@ public class SftpFileIO {
               createdFolders.get(i).getAbsolutePath() + "'");
       createdFolders.get(i).deleteOnExit();
     }
-
-   _pr.count(
-        "Fetching '" + inFileName + "' from host '" + _session.getHost() + "'",
-        0);
-    IJ.log(
-        "$ sftp \"" + _session.getUserName() +
-        "@" + _session.getHost() + ":" + _session.getPort() + ":" +
-        inFileName + "\" \"" + outFile.getAbsolutePath() + "\"");
     outFile.deleteOnExit();
     ChannelSftp channel = (ChannelSftp)_session.openChannel("sftp");
     channel.connect();
-    channel.get(inFileName, outFile.getAbsolutePath(), _pr,
+    channel.cd(channel.getHome());
+    _pr.count("Fetching '" + channel.realpath(inFileName) + "' from host '" +
+              _session.getHost() + "'", 0);
+    IJ.log("$ sftp \"" + _session.getUserName() +
+           "@" + _session.getHost() + ":" + _session.getPort() + ":" +
+           channel.realpath(inFileName) + "\" \"" + outFile.getAbsolutePath() +
+           "\"");
+    channel.get(channel.realpath(inFileName), outFile.getAbsolutePath(), _pr,
                 ChannelSftp.OVERWRITE);
     channel.disconnect();
     if (_pr.canceled())

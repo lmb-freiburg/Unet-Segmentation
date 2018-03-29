@@ -32,7 +32,7 @@ get_filename_component(JSCH_JAR_FILENAME ${JSCH_JAR_ABSPATH} NAME)
 string(REGEX REPLACE "[.]jar.*" "" JSCH_JAR_BASENAME ${JSCH_JAR_FILENAME})
 find_jar(JSCH_JAR "${JSCH_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the Java Secure Shell library jsch-<version>.jar")
 
-set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROJECT_SOURCE_DIR}/protobuf-java-2.6.1.jar)
+set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROJECT_SOURCE_DIR}/protobuf-java-3.3.1.jar)
 
 add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/JobManager.java
@@ -57,7 +57,7 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/Blob.java
   caffe/Caffe.java
   caffe/caffe.proto COPYING.txt plugins.config
-  resources/README.html INCLUDE_JARS protobuf-java-2.6.1.jar)
+  resources/README.html INCLUDE_JARS protobuf-java-3.3.1.jar)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)
 

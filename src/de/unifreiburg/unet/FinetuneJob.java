@@ -106,13 +106,13 @@ public class FinetuneJob extends Job implements PlugIn {
       new JFormattedTextField(
           new NumberFormatter(new DecimalFormat("0.###E0")));
   private final JTextField _outModeldefTextField = new JTextField(
-      Prefs.get("unet.finetuning.outModeldef", "finetuned-modeldef.h5"));
+      "finetuned-modeldef.h5");
   private final JButton _outModeldefChooseButton =
       (UIManager.get("FileView.directoryIcon") instanceof Icon) ?
       new JButton((Icon)UIManager.get("FileView.directoryIcon")) :
       new JButton("...");
   private final JTextField _outweightsTextField = new JTextField(
-      Prefs.get("unet.finetuning.outweights", "finetuned.caffemodel.h5"));
+      "finetuned.caffemodel.h5");
   private final JButton _outweightsChooseButton =
       hostConfiguration().finetunedFileChooseButton();
   private final JSpinner _iterationsSpinner =
@@ -130,7 +130,7 @@ public class FinetuneJob extends Job implements PlugIn {
           "ROI names are classes",
           Prefs.get("unet.finetuning.roiNamesAreClasses", false));
   private final JTextField _modelNameTextField = new JTextField(
-      Prefs.get("unet.finetuning.modelName", "finetuned model"));
+      "finetuned model");
 
   // Plot-related variables
   private final Color[] colormap = new Color[] {
@@ -184,12 +184,12 @@ public class FinetuneJob extends Job implements PlugIn {
     if (sshSession() != null)
         IJ.showMessage(
             "Finetuning finished!\nThe finetuned model has been saved to " +
-            processFolder() + "/" + _outweightsTextField.getText() +
+            processFolder() + _outweightsTextField.getText() +
             " on the remote host");
     else
         IJ.showMessage(
             "Finetuning finished!\nThe finetuned model has been saved to " +
-            processFolder() + "/" + _outweightsTextField.getText());
+            processFolder() + _outweightsTextField.getText());
     super.finish();
   }
 
@@ -205,6 +205,19 @@ public class FinetuneJob extends Job implements PlugIn {
           new Dimension(
               Integer.MAX_VALUE,
               originalModel().elementSizeUmPanel().getPreferredSize().height));
+      _modelNameTextField.setText(
+          Prefs.get("unet.finetuning." + originalModel().id + ".modelName",
+                    originalModel().name + " - finetuned"));
+      _outweightsTextField.setText(
+          Prefs.get("unet.finetuning." + originalModel().id + ".outweights",
+                    originalModel().file.getName().replaceFirst(".h5$", "")
+                    .replaceFirst("-modeldef$", "") +
+                    "-finetuned.caffemodel.h5"));
+      _outModeldefTextField.setText(
+          Prefs.get("unet.finetuning." + originalModel().id + ".modeldef",
+                    originalModel().file.getAbsolutePath()
+                    .replaceFirst(".h5$", "").replaceFirst("-modeldef$", "") +
+                    "-finetuned-modeldef.h5"));
     }
     super.processModelSelectionChange();
   }
@@ -593,7 +606,7 @@ public class FinetuneJob extends Job implements PlugIn {
       if (sshSession() != null) {
 
         model().remoteAbsolutePath =
-            processFolder() + "/" + id() + "-modeldef.h5";
+            processFolder() + id() + "-modeldef.h5";
         try {
           _createdRemoteFolders.addAll(
               new SftpFileIO(sshSession(), progressMonitor()).put(
@@ -720,15 +733,18 @@ public class FinetuneJob extends Job implements PlugIn {
 
     Prefs.set("unet.finetuning.base_learning_rate",
               (Double)_learningRateTextField.getValue());
-    Prefs.set("unet.finetuning.modelName", _modelNameTextField.getText());
-    Prefs.set("unet.finetuning.outModeldef", _outModeldefTextField.getText());
-    Prefs.set("unet.finetuning.outweights", _outweightsTextField.getText());
     Prefs.set("unet.finetuning.iterations",
               (Integer)_iterationsSpinner.getValue());
     Prefs.set("unet.finetuning.validation_step",
               (Integer)_validationStepSpinner.getValue());
     Prefs.set("unet.finetuning.roiNamesAreClasses",
               _treatRoiNamesAsClassesCheckBox.isSelected());
+    Prefs.set("unet.finetuning." + originalModel().id + ".modelName",
+              _modelNameTextField.getText());
+    Prefs.set("unet.finetuning." + originalModel().id + ".outweights",
+              _outweightsTextField.getText());
+    Prefs.set("unet.finetuning." + originalModel().id + ".modeldef",
+              _outModeldefTextField.getText());
 
     _parametersDialog.dispose();
 
@@ -1153,37 +1169,36 @@ public class FinetuneJob extends Job implements PlugIn {
       try {
         // Rename output file name and remove solverstate file
         sftp.renameFile(
-            processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
-            ".caffemodel.h5", processFolder() + "/" +
-            _outweightsTextField.getText());
+            processFolder() + id() + "-snapshot_iter_" + nIter +
+            ".caffemodel.h5", processFolder() + _outweightsTextField.getText());
       }
       catch (SftpException e) {
         IJ.showMessage(
-            "Could not rename weightsfile to " + processFolder() + "/" +
+            "Could not rename weightsfile to " + processFolder() +
             _outweightsTextField.getText() + "\n" +
-            "The trained model can be found at " + processFolder() + "/" +
+            "The trained model can be found at " + processFolder() +
             id() + "-snapshot_iter_" + nIter + ".caffemodel.h5");
       }
       try {
         sftp.removeFile(
-            processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
+            processFolder() + id() + "-snapshot_iter_" + nIter +
             ".solverstate.h5");
       }
       catch (SftpException e) {
         IJ.showMessage(
-            "Could not delete solverstate " + processFolder() + "/" + id() +
+            "Could not delete solverstate " + processFolder() + id() +
             "-snapshot_iter_" + nIter + ".solverstate.h5");
       }
     }
     else {
       // Rename output file and remove solverstate
       File outfile = new File(
-          processFolder() + "/" + _outweightsTextField.getText());
+          processFolder() + _outweightsTextField.getText());
       File infile = new File(
-          processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
+          processFolder() + id() + "-snapshot_iter_" + nIter +
           ".caffemodel.h5");
       File solverstatefile = new File(
-          processFolder() + "/" + id() + "-snapshot_iter_" + nIter +
+          processFolder() + id() + "-snapshot_iter_" + nIter +
           ".solverstate.h5");
       if (!infile.renameTo(outfile))
           IJ.showMessage(
@@ -1329,7 +1344,7 @@ public class FinetuneJob extends Job implements PlugIn {
             0.05f * ((float)i + ((sshSession() == null) ? 1.0f : 0.5f)) /
             (float)nImages, 0);
         trainBlobFileNames[i] =
-            processFolder() + "/" + id() + "_train_" + i + ".h5";
+            processFolder() + id() + "_train_" + i + ".h5";
         if (sshSession() == null) outfile = new File(trainBlobFileNames[i]);
         Tools.saveHDF5Blob(
             imp, roiNamesAreClasses ? _classNames : null, outfile, this, true,
@@ -1358,7 +1373,7 @@ public class FinetuneJob extends Job implements PlugIn {
             ((float)i + ((sshSession() == null) ? 1.0f : 0.5f)) /
             (float)nImages, 1);
         String fileNameStub = (sshSession() == null) ?
-            processFolder() + "/" + id() + "_valid_" + i : null;
+            processFolder() + id() + "_valid_" + i : null;
         File[] generatedFiles = Tools.saveHDF5TiledBlob(
             imp, roiNamesAreClasses ? _classNames : null, fileNameStub, this);
 
@@ -1373,7 +1388,7 @@ public class FinetuneJob extends Job implements PlugIn {
                 ((i + 0.5f * (1 + (float)(j + 1) / generatedFiles.length))) /
                 (float)nImages, 1);
             String outFileName =
-                processFolder() + "/" + id() + "_valid_" + i + "_" + j +
+                processFolder() + id() + "_valid_" + i + "_" + j +
                 ".h5";
             _createdRemoteFolders.addAll(
                 new SftpFileIO(sshSession(), progressMonitor()).put(
@@ -1388,7 +1403,7 @@ public class FinetuneJob extends Job implements PlugIn {
       // ---
       // Create train and valid file list files
       String trainFileListAbsolutePath =
-          processFolder() + "/" + id() + "-trainfilelist.txt";
+          processFolder() + id() + "-trainfilelist.txt";
       progressMonitor().initNewTask(
           "Create train and valid file lists",
           progressMonitor().taskProgressMax(), 0);
@@ -1409,7 +1424,7 @@ public class FinetuneJob extends Job implements PlugIn {
       else outfile.deleteOnExit();
 
       String validFileListAbsolutePath =
-          processFolder() + "/" + id() + "-validfilelist.txt";
+          processFolder() + id() + "-validfilelist.txt";
       if (validBlobFileNames.size() != 0) {
         outfile = (sshSession() != null) ?
             File.createTempFile(id(), "-validfilelist.txt") :
@@ -1549,7 +1564,7 @@ public class FinetuneJob extends Job implements PlugIn {
       }
 
       model().modelPrototxtAbsolutePath =
-          processFolder() + "/" + id() + "-model.prototxt";
+          processFolder() + id() + "-model.prototxt";
       model().modelPrototxt = TextFormat.printToString(nb);
       if (sshSession() != null) {
         File tmpFile = File.createTempFile(id(), "-model.prototxt");
@@ -1576,7 +1591,7 @@ public class FinetuneJob extends Job implements PlugIn {
       sb.setBaseLr(((Double)_learningRateTextField.getValue()).floatValue());
       sb.setSnapshot((Integer)_iterationsSpinner.getValue());
       sb.setMaxIter((Integer)_iterationsSpinner.getValue());
-      sb.setSnapshotPrefix(processFolder() + "/" + id() + "-snapshot");
+      sb.setSnapshotPrefix(processFolder() + id() + "-snapshot");
       sb.setLrPolicy("fixed");
       sb.setType("Adam");
       sb.setSnapshotFormat(Caffe.SolverParameter.SnapshotFormat.HDF5);
@@ -1587,7 +1602,7 @@ public class FinetuneJob extends Job implements PlugIn {
       }
 
       model().solverPrototxtAbsolutePath =
-          processFolder() + "/" + id() + "-solver.prototxt";
+          processFolder() + id() + "-solver.prototxt";
       model().solverPrototxt = TextFormat.printToString(sb);
       if (sshSession() != null) {
         File tmpFile = File.createTempFile(id(), "-solver.prototxt");

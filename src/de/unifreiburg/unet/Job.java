@@ -99,7 +99,7 @@ public abstract class Job extends Thread {
       new JComboBox<ModelDefinition>();
   private final JTextField _weightsFileTextField = new JTextField("", 20);
   private final JTextField _processFolderTextField = new JTextField(
-      Prefs.get("unet.processfolder", System.getProperty("user.home")), 20);
+      Prefs.get("unet.processfolder", ""), 20);
   private final String[] gpuList = {
       "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
       "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
@@ -196,8 +196,27 @@ public abstract class Job extends Thread {
     _weightsFileTextField.setText(name);
   }
 
+/*======================================================================*/
+/*!
+ *   The process folder to use. This method returns the content of the
+ *   corresponding dialog text field with a trailing '/' added if the
+ *   field is not empty. The idea is to allow the user to give absolute and
+ *   relative path strings. The path must be writable on the computer the
+ *   actual work is done, i.e. for local computing, the local machine, for
+ *   remote computing the remote machine. When giving a relative path
+ *   (or leaving the field empty) temporary output will be written relative
+ *   to the current folder (local mode) or to the home directory on the server
+ *   (remote mode). Be careful when using relative paths, especially on
+ *   Windows the current folder might be not writable by the user!
+ *
+ *   \return The process folder name as String with trailing slash appended
+ *     if the string is not empty
+ */
+/*======================================================================*/
   public final String processFolder() {
-    return _processFolderTextField.getText();
+    String folder = _processFolderTextField.getText();
+    if (folder.equals("") || folder.endsWith("/")) return folder;
+    return folder + "/";
   }
 
   protected final void setProcessFolder(String name) {
@@ -403,7 +422,8 @@ public abstract class Job extends Thread {
     // Processing environment
     final JLabel processFolderLabel = new JLabel("Process Folder:");
     _processFolderTextField.setToolTipText(
-        "Folder for temporary files on the backend server.");
+        "Folder for temporary files on the backend server. If left empty, " +
+        "temporary files are written directly to the user's home directory.");
     marginTop = (int) Math.ceil(
         (_processFolderChooseButton.getPreferredSize().getHeight() -
          _processFolderTextField.getPreferredSize().getHeight()) / 2.0);
@@ -547,12 +567,16 @@ public abstract class Job extends Thread {
             JFileChooser f = new JFileChooser(startFolder);
             f.setDialogTitle("Select U-Net model folder");
             f.setMultiSelectionEnabled(false);
-            f.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            f.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+            f.setFileFilter(
+                new FileNameExtensionFilter("HDF5 files", "h5", "H5"));
             int res = f.showDialog(_parametersDialog, "Select");
             if (res != JFileChooser.APPROVE_OPTION) return;
 
             // This also updates the Prefs if the folder contains valid models
-            searchModels(f.getSelectedFile());
+            searchModels(f.getSelectedFile().isDirectory() ?
+                          f.getSelectedFile() :
+                          f.getSelectedFile().getParentFile());
           }});
 
     // WeightsFileTextField affects model.weightFile (not critical)
@@ -664,8 +688,7 @@ public abstract class Job extends Thread {
 
   public boolean checkParameters() throws InterruptedException {
 
-    Prefs.set("unet.processfolder", _processFolderTextField.getText());
-
+    Prefs.set("unet.processfolder", processFolder());
     Prefs.set("unet.gpuId", selectedGPUString());
 
     if (!originalModel().isValid()) {
@@ -707,8 +730,8 @@ public abstract class Job extends Thread {
         File tmpFile = File.createTempFile(id(), null);
         SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
         _createdRemoteFolders.addAll(
-            sftp.put(tmpFile, processFolder() + "/" + tmpFile.getName()));
-        sftp.removeFile(processFolder() + "/" + tmpFile.getName());
+            sftp.put(tmpFile, processFolder() + tmpFile.getName()));
+        sftp.removeFile(processFolder() + tmpFile.getName());
         tmpFile.delete();
       }
       catch (IOException e) {
@@ -734,7 +757,7 @@ public abstract class Job extends Thread {
     }
     else {
       try {
-        File tmpFile = new File(processFolder() + "/" + id() + ".tmp");
+        File tmpFile = new File(processFolder() + id() + ".tmp");
         tmpFile.createNewFile();
         tmpFile.delete();
       }

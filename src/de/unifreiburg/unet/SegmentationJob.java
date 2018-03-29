@@ -323,7 +323,7 @@ public class SegmentationJob extends Job implements PlugIn {
 
         try {
           originalModel().remoteAbsolutePath =
-              processFolder() + "/" + id() + "_model.h5";
+              processFolder() + id() + "_model.h5";
           _createdRemoteFolders.addAll(
               new SftpFileIO(sshSession(), progressMonitor()).put(
                   originalModel().file, originalModel().remoteAbsolutePath));
@@ -838,7 +838,7 @@ public class SegmentationJob extends Job implements PlugIn {
         progressMonitor().initNewTask("Uploading Model", 0.01f, 1);
         if (!isInteractive()) {
           originalModel().remoteAbsolutePath =
-              processFolder() + "/" + id() + "_model.h5";
+              processFolder() + id() + "_model.h5";
           _createdRemoteFolders.addAll(
               sftp.put(originalModel().file,
                        originalModel().remoteAbsolutePath));
@@ -847,7 +847,7 @@ public class SegmentationJob extends Job implements PlugIn {
 
         _localTmpFile = File.createTempFile(id(), ".h5");
         _localTmpFile.delete();
-        String remoteFileName = processFolder() + "/" + id() + ".h5";
+        String remoteFileName = processFolder() + id() + ".h5";
 
         progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
         setImagePlus(
@@ -870,7 +870,7 @@ public class SegmentationJob extends Job implements PlugIn {
         if (interrupted()) throw new InterruptedException();
      }
       else {
-        _localTmpFile = new File(processFolder() + "/" + id() + ".h5");
+        _localTmpFile = new File(processFolder() + id() + ".h5");
 
         progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
         setImagePlus(
