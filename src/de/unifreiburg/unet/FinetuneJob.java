@@ -210,14 +210,16 @@ public class FinetuneJob extends Job implements PlugIn {
                     originalModel().name + " - finetuned"));
       _outweightsTextField.setText(
           Prefs.get("unet.finetuning." + originalModel().id + ".outweights",
-                    originalModel().file.getName().replaceFirst(".h5$", "")
-                    .replaceFirst("-modeldef$", "") +
-                    "-finetuned.caffemodel.h5"));
+                    (originalModel().file != null) ?
+                    (originalModel().file.getName().replaceFirst(".h5$", "")
+                     .replaceFirst("-modeldef$", "") +
+                     "-finetuned.caffemodel.h5") : "finetuned.caffemodel.h5"));
       _outModeldefTextField.setText(
           Prefs.get("unet.finetuning." + originalModel().id + ".modeldef",
-                    originalModel().file.getAbsolutePath()
-                    .replaceFirst(".h5$", "").replaceFirst("-modeldef$", "") +
-                    "-finetuned-modeldef.h5"));
+                    (originalModel().file != null) ?
+                    (originalModel().file.getAbsolutePath()
+                     .replaceFirst(".h5$", "").replaceFirst("-modeldef$", "") +
+                     "-finetuned-modeldef.h5") : "finetuned-modeldef.h5"));
     }
     super.processModelSelectionChange();
   }
