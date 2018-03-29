@@ -1269,7 +1269,7 @@ public class FinetuneJob extends Job implements PlugIn {
           }
           if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
               continue;
-          String className = roi.getName().replaceFirst("-[0-9]*$", "");
+          String className = roi.getName().replaceFirst("[-0-9]*$", "");
           if (_classNames.contains(className)) continue;
           _classNames.add(className);
           IJ.log("  Adding class " + className);
@@ -1282,7 +1282,7 @@ public class FinetuneJob extends Job implements PlugIn {
             }
             if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
                 continue;
-            String className = roi.getName().replaceFirst("-[0-9]*$", "");
+            String className = roi.getName().replaceFirst("[-0-9]*$", "");
             if (_classNames.contains(className)) continue;
             _classNames.add(className);
             IJ.log("  Adding class " + className);
@@ -1300,7 +1300,7 @@ public class FinetuneJob extends Job implements PlugIn {
           }
           if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
               continue;
-          String className = roi.getName().replaceFirst("-[0-9]*$", "");
+          String className = roi.getName().replaceFirst("[-0-9]*$", "");
           if (_classNames.contains(className)) continue;
           _classNames.add(className);
           IJ.log("  Adding class " + className);
@@ -1317,7 +1317,7 @@ public class FinetuneJob extends Job implements PlugIn {
             }
             if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
                 continue;
-            String className = roi.getName().replaceFirst("-[0-9]*$", "");
+            String className = roi.getName().replaceFirst("[-0-9]*$", "");
             if (_classNames.contains(className)) continue;
             _classNames.add(className);
             IJ.log("  Adding class " + className);

@@ -674,7 +674,8 @@ public class Tools {
         ipPdf.fill(roi);
       }
       else {
-        String label = (roi.getName() != null) ? roi.getName() : "foreground";
+        String label = (roi.getName() != null) ?
+            roi.getName().replaceFirst("[-0-9]*$", "") : "foreground";
         int labelIdx = 1;
         if (classes != null) {
           for (; labelIdx < classes.size() &&

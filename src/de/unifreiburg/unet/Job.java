@@ -210,7 +210,7 @@ public abstract class Job extends Thread {
  *   Windows the current folder might be not writable by the user!
  *
  *   \return The process folder name as String with trailing slash appended
- *     if the string is not empty
+ *     if not the empty string
  */
 /*======================================================================*/
   public final String processFolder() {
