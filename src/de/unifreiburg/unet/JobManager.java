@@ -127,7 +127,7 @@ public class JobManager extends PlugInFrame {
               JEditorPane helpPanel;
               try {
                 helpPanel = new JEditorPane(
-                    getClass().getResource("resources/README.html"));
+                    getClass().getResource("/resources/README.html"));
               }
               catch (java.io.IOException e2) {
                 helpPanel = new JEditorPane(

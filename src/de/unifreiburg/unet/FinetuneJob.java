@@ -157,7 +157,6 @@ public class FinetuneJob extends Job implements PlugIn {
   private double[][] _nPredSegmentation = null;
   private double[][] _nObjSegmentation = null;
   private double[][] _f1Segmentation = null;
-  private Vector<String> _classNames = null;
 
   private boolean _trainFromScratch = false;
 
@@ -900,14 +899,14 @@ public class FinetuneJob extends Job implements PlugIn {
         Plot plot = new Plot(
             "Finetuning Evolution", "Iteration", "Intersection over Union");
         String legendString = "";
-        for (int c = 0; c < _classNames.size() - 1; ++c) {
+        for (int c = 0; c < model().classNames.length - 1; ++c) {
           _iou[c][_currentTestIterationIdx] =
               _intersection[c][_currentTestIterationIdx] /
               _union[c][_currentTestIterationIdx];
           plot.setColor(colormap[c % colormap.length]);
           plot.addPoints(_xValid, _iou[c], Plot.LINE);
-          legendString += _classNames.get(c + 1) +
-              ((c < _classNames.size() - 1) ? "\n" : "");
+          legendString += model().classNames[c + 1] +
+              ((c < model().classNames.length - 1) ? "\n" : "");
         }
         plot.setColor(Color.black);
         plot.addLegend(legendString);
@@ -929,7 +928,7 @@ public class FinetuneJob extends Job implements PlugIn {
         Plot plot = new Plot(
             "Finetuning Evolution", "Iteration", "F1 (Detection)");
         String legendString = "";
-        for (int c = 0; c < _classNames.size() - 1; ++c) {
+        for (int c = 0; c < model().classNames.length - 1; ++c) {
           double prec = _nTPDetection[c][_currentTestIterationIdx] /
               _nPredDetection[c][_currentTestIterationIdx];
           double rec = _nTPDetection[c][_currentTestIterationIdx] /
@@ -938,8 +937,8 @@ public class FinetuneJob extends Job implements PlugIn {
               2.0 * prec * rec / (prec + rec);
           plot.setColor(colormap[c % colormap.length]);
           plot.addPoints(_xValid, _f1Detection[c], Plot.LINE);
-          legendString += _classNames.get(c + 1) +
-              ((c < _classNames.size() - 1) ? "\n" : "");
+          legendString += model().classNames[c + 1] +
+              ((c < model().classNames.length - 1) ? "\n" : "");
         }
         plot.setColor(Color.black);
         plot.addLegend(legendString);
@@ -961,7 +960,7 @@ public class FinetuneJob extends Job implements PlugIn {
         Plot plot = new Plot(
             "Finetuning Evolution", "Iteration", "F1 (Segmentation)");
         String legendString = "";
-        for (int c = 0; c < _classNames.size() - 1; ++c) {
+        for (int c = 0; c < model().classNames.length - 1; ++c) {
           double prec = _nTPSegmentation[c][_currentTestIterationIdx] /
               _nPredSegmentation[c][_currentTestIterationIdx];
           double rec = _nTPSegmentation[c][_currentTestIterationIdx] /
@@ -970,8 +969,8 @@ public class FinetuneJob extends Job implements PlugIn {
               2.0 * prec * rec / (prec + rec);
           plot.setColor(colormap[c % colormap.length]);
           plot.addPoints(_xValid, _f1Segmentation[c], Plot.LINE);
-          legendString += _classNames.get(c + 1) +
-              ((c < _classNames.size() - 1) ? "\n" : "");
+          legendString += model().classNames[c + 1] +
+              ((c < model().classNames.length - 1) ? "\n" : "");
         }
         plot.setColor(Color.black);
         plot.addLegend(legendString);
@@ -1031,17 +1030,24 @@ public class FinetuneJob extends Job implements PlugIn {
     _xValid = new double[nValidations + 1];
     _lossTrain = new double[nIter + 1];
     _lossValid = new double[nValidations + 1];
-    _intersection = new double[_classNames.size() - 1][nValidations + 1];
-    _union = new double[_classNames.size() - 1][nValidations + 1];
-    _iou = new double[_classNames.size() - 1][nValidations + 1];
-    _nTPDetection = new double[_classNames.size() - 1][nValidations + 1];
-    _nPredDetection = new double[_classNames.size() - 1][nValidations + 1];
-    _nObjDetection = new double[_classNames.size() - 1][nValidations + 1];
-    _f1Detection = new double[_classNames.size() - 1][nValidations + 1];
-    _nTPSegmentation = new double[_classNames.size() - 1][nValidations + 1];
-    _nPredSegmentation = new double[_classNames.size() - 1][nValidations + 1];
-    _nObjSegmentation = new double[_classNames.size() - 1][nValidations + 1];
-    _f1Segmentation = new double[_classNames.size() - 1][nValidations + 1];
+    _intersection = new double[model().classNames.length - 1][nValidations + 1];
+    _union = new double[model().classNames.length - 1][nValidations + 1];
+    _iou = new double[model().classNames.length - 1][nValidations + 1];
+    _nTPDetection = new double[model().classNames.length - 1][
+        nValidations + 1];
+    _nPredDetection = new double[model().classNames.length - 1][
+        nValidations + 1];
+    _nObjDetection = new double[model().classNames.length - 1][
+        nValidations + 1];
+    _f1Detection = new double[model().classNames.length - 1][nValidations + 1];
+    _nTPSegmentation = new double[model().classNames.length - 1][
+        nValidations + 1];
+    _nPredSegmentation = new double[model().classNames.length - 1][
+        nValidations + 1];
+    _nObjSegmentation = new double[model().classNames.length - 1][
+        nValidations + 1];
+    _f1Segmentation = new double[model().classNames.length - 1][
+        nValidations + 1];
     for (int i = 0; i <= nIter; i++) {
       _xTrain[i] = i + 1;
       _lossTrain[i] = Double.NaN;
@@ -1049,7 +1055,7 @@ public class FinetuneJob extends Job implements PlugIn {
     for (int i = 0; i <= nValidations ; i++) {
       _xValid[i] = i * (Integer)_validationStepSpinner.getValue();
       _lossValid[i] = Double.NaN;
-      for (int k = 0; k < _classNames.size() - 1; ++k) {
+      for (int k = 0; k < model().classNames.length - 1; ++k) {
         _intersection[k][i] = 0.0;
         _union[k][i] = 0.0;
         _iou[k][i] = Double.NaN;
@@ -1256,10 +1262,10 @@ public class FinetuneJob extends Job implements PlugIn {
       // Get class label information from annotations
       progressMonitor().initNewTask(
           "Searching class labels", progressMonitor().taskProgressMax(), 0);
-      _classNames = new Vector<String>();
+      Vector<String> classNames = new Vector<String>();
       boolean roiNamesAreClasses =
           _treatRoiNamesAsClassesCheckBox.isSelected();
-      _classNames.add("background");
+      classNames.add("background");
       for (int i = 0; i < nTrainImages && roiNamesAreClasses; i++) {
         ImagePlus imp = ((DefaultListModel<ImagePlus>)
                          _trainFileList.getModel()).get(i);
@@ -1272,8 +1278,8 @@ public class FinetuneJob extends Job implements PlugIn {
           if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
               continue;
           String className = roi.getName().replaceFirst("[-0-9]*$", "");
-          if (_classNames.contains(className)) continue;
-          _classNames.add(className);
+          if (classNames.contains(className)) continue;
+          classNames.add(className);
           IJ.log("  Adding class " + className);
         }
         else {
@@ -1285,8 +1291,8 @@ public class FinetuneJob extends Job implements PlugIn {
             if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
                 continue;
             String className = roi.getName().replaceFirst("[-0-9]*$", "");
-            if (_classNames.contains(className)) continue;
-            _classNames.add(className);
+            if (classNames.contains(className)) continue;
+            classNames.add(className);
             IJ.log("  Adding class " + className);
           }
         }
@@ -1303,8 +1309,8 @@ public class FinetuneJob extends Job implements PlugIn {
           if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
               continue;
           String className = roi.getName().replaceFirst("[-0-9]*$", "");
-          if (_classNames.contains(className)) continue;
-          _classNames.add(className);
+          if (classNames.contains(className)) continue;
+          classNames.add(className);
           IJ.log("  Adding class " + className);
           IJ.log("  WARNING: Training set does not contain instances of " +
                  "class " + className + " switching to instance " +
@@ -1320,8 +1326,8 @@ public class FinetuneJob extends Job implements PlugIn {
             if (roi.getName().toLowerCase(Locale.ROOT).contains("ignore"))
                 continue;
             String className = roi.getName().replaceFirst("[-0-9]*$", "");
-            if (_classNames.contains(className)) continue;
-            _classNames.add(className);
+            if (classNames.contains(className)) continue;
+            classNames.add(className);
             IJ.log("  Adding class " + className);
             IJ.log("  WARNING: Training set does not contain instances of " +
                    "class " + className + " switching to instance " +
@@ -1332,9 +1338,14 @@ public class FinetuneJob extends Job implements PlugIn {
       }
 
       if (!roiNamesAreClasses) {
-        _classNames = new Vector<String>();
-        _classNames.add("Background");
-        _classNames.add("Foreground");
+        model().classNames = new String[2];
+        model().classNames[0] = "Background";
+        model().classNames[1] = "Foreground";
+      }
+      else {
+        model().classNames = new String[classNames.size()];
+        for (int i = 0; i < classNames.size(); ++i)
+            model().classNames[i] = classNames.get(i);
       }
 
       // Process train files
@@ -1349,8 +1360,8 @@ public class FinetuneJob extends Job implements PlugIn {
             processFolder() + id() + "_train_" + i + ".h5";
         if (sshSession() == null) outfile = new File(trainBlobFileNames[i]);
         Tools.saveHDF5Blob(
-            imp, roiNamesAreClasses ? _classNames : null, outfile, this, true,
-            false);
+            imp, roiNamesAreClasses ? model().classNames : null,
+            outfile, this, true, false);
         if (interrupted()) throw new InterruptedException();
         if (sshSession() != null) {
           progressMonitor().initNewTask(
@@ -1377,7 +1388,8 @@ public class FinetuneJob extends Job implements PlugIn {
         String fileNameStub = (sshSession() == null) ?
             processFolder() + id() + "_valid_" + i : null;
         File[] generatedFiles = Tools.saveHDF5TiledBlob(
-            imp, roiNamesAreClasses ? _classNames : null, fileNameStub, this);
+            imp, roiNamesAreClasses ? model().classNames : null,
+            fileNameStub, this);
 
         if (sshSession() == null)
             for (File f : generatedFiles)
@@ -1507,8 +1519,8 @@ public class FinetuneJob extends Job implements PlugIn {
             return;
           }
           int nClassesModel = lb.getConvolutionParam().getNumOutput();
-          if (nClassesModel != _classNames.size())
-              lb.getConvolutionParamBuilder().setNumOutput(_classNames.size());
+          if (nClassesModel != model().classNames.length)
+              lb.getConvolutionParamBuilder().setNumOutput(model().classNames.length);
         }
       }
 

@@ -86,6 +86,7 @@ public class ModelDefinition {
   public float borderWeightSigmaUm = 3.0f;
   public float foregroundBackgroundRatio = 0.1f;
   public float sigma1Um = 5.0f;
+  public String[] classNames = null;
 
   public String weightFile = null;
 
@@ -237,6 +238,7 @@ public class ModelDefinition {
     dup.foregroundBackgroundRatio = foregroundBackgroundRatio;
     dup.sigma1Um = sigma1Um;
     dup.weightFile = weightFile;
+    dup.classNames = classNames;
     dup._initGUIElements();
     if (_nTilesSpinner != null)
         dup._nTilesSpinner.setValue((Integer)_nTilesSpinner.getValue());
@@ -286,6 +288,11 @@ public class ModelDefinition {
           "/unet_param/pixelwise_loss_weights/foregroundBackgroundRatio");
       sigma1Um = reader.float32().read(
           "/unet_param/pixelwise_loss_weights/sigma1_um");
+    }
+    catch (HDF5Exception e) {}
+
+    try {
+      classNames = reader.string().readArray("/unet_param/classNames");
     }
     catch (HDF5Exception e) {}
 
@@ -551,6 +558,8 @@ public class ModelDefinition {
         foregroundBackgroundRatio);
     writer.float32().write(
         "/unet_param/pixelwise_loss_weights/sigma1_um", sigma1Um);
+    if (classNames != null)
+        writer.string().writeArray("/unet_param/classNames", classNames);
     if (memoryMap != null && memoryMap.length == 2)
         writer.int32().writeMatrix(
             "/unet_param/mapInputNumPxGPUMemMB", memoryMap);

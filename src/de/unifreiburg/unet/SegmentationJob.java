@@ -1217,13 +1217,16 @@ public class SegmentationJob extends Job implements PlugIn {
                     centerPosUm[volIdx][j][2] / elSize[2],
                     centerPosUm[volIdx][j][1] / elSize[1]);
               }
-              table.addValue("class", c + 1);
+              if (model().classNames != null)
+                  table.addValue("class", model().classNames[c + 1]);
+              else table.addValue("class", c + 1);
               table.addValue(
                   "confidence", weightSum[volIdx][j] / nPixels[volIdx][j]);
             }
             for (int z = 0; z < nLevs; ++z) {
               if (detections[z] != null) overlay.add(
-                  detections[z], "Class " + (c + 1));
+                  detections[z], (model().classNames != null) ?
+                  model().classNames[c + 1] : ("Class " + (c + 1)));
             }
           }
         }

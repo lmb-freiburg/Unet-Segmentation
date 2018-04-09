@@ -562,7 +562,7 @@ public class Tools {
  */
 /*======================================================================*/
   public static ImagePlus[] convertAnnotationsToLabelsAndWeights(
-      ImagePlus imp, Vector<String> classes, Job job)
+      ImagePlus imp, String[] classes, Job job)
       throws InterruptedException, NotImplementedException {
 
     int nDims = job.model().nDims();
@@ -678,8 +678,8 @@ public class Tools {
             roi.getName().replaceFirst("[-0-9]*$", "") : "foreground";
         int labelIdx = 1;
         if (classes != null) {
-          for (; labelIdx < classes.size() &&
-                   !classes.get(labelIdx).equals(label); labelIdx++);
+          for (; labelIdx < classes.length &&
+                   !classes[labelIdx].equals(label); labelIdx++);
         }
         ipLabels.setValue(labelIdx);
 
@@ -910,7 +910,7 @@ public class Tools {
   }
 
   public static ImagePlus saveHDF5Blob(
-      ImagePlus imp, Vector<String> classes, File outFile, Job job,
+      ImagePlus imp, String[] classes, File outFile, Job job,
       boolean keepOriginal, boolean show)
       throws IOException, InterruptedException, NotImplementedException {
     if (job == null) {
@@ -989,7 +989,7 @@ public class Tools {
   }
 
   public static File[] saveHDF5TiledBlob(
-      ImagePlus imp, Vector<String> classes, String fileNameStub, Job job)
+      ImagePlus imp, String[] classes, String fileNameStub, Job job)
       throws IOException, InterruptedException, NotImplementedException {
     if (job == null) {
       IJ.error("Cannot save HDF5 blob without associated unet model");
