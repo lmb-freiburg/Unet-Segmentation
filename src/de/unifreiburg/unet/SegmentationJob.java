@@ -345,6 +345,7 @@ public class SegmentationJob extends Job implements PlugIn {
         }
 
         try {
+          boolean weightsUploaded = false;
           do {
             String cmd =
                 Prefs.get("unet.caffe_unetBinary",
@@ -354,7 +355,8 @@ public class SegmentationJob extends Job implements PlugIn {
                 weightsFileName() + "\" -n_channels " + nChannels + " " +
                 caffeGPUParameter();
             res = Tools.execute(cmd, sshSession(), this);
-            if (res.exitStatus != 0) {
+            if (weightsUploaded && res.exitStatus != 0) break;
+            if (!weightsUploaded && res.exitStatus != 0) {
               int selectedOption = JOptionPane.showConfirmDialog(
                   _imp.getWindow(), "No compatible weights found at the " +
                   "given location on the backend server.\nDo you want " +
@@ -364,7 +366,8 @@ public class SegmentationJob extends Job implements PlugIn {
               switch (selectedOption) {
               case JOptionPane.YES_OPTION: {
                 File startFile =
-                    (originalModel() == null || originalModel().file == null ||
+                    (originalModel() == null ||
+                     originalModel().file == null ||
                      originalModel().file.getParentFile() == null) ?
                     new File(".") : originalModel().file.getParentFile();
                 JFileChooser f = new JFileChooser(startFile);
@@ -381,6 +384,7 @@ public class SegmentationJob extends Job implements PlugIn {
                 try {
                   new SftpFileIO(sshSession(), progressMonitor()).put(
                       f.getSelectedFile(), weightsFileName());
+                  weightsUploaded = true;
                 }
                 catch (SftpException e) {
                   res.exitStatus = 3;
@@ -396,8 +400,7 @@ public class SegmentationJob extends Job implements PlugIn {
               case JOptionPane.NO_OPTION: {
                 res.exitStatus = 2;
                 res.shortErrorString = "Weight file selection required";
-                res.cerr = "Weight file " +
-                    weightsFileName() + " not found";
+                res.cerr = "Weight file " + weightsFileName() + " not found";
                 break;
               }
               case JOptionPane.CANCEL_OPTION:
@@ -405,6 +408,12 @@ public class SegmentationJob extends Job implements PlugIn {
                 throw new InterruptedException("Aborted by user");
               }
               if (res.exitStatus > 1) break;
+            }
+            else {
+              IJ.log(res.cerr);
+              res.shortErrorString = "Model/Weights check failed.";
+              res.cerr = "See log for further details";
+              break;
             }
           }
           while (res.exitStatus != 0);
