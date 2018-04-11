@@ -238,7 +238,11 @@ public class ModelDefinition {
     dup.foregroundBackgroundRatio = foregroundBackgroundRatio;
     dup.sigma1Um = sigma1Um;
     dup.weightFile = weightFile;
-    dup.classNames = classNames;
+    if (classNames != null) {
+      dup.classNames = new String[classNames.length];
+      for (int i = 0; i < classNames.length; i++)
+          dup.classNames[i] = classNames[i];
+    }
     dup._initGUIElements();
     if (_nTilesSpinner != null)
         dup._nTilesSpinner.setValue((Integer)_nTilesSpinner.getValue());

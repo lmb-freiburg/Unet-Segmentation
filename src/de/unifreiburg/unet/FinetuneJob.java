@@ -724,9 +724,11 @@ public class FinetuneJob extends Job implements PlugIn {
       if (res.exitStatus != 0) {
         // User decided to change weight file, so don't bother him with
         // additional message boxes
-        if (res.exitStatus == 2) continue;
-        IJ.log(res.cerr);
-        IJ.showMessage("Model/Weight check failed:\n" + res.shortErrorString);
+        if (res.exitStatus != 2)
+        {
+          IJ.log(res.cerr);
+          IJ.showMessage("Model/Weight check failed:\n" + res.shortErrorString);
+        }
         dialogOK = false;
         continue;
       }
@@ -1520,7 +1522,8 @@ public class FinetuneJob extends Job implements PlugIn {
           }
           int nClassesModel = lb.getConvolutionParam().getNumOutput();
           if (nClassesModel != model().classNames.length)
-              lb.getConvolutionParamBuilder().setNumOutput(model().classNames.length);
+              lb.getConvolutionParamBuilder().setNumOutput(
+                  model().classNames.length);
         }
       }
 
