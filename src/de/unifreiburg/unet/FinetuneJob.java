@@ -128,7 +128,11 @@ public class FinetuneJob extends Job implements PlugIn {
   private final JCheckBox _treatRoiNamesAsClassesCheckBox =
       new JCheckBox(
           "ROI names are classes",
-          Prefs.get("unet.finetuning.roiNamesAreClasses", false));
+          Prefs.get("unet.finetuning.roiNamesAreClasses", true));
+  private final JCheckBox _downloadWeightsCheckBox =
+      new JCheckBox(
+          "Download Weights",
+          Prefs.get("unet.finetuning.downloadWeights", false));
   private final JTextField _modelNameTextField = new JTextField(
       "finetuned model");
 
@@ -371,8 +375,14 @@ public class FinetuneJob extends Job implements PlugIn {
             .addComponent(outweightsLabel)
             .addComponent(_outweightsTextField)
             .addComponent(_outweightsChooseButton));
-
+    _treatRoiNamesAsClassesCheckBox.setToolTipText(
+        "Check if your ROI labels indicate class labels");
     _configPanel.add(_treatRoiNamesAsClassesCheckBox);
+    _downloadWeightsCheckBox.setToolTipText(
+        "Check if you want to download the weights from the server. " +
+        "The weights file will be placed in the same folder as the new " +
+        "model definition file. (Ignored for local processing)");
+    _configPanel.add(_downloadWeightsCheckBox);
   }
 
   @Override
@@ -629,37 +639,75 @@ public class FinetuneJob extends Job implements PlugIn {
         }
 
         try {
-          String cmd =
-              Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet") +
-              " check_model_and_weights_h5 -model \"" +
-              model().remoteAbsolutePath + "\" -weights \"" +
-              weightsFileName() + "\" -n_channels " + nChannels + " " +
-              caffeGPUParameter();
-          res = Tools.execute(cmd, sshSession(), this);
-          if (res.exitStatus != 0) {
-            int selectedOption = JOptionPane.showConfirmDialog(
-                WindowManager.getActiveWindow(),
-                "No compatible pre-trained weights found at the given " +
-                "location on the server.\n" +
-                "Do you want to train from scratch?",
-                "Start new Training?", JOptionPane.YES_NO_CANCEL_OPTION,
-                JOptionPane.QUESTION_MESSAGE);
-            switch (selectedOption) {
-            case JOptionPane.YES_OPTION:
-              _trainFromScratch = true;
-              res.exitStatus = 0;
-              break;
-            case JOptionPane.NO_OPTION: {
-              res.exitStatus = 2;
-              res.shortErrorString = "Weight file selection required";
-              res.cerr = "Weight file " + weightsFileName() + " not found";
-              break;
-            }
-            case JOptionPane.CANCEL_OPTION:
-            case JOptionPane.CLOSED_OPTION:
-              throw new InterruptedException("Aborted by user");
+          boolean weightsUploaded = false;
+          do {
+            String cmd =
+                Prefs.get(
+                    "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet") +
+                " check_model_and_weights_h5 -model \"" +
+                model().remoteAbsolutePath + "\" -weights \"" +
+                weightsFileName() + "\" -n_channels " + nChannels + " " +
+                caffeGPUParameter();
+            res = Tools.execute(cmd, sshSession(), this);
+            if (weightsUploaded && res.exitStatus != 0) break;
+            if (!weightsUploaded && res.exitStatus != 0) {
+              Object[] options = {
+                  "Train from scratch", "Upload weights", "Cancel" };
+              int selectedOption = JOptionPane.showOptionDialog(
+                  WindowManager.getActiveWindow(),
+                  "No compatible pre-trained weights found at the given " +
+                  "location on the server.\n" +
+                  "Please select whether you want to train from scratch or " +
+                  "upload weights.", "No weights found",
+                  JOptionPane.YES_NO_CANCEL_OPTION,
+                  JOptionPane.QUESTION_MESSAGE,
+                  null, options, options[0]);
+              switch (selectedOption) {
+              case JOptionPane.YES_OPTION:
+                _trainFromScratch = true;
+                res.exitStatus = 0;
+                break;
+              case JOptionPane.NO_OPTION: {
+                File startFile =
+                    (originalModel() == null ||
+                     originalModel().file == null ||
+                     originalModel().file.getParentFile() == null) ?
+                    new File(".") : originalModel().file.getParentFile();
+                JFileChooser f = new JFileChooser(startFile);
+                f.setDialogTitle("Select trained U-Net weights");
+                f.setFileFilter(
+                    new FileNameExtensionFilter(
+                        "HDF5 and prototxt files", "h5", "H5",
+                        "prototxt", "PROTOTXT", "caffemodel", "CAFFEMODEL"));
+                f.setMultiSelectionEnabled(false);
+                f.setFileSelectionMode(JFileChooser.FILES_ONLY);
+                int res2 = f.showDialog(
+                    WindowManager.getActiveWindow(), "Select");
+                if (res2 != JFileChooser.APPROVE_OPTION)
+                    throw new InterruptedException("Aborted by user");
+                try {
+                  new SftpFileIO(sshSession(), progressMonitor()).put(
+                      f.getSelectedFile(), weightsFileName());
+                  weightsUploaded = true;
+                }
+                catch (SftpException e) {
+                  res.exitStatus = 3;
+                  res.shortErrorString =
+                      "Upload failed.\nDo you have sufficient " +
+                      "permissions to create a file at the given " +
+                      "backend server path?";
+                  res.cerr = e.getMessage();
+                  break;
+                }
+                break;
+              }
+              case JOptionPane.CANCEL_OPTION:
+              case JOptionPane.CLOSED_OPTION:
+                throw new InterruptedException("Aborted by user");
+              }
             }
           }
+          while (res.exitStatus != 0);
         }
         catch (JSchException e) {
           res.exitStatus = 1;
@@ -742,6 +790,8 @@ public class FinetuneJob extends Job implements PlugIn {
               (Integer)_validationStepSpinner.getValue());
     Prefs.set("unet.finetuning.roiNamesAreClasses",
               _treatRoiNamesAsClassesCheckBox.isSelected());
+    Prefs.set("unet.finetuning.downloadWeights",
+              _downloadWeightsCheckBox.isSelected());
     Prefs.set("unet.finetuning." + originalModel().id + ".modelName",
               _modelNameTextField.getText());
     Prefs.set("unet.finetuning." + originalModel().id + ".outweights",
@@ -1176,6 +1226,27 @@ public class FinetuneJob extends Job implements PlugIn {
 
       SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
 
+      if (_downloadWeightsCheckBox.isSelected()) {
+        String[] outweightsComponents =
+            _outweightsTextField.getText().split("/");
+        File outfile = new File(
+            ((model().file.getParentFile() != null) ?
+             (model().file.getParent() + "/") : "") + outweightsComponents[
+                 outweightsComponents.length - 1]);
+        try {
+          progressMonitor().initNewTask("Downloading weights", 1.0f, 1);
+          // Download weights file
+          sftp.get(
+              processFolder() + id() + "-snapshot_iter_" + nIter +
+              ".caffemodel.h5", outfile);
+        }
+        catch (SftpException e) {
+          IJ.showMessage(
+              "Could not download weights " + processFolder() + id() +
+              "-snapshot_iter_" + nIter + ".caffemodel.h5");
+        }
+      }
+
       try {
         // Rename output file name and remove solverstate file
         sftp.renameFile(
@@ -1189,6 +1260,7 @@ public class FinetuneJob extends Job implements PlugIn {
             "The trained model can be found at " + processFolder() +
             id() + "-snapshot_iter_" + nIter + ".caffemodel.h5");
       }
+
       try {
         sftp.removeFile(
             processFolder() + id() + "-snapshot_iter_" + nIter +
@@ -1509,22 +1581,21 @@ public class FinetuneJob extends Job implements PlugIn {
 
       // Get number of classes in model
       for (Caffe.LayerParameter.Builder lb : nb.getLayerBuilderList()) {
-        for (int i = 0; i < lb.getTopCount(); ++i) {
-          if (!lb.getTop(i).equals("score")) continue;
-          if (!lb.hasConvolutionParam()) {
-            IJ.error(
-                "U-Net Finetuning",
-                "The selected model cannot be finetuned using this " +
-                "Plugin.\n" +
-                "Scores must be generated with a Convolution layer.");
-            abort();
-            return;
-          }
-          int nClassesModel = lb.getConvolutionParam().getNumOutput();
-          if (nClassesModel != model().classNames.length)
-              lb.getConvolutionParamBuilder().setNumOutput(
-                  model().classNames.length);
+        int i = 0;
+        for (; i < lb.getTopCount() && !lb.getTop(i).equals("score"); ++i);
+        if (i == lb.getTopCount()) continue;
+        if (!lb.hasConvolutionParam()) {
+          IJ.error(
+              "U-Net Finetuning",
+              "The selected model cannot be finetuned using this Plugin.\n" +
+              "Scores must be generated with a Convolution layer.");
+          abort();
+          return;
         }
+        int nClassesModel = lb.getConvolutionParam().getNumOutput();
+        if (nClassesModel != model().classNames.length)
+            lb.getConvolutionParamBuilder().setNumOutput(
+                model().classNames.length);
       }
 
       // Save model definition file before adding validation structures
