@@ -303,6 +303,11 @@ public class Tools {
         if (interpolationMethod == ImageProcessor.BILINEAR) {
           int zIn = (int)Math.floor(zTmp);
           double lambda = zTmp - zIn;
+          int zIn2 = zIn + 1;
+          if (zIn >= out.getNSlices())
+              zIn = 2 * (out.getNSlices() - 1) - zIn;
+          if (zIn2 >= out.getNSlices())
+              zIn2 = 2 * (out.getNSlices() - 1) - zIn2;
           for (int c = 1; c <= out.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");
@@ -311,20 +316,20 @@ public class Tools {
                 imp.getStackIndex(c, zIn, t)).duplicate();
             if (lambda != 0) {
               ip.multiply(1 - lambda);
-              if (zIn + 1 <= imp.getNSlices()) {
-                ImageProcessor ip2 = imp.getStack().getProcessor(
-                    imp.getStackIndex(c, zIn + 1, t)).duplicate();
-                float[] ipData = (float[]) ip.getPixels();
-                float[] ip2Data = (float[]) ip2.getPixels();
-                for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
-                    ipData[i] += lambda * ip2Data[i];
-              }
+              ImageProcessor ip2 = imp.getStack().getProcessor(
+                  imp.getStackIndex(c, zIn2, t)).duplicate();
+              float[] ipData = (float[]) ip.getPixels();
+              float[] ip2Data = (float[]) ip2.getPixels();
+              for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
+                  ipData[i] += lambda * ip2Data[i];
             }
             out.getStack().setProcessor(ip, out.getStackIndex(c, z, t));
           }
         }
         else {
           int zIn = (int)Math.round(zTmp);
+          if (zIn >= out.getNSlices())
+              zIn = 2 * (out.getNSlices() - 1) - zIn;
           for (int c = 1; c <= out.getNChannels(); ++c) {
             if (job.interrupted())
                 throw new InterruptedException("Aborted by user");

@@ -106,7 +106,7 @@ public class FinetuneJob extends Job implements PlugIn {
       new JFormattedTextField(
           new NumberFormatter(new DecimalFormat("0.###E0")));
   private final JTextField _outModeldefTextField = new JTextField(
-      "finetuned-modeldef.h5");
+      "finetuned.modeldef.h5");
   private final JButton _outModeldefChooseButton =
       (UIManager.get("FileView.directoryIcon") instanceof Icon) ?
       new JButton((Icon)UIManager.get("FileView.directoryIcon")) :
@@ -215,14 +215,15 @@ public class FinetuneJob extends Job implements PlugIn {
           Prefs.get("unet.finetuning." + originalModel().id + ".outweights",
                     (originalModel().file != null) ?
                     (originalModel().file.getName().replaceFirst(".h5$", "")
-                     .replaceFirst("-modeldef$", "") +
+                     .replaceFirst("[.-]modeldef$", "") +
                      "-finetuned.caffemodel.h5") : "finetuned.caffemodel.h5"));
       _outModeldefTextField.setText(
           Prefs.get("unet.finetuning." + originalModel().id + ".modeldef",
                     (originalModel().file != null) ?
                     (originalModel().file.getAbsolutePath()
-                     .replaceFirst(".h5$", "").replaceFirst("-modeldef$", "") +
-                     "-finetuned-modeldef.h5") : "finetuned-modeldef.h5"));
+                     .replaceFirst(".h5$", "").replaceFirst(
+                         "[.-]modeldef$", "") +
+                     "-finetuned.modeldef.h5") : "finetuned.modeldef.h5"));
     }
     super.processModelSelectionChange();
   }
@@ -617,7 +618,7 @@ public class FinetuneJob extends Job implements PlugIn {
       if (sshSession() != null) {
 
         model().remoteAbsolutePath =
-            processFolder() + id() + "-modeldef.h5";
+            processFolder() + id() + ".modeldef.h5";
         try {
           _createdRemoteFolders.addAll(
               new SftpFileIO(sshSession(), progressMonitor()).put(
@@ -1294,6 +1295,11 @@ public class FinetuneJob extends Job implements PlugIn {
 
   @Override
   public void run(String arg) {
+    start();
+  }
+
+  @Override
+  public void run() {
     boolean trainImageFound = false;
     if (WindowManager.getIDList() != null) {
       for (int id: WindowManager.getIDList()) {
@@ -1309,11 +1315,6 @@ public class FinetuneJob extends Job implements PlugIn {
                "overlay containing annotations.");
       return;
     }
-    start();
-  }
-
-  @Override
-  public void run() {
     try
     {
       prepareParametersDialog();
@@ -1593,6 +1594,12 @@ public class FinetuneJob extends Job implements PlugIn {
           return;
         }
         int nClassesModel = lb.getConvolutionParam().getNumOutput();
+        if (model() == null) {
+          IJ.log("Very weird, the model is null... this is impossible!!!!!");
+        }
+        if (model().classNames == null) {
+          IJ.log("Very weird, the classNames array is null... this is impossible!!!!!");
+        }
         if (nClassesModel != model().classNames.length)
             lb.getConvolutionParamBuilder().setNumOutput(
                 model().classNames.length);

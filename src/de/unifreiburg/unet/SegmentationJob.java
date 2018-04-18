@@ -827,16 +827,16 @@ public class SegmentationJob extends Job implements PlugIn {
 
   @Override
   public void run(String arg) {
-    setImagePlus(WindowManager.getCurrentImage());
-    if (_imp == null) {
-      IJ.noImage();
-      return;
-    }
     start();
   }
 
   @Override
   public void run() {
+    if (WindowManager.getCurrentImage() == null) {
+      IJ.noImage();
+      return;
+    }
+    setImagePlus(WindowManager.getCurrentImage());
     try {
       prepareParametersDialog();
       if (isInteractive() && !getParameters()) return;

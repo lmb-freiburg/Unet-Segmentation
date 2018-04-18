@@ -30,6 +30,7 @@
 
 package de.unifreiburg.unet;
 
+import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
 
@@ -129,6 +130,10 @@ public class JobTableModel extends AbstractTableModel {
   }
 
   private void startJob(Job job) {
+    if (WindowManager.getCurrentImage() == null) {
+      IJ.noImage();
+      return;
+    }
     _jobs.add(job);
     job.start();
     fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
