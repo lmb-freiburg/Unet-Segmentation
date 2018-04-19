@@ -187,8 +187,7 @@ public class FinetuneJob extends Job implements PlugIn {
     if (sshSession() != null)
         IJ.showMessage(
             "Finetuning finished!\nThe finetuned model has been saved to " +
-            processFolder() + _outweightsTextField.getText() +
-            " on the remote host");
+            _outweightsTextField.getText() + " on the remote host");
     else
         IJ.showMessage(
             "Finetuning finished!\nThe finetuned model has been saved to " +
@@ -582,8 +581,9 @@ public class FinetuneJob extends Job implements PlugIn {
         if (sshSession() == null) {
           try {
             Vector<String> cmd = new Vector<String>();
-            cmd.add(Prefs.get(
-                        "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
+            cmd.add(
+                Prefs.get(
+                    "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
             res = Tools.execute(cmd, this);
           }
           catch (IOException e) {
@@ -1252,11 +1252,11 @@ public class FinetuneJob extends Job implements PlugIn {
         // Rename output file name and remove solverstate file
         sftp.renameFile(
             processFolder() + id() + "-snapshot_iter_" + nIter +
-            ".caffemodel.h5", processFolder() + _outweightsTextField.getText());
+            ".caffemodel.h5", _outweightsTextField.getText());
       }
       catch (SftpException e) {
         IJ.showMessage(
-            "Could not rename weightsfile to " + processFolder() +
+            "Could not rename weightsfile to " +
             _outweightsTextField.getText() + "\n" +
             "The trained model can be found at " + processFolder() +
             id() + "-snapshot_iter_" + nIter + ".caffemodel.h5");
@@ -1275,8 +1275,7 @@ public class FinetuneJob extends Job implements PlugIn {
     }
     else {
       // Rename output file and remove solverstate
-      File outfile = new File(
-          processFolder() + _outweightsTextField.getText());
+      File outfile = new File(_outweightsTextField.getText());
       File infile = new File(
           processFolder() + id() + "-snapshot_iter_" + nIter +
           ".caffemodel.h5");

@@ -156,7 +156,9 @@ public class SftpFileIO {
  *   creation order to allow to easily clean up again later.
  *
  *   \param inFile The file to copy on the local host
- *   \param outFileName The absolute file path on the remote host
+ *   \param outFileName The file path on the remote host. If giving an
+ *      absolute path (starting with /) it will be used literally, otherwise
+ *      the file will be created relative to the user home directory.
  *
  *   \exception JSchException if the SSH session is not open
  *   \exception IOException if the file could not be copied
@@ -172,30 +174,30 @@ public class SftpFileIO {
       throws JSchException, IOException, InterruptedException, SftpException {
 
     Vector<String> createdFolders = new Vector<String>();
-    String[] folders = outFileName.split("/");
-    String currentFolder = "/";
+    String[] pathelements = outFileName.split("/");
     ChannelSftp channel = (ChannelSftp)_session.openChannel("sftp");
     channel.connect();
-    if (outFileName.startsWith("/")) currentFolder = "/";
-    else currentFolder = channel.getHome();
+    String currentFolder = (outFileName.startsWith("/")) ? "/" :
+        channel.getHome();
     channel.cd(currentFolder);
-    for (int i = 0; i < folders.length - 1; ++i) {
-      if (folders[i].length() > 0) {
+    for (int i = 0; i < pathelements.length - 1; ++i) {
+      if (pathelements[i].length() > 0) {
         try {
-          channel.cd(folders[i]);
-          currentFolder += "/" + folders[i];
+          channel.cd(pathelements[i]);
+          currentFolder += "/" + pathelements[i];
         }
         catch (SftpException e) {
           _pr.count(
-              "Creating folder '" + currentFolder + "/" + folders[i] +
-              "' on host '" + _session.getHost() + "'", 0);
+              "Creating folder '" + channel.realpath(currentFolder) + "/" +
+              pathelements[i] + "' on host '" + _session.getHost() + "'", 0);
           IJ.log(
               _session.getUserName() + "@" + _session.getHost() +
-              " $ mkdir \"" + currentFolder + "/" + folders[i] + "\"");
-          channel.mkdir(folders[i]);
-          channel.cd(folders[i]);
+              " $ mkdir \"" + channel.realpath(currentFolder) + "/" +
+              pathelements[i] + "\"");
+          channel.mkdir(pathelements[i]);
+          channel.cd(pathelements[i]);
           if (!currentFolder.endsWith("/")) currentFolder += "/";
-          currentFolder += folders[i];
+          currentFolder += pathelements[i];
           createdFolders.add(0, currentFolder);
         }
       }
@@ -207,11 +209,14 @@ public class SftpFileIO {
     IJ.log(
         "$ sftp \"" + inFile.getAbsolutePath() + "\" \"" +
         _session.getUserName() + "@" + _session.getHost() + ":" +
-        _session.getPort() + ":" + outFileName + "\"");
-    channel.put(inFile.getAbsolutePath(), outFileName, _pr,
-                 ChannelSftp.OVERWRITE);
+        _session.getPort() + ":" +
+        channel.realpath(pathelements[pathelements.length - 1]) + "\"");
+    channel.put(
+        inFile.getAbsolutePath(),
+        channel.realpath(pathelements[pathelements.length - 1]), _pr,
+        ChannelSftp.OVERWRITE);
     if (_pr.canceled()) {
-      channel.rm(outFileName);
+      channel.rm(channel.realpath(pathelements[pathelements.length - 1]));
       for (int i = 0; i < createdFolders.size(); ++i)
           channel.rmdir(createdFolders.get(i));
       channel.disconnect();
