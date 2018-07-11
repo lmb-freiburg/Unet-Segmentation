@@ -39,7 +39,6 @@ import ij.plugin.PlugIn;
 import ij.gui.Plot;
 import ij.gui.PlotWindow;
 import ij.gui.Roi;
-import ij.gui.PointRoi;
 import ij.gui.ImageRoi;
 
 import java.awt.Dimension;
@@ -94,10 +93,12 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.TextFormat.Parser;
 import com.google.protobuf.TextFormat;
 
-public class FinetuneJob extends Job implements PlugIn {
+public class FinetuneWithImagePairsJob extends Job implements PlugIn {
 
-  private final ImagePlusListView _trainFileList = new ImagePlusListView();
-  private final ImagePlusListView _validFileList = new ImagePlusListView();
+  private final TrainImagePairListView _trainFileList =
+      new TrainImagePairListView();
+  private final TrainImagePairListView _validFileList =
+      new TrainImagePairListView();
 
   private final JPanel _trainImagesPanel = new JPanel(new BorderLayout());
   private final JPanel _validImagesPanel = new JPanel(new BorderLayout());
@@ -128,10 +129,9 @@ public class FinetuneJob extends Job implements PlugIn {
           new SpinnerNumberModel(
               (int)Prefs.get("unet.finetuning.validation_step", 1),
               1, (int)Integer.MAX_VALUE, 1));
-  private final JCheckBox _treatRoiNamesAsClassesCheckBox =
-      new JCheckBox(
-          "ROI names are classes",
-          Prefs.get("unet.finetuning.roiNamesAreClasses", true));
+  private final JCheckBox _labelsAreClassesCheckBox =
+      new JCheckBox("Treat labels as classes",
+                    Prefs.get("unet.finetuning.labelsAreClasses", true));
   private final JCheckBox _downloadWeightsCheckBox =
       new JCheckBox(
           "Download Weights",
@@ -169,18 +169,18 @@ public class FinetuneJob extends Job implements PlugIn {
 
   private ModelDefinition _finetunedModel = null;
 
-  public FinetuneJob() {
+  public FinetuneWithImagePairsJob() {
     super();
   }
 
-  public FinetuneJob(JobTableModel model) {
+  public FinetuneWithImagePairsJob(JobTableModel model) {
     super(model);
   }
 
   @Override
   public void finish() {
     if (progressMonitor().finished()) return;
-    IJ.log("Finetuning finished");
+    IJ.log("Finetuning finished!");
     super.finish();
   }
 
@@ -202,8 +202,8 @@ public class FinetuneJob extends Job implements PlugIn {
       _outweightsTextField.setText(
           Prefs.get("unet.finetuning." + model().id + ".outweights",
                     (model().file != null) ?
-                    (model().file.getPath().replaceFirst(
-                        "[.]h5$", "").replaceFirst("[.-]modeldef$", "") +
+                    (model().file.getName().replaceFirst(".h5$", "")
+                     .replaceFirst("[.-]modeldef$", "") +
                      "-finetuned.caffemodel.h5") : "finetuned.caffemodel.h5"));
       _outModeldefTextField.setText(
           Prefs.get("unet.finetuning." + model().id + ".modeldef",
@@ -223,25 +223,39 @@ public class FinetuneJob extends Job implements PlugIn {
 
     _parametersDialog.setTitle("U-Net Finetuning");
 
-    // Create Train/Test split Configurator
-    int[] ids = WindowManager.getIDList();
-    for (int i = 0; i < ids.length; i++)
-        if (WindowManager.getImage(ids[i]).getRoi() != null ||
-            WindowManager.getImage(ids[i]).getOverlay() != null)
-            ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).addElement(
-                WindowManager.getImage(ids[i]));
-
-    JLabel trainImagesLabel = new JLabel("Train images");
+    JLabel trainImagesLabel = new JLabel("Train image pairs");
     _trainImagesPanel.add(trainImagesLabel, BorderLayout.NORTH);
     JScrollPane trainScroller = new JScrollPane(_trainFileList);
     trainScroller.setMinimumSize(new Dimension(100, 50));
     _trainImagesPanel.add(trainScroller, BorderLayout.CENTER);
+    JButton addTrainingSampleButton = new JButton("Add sample");
+    _trainImagesPanel.add(addTrainingSampleButton, BorderLayout.SOUTH);
+    addTrainingSampleButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            TrainImagePair p = TrainImagePair.selectImagePair();
+            if (p != null) ((DefaultListModel<TrainImagePair>)
+                            _trainFileList.getModel()).addElement(p);
+          }
+        });
 
-    JLabel validImagesLabel = new JLabel("Validation images");
+    JLabel validImagesLabel = new JLabel("Validation image pairs");
     _validImagesPanel.add(validImagesLabel, BorderLayout.NORTH);
     JScrollPane validScroller = new JScrollPane(_validFileList);
     validScroller.setMinimumSize(new Dimension(100, 50));
     _validImagesPanel.add(validScroller, BorderLayout.CENTER);
+    JButton addValidationSampleButton = new JButton("Add sample");
+    _validImagesPanel.add(addValidationSampleButton, BorderLayout.SOUTH);
+    addValidationSampleButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            TrainImagePair p = TrainImagePair.selectImagePair();
+            if (p != null) ((DefaultListModel<TrainImagePair>)
+                            _validFileList.getModel()).addElement(p);
+          }
+        });
 
     JLabel elSizeLabel = new JLabel("Element Size [µm]:");
     _fromImageButton.setToolTipText(
@@ -364,9 +378,10 @@ public class FinetuneJob extends Job implements PlugIn {
             .addComponent(outweightsLabel)
             .addComponent(_outweightsTextField)
             .addComponent(_outweightsChooseButton));
-    _treatRoiNamesAsClassesCheckBox.setToolTipText(
-        "Check if your ROI labels indicate class labels");
-    _configPanel.add(_treatRoiNamesAsClassesCheckBox);
+    _labelsAreClassesCheckBox.setToolTipText(
+        "Check this if your labels indicate classes, otherwise they are " +
+        "treated as instance labels for binary segmentation");
+    _configPanel.add(_labelsAreClassesCheckBox);
     _downloadWeightsCheckBox.setToolTipText(
         "Check if you want to download the weights from the server. " +
         "The weights file will be placed in the same folder as the new " +
@@ -416,7 +431,7 @@ public class FinetuneJob extends Job implements PlugIn {
           public void actionPerformed(ActionEvent e) {
             if (model() == null) return;
             if (_trainFileList.getModel().getSize() == 0) return;
-            ImagePlus imp = _trainFileList.getModel().getElementAt(0);
+            ImagePlus imp = _trainFileList.getModel().getElementAt(0).rawdata();
             model().setElementSizeUm(
                 Tools.getElementSizeUmFromCalibration(
                     imp.getCalibration(), model().nDims()));
@@ -457,9 +472,9 @@ public class FinetuneJob extends Job implements PlugIn {
       }
 
       int nChannels = -1;
-      for (Object obj : ((DefaultListModel<ImagePlus>)
+      for (Object obj : ((DefaultListModel<TrainImagePair>)
                          _trainFileList.getModel()).toArray()) {
-        ImagePlus imp = (ImagePlus)obj;
+        ImagePlus imp = ((TrainImagePair)obj).rawdata();
         int nc = (imp.getType() == ImagePlus.COLOR_256 ||
                   imp.getType() == ImagePlus.COLOR_RGB) ? 3 :
             imp.getNChannels();
@@ -474,9 +489,9 @@ public class FinetuneJob extends Job implements PlugIn {
       }
       if (!dialogOK) continue;
 
-      for (Object obj : ((DefaultListModel<ImagePlus>)
+      for (Object obj : ((DefaultListModel<TrainImagePair>)
                          _validFileList.getModel()).toArray()) {
-        ImagePlus imp = (ImagePlus)obj;
+        ImagePlus imp = ((TrainImagePair)obj).rawdata();
         int nc = (imp.getType() == ImagePlus.COLOR_256 ||
                   imp.getType() == ImagePlus.COLOR_RGB) ? 3 :
             imp.getNChannels();
@@ -575,7 +590,8 @@ public class FinetuneJob extends Job implements PlugIn {
       // Check for correct model and weight combination
       if (sshSession() != null) {
 
-        model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
+        model().remoteAbsolutePath =
+            processFolder() + id() + ".modeldef.h5";
         try {
           _createdRemoteFolders.addAll(
               new SftpFileIO(sshSession(), progressMonitor()).put(
@@ -738,94 +754,6 @@ public class FinetuneJob extends Job implements PlugIn {
         dialogOK = false;
         continue;
       }
-
-      if (model().nDims() == 3 ||
-          _treatRoiNamesAsClassesCheckBox.isSelected()) {
-
-        // ROI names must match either "ignore" (case insensitive) or
-        // "<class>#<instance number>" where "#<instance number>" is mandatory
-        // for 3D while it may be omitted for 2D. In any case the string may
-        // end with dash-separated numbers, as they are generated when
-        // converting ROI lists to overlays and vice-versa. They must be
-        // ignored when extracting class and instance labels
-        String pattern = "(([iI][gG][nN][oO][rR][eE])|(" +
-            ((model().nDims() == 2) ?
-             "[0-9a-zA-Z]+[^#]*(#[0-9]+)?" :
-             "[0-9a-zA-Z]+[^#]*#[0-9]+") + "))(-[0-9]+)*";
-        String pointRoiPattern = "[0-9a-zA-Z]+[^#]*(#[0-9]+)?(-[0-9]+)*";
-        String roiParseErrorMsg =
-            "Could not parse name of at least one ROI.\n" +
-            "All ROIs must be named <class>" +
-            ((model().nDims() == 2) ? "[" : "") + "#<instance number>" +
-            ((model().nDims() == 2) ? "]" : "") + " or ignore.\n" +
-            "Make sure that all ROIs belonging to the same object have " +
-            "the same instance number.";
-
-        for (Object o : ((DefaultListModel<ImagePlus>)
-                         _trainFileList.getModel()).toArray()) {
-          ImagePlus imp = (ImagePlus)o;
-          if (imp.getOverlay() == null) {
-            String msg = "Image " + imp.getTitle() + " does not contain " +
-                "annotations.\n" +
-                "Please add annotations as overlay to training and " +
-                "validation images or remove images without annotations from " +
-                "the corresponding list.";
-            IJ.log(msg);
-            IJ.showMessage(msg);
-            dialogOK = false;
-            break;
-          }
-          for (Roi roi : imp.getOverlay().toArray()) {
-            if (roi.getName() == null ||
-                (roi instanceof PointRoi &&
-                 !roi.getName().matches(pointRoiPattern)) ||
-                (!(roi instanceof PointRoi) &&
-                 !roi.getName().matches(pattern))) {
-              IJ.log(roiParseErrorMsg);
-              IJ.showMessage(roiParseErrorMsg);
-              dialogOK = false;
-              break;
-            }
-          }
-          if (!dialogOK) break;
-        }
-        if (!dialogOK) continue;
-        for (Object o : ((DefaultListModel<ImagePlus>)
-                         _validFileList.getModel()).toArray()) {
-          ImagePlus imp = (ImagePlus)o;
-          if (imp.getOverlay() == null) {
-            String msg = "Image " + imp.getTitle() + " does not contain " +
-                "annotations.\n" +
-                "Please add annotations as overlay to training and " +
-                "validation images or remove images without annotations from " +
-                "the corresponding list.";
-            IJ.log(msg);
-            IJ.showMessage(msg);
-            dialogOK = false;
-            break;
-          }
-          for (Roi roi : imp.getOverlay().toArray()) {
-            if (roi.getName() == null ||
-                (roi instanceof PointRoi &&
-                 !roi.getName().matches(pointRoiPattern)) ||
-                (!(roi instanceof PointRoi) &&
-                 !roi.getName().matches(pattern))) {
-              String msg = "Could not parse name of at least one ROI.\n" +
-                  "All ROIs must be named <class>" +
-                  ((model().nDims() == 2) ? "[" : "") + "#<instance number>" +
-                  ((model().nDims() == 2) ? "]" : "") + " or ignore.\n" +
-                  "Make sure that all ROIs belonging to the same object have " +
-                  "the same instance number.";
-              IJ.log(msg);
-              IJ.showMessage(msg);
-              dialogOK = false;
-              break;
-            }
-          }
-          if (!dialogOK) break;
-        }
-        if (!dialogOK) continue;
-      }
     }
 
     Prefs.set("unet.finetuning.base_learning_rate",
@@ -834,8 +762,8 @@ public class FinetuneJob extends Job implements PlugIn {
               (Integer)_iterationsSpinner.getValue());
     Prefs.set("unet.finetuning.validation_step",
               (Integer)_validationStepSpinner.getValue());
-    Prefs.set("unet.finetuning.roiNamesAreClasses",
-              _treatRoiNamesAsClassesCheckBox.isSelected());
+    Prefs.set("unet.finetuning.labelsAreClasses",
+              _labelsAreClassesCheckBox.isSelected());
     Prefs.set("unet.finetuning.downloadWeights",
               _downloadWeightsCheckBox.isSelected());
     Prefs.set("unet.finetuning." + model().id + ".modelName",
@@ -1297,15 +1225,15 @@ public class FinetuneJob extends Job implements PlugIn {
         // Rename output file name and remove solverstate file
         sftp.renameFile(
             processFolder() + id() + "-snapshot_iter_" + nIter +
-            ".caffemodel.h5", _finetunedModel.weightFile);
+            ".caffemodel.h5", _outweightsTextField.getText());
         String msg = "Finetuned weights have been saved to " +
-            _finetunedModel.weightFile + " on the remote host";
+            _outweightsTextField.getText() + " on the remote host";
         IJ.log(msg);
         IJ.showMessage(msg);
       }
       catch (SftpException e) {
         String msg = "Could not rename weightsfile to " +
-            _finetunedModel.weightFile + "\n" +
+            _outweightsTextField.getText() + "\n" +
             "The trained model can be found at " + processFolder() +
             id() + "-snapshot_iter_" + nIter + ".caffemodel.h5";
         IJ.log(msg);
@@ -1326,7 +1254,7 @@ public class FinetuneJob extends Job implements PlugIn {
     }
     else {
       // Rename output file and remove solverstate
-      File outfile = new File(_finetunedModel.weightFile);
+      File outfile = new File(_outweightsTextField.getText());
       File infile = new File(
           processFolder() + id() + "-snapshot_iter_" + nIter +
           ".caffemodel.h5");
@@ -1362,19 +1290,10 @@ public class FinetuneJob extends Job implements PlugIn {
 
   @Override
   public void run() {
-    boolean trainImageFound = false;
-    if (WindowManager.getIDList() != null) {
-      for (int id: WindowManager.getIDList()) {
-        if (WindowManager.getImage(id).getOverlay() != null) {
-          trainImageFound = true;
-          break;
-        }
-      }
-    }
-    if (!trainImageFound) {
-      IJ.error("U-Net Finetuning", "No image with annotations found for " +
-               "finetuning.\nThis Plugin requires at least one image with " +
-               "overlay containing annotations.");
+    if (WindowManager.getImageCount() < 2) {
+      IJ.error("U-Net Finetuning", "At least two images are required, one " +
+               "containing the raw data and one containing the corresponding " +
+               "labeled masks.");
       abort();
       return;
     }
@@ -1390,6 +1309,72 @@ public class FinetuneJob extends Job implements PlugIn {
       String[] trainBlobFileNames = new String[nTrainImages];
       Vector<String> validBlobFileNames = new Vector<String>();
 
+      // Get class label information from annotations
+      progressMonitor().initNewTask(
+          "Searching class labels", progressMonitor().taskProgressMax(), 0);
+      int maxClassLabel = 0;
+      boolean labelsAreClasses = _labelsAreClassesCheckBox.isSelected();
+      if (labelsAreClasses) {
+        for (Object imgPair : ((DefaultListModel<TrainImagePair>)
+                               _trainFileList.getModel()).toArray()) {
+          ImagePlus imp = ((TrainImagePair)imgPair).rawlabels();
+          if (imp.getBitDepth() == 8) {
+            Byte[][] data = (Byte[][])imp.getStack().getImageArray();
+            for (int i = 0; i < imp.getStack().getSize(); ++i)
+                for (int j = 0; j < data[i].length; j++)
+                    if (data[i][j] > maxClassLabel)
+                        maxClassLabel = data[i][j];
+          }
+          else if (imp.getBitDepth() == 16)
+          {
+            Short[][] data = (Short[][])imp.getStack().getImageArray();
+            for (int i = 0; i < imp.getStack().getSize(); ++i)
+                for (int j = 0; j < data[i].length; j++)
+                    if (data[i][j] > maxClassLabel)
+                        maxClassLabel = data[i][j];
+          }
+        }
+        if (maxClassLabel < 2) {
+          IJ.error("Label images contain no valid annotations.\n" +
+                   "Please make sure your labeling has the following " +
+                   "format:\n" +
+                   "0 - ignore, 1 - background, >1 foreground classes");
+          abort();
+          return;
+        }
+        int oldMax = maxClassLabel;
+        for (Object imgPair : ((DefaultListModel<TrainImagePair>)
+                               _validFileList.getModel()).toArray()) {
+          ImagePlus imp = ((TrainImagePair)imgPair).rawlabels();
+          if (imp.getBitDepth() == 8) {
+            Byte[][] data = (Byte[][])imp.getStack().getImageArray();
+            for (int i = 0; i < imp.getStack().getSize(); ++i)
+                for (int j = 0; j < data[i].length; j++)
+                    if (data[i][j] > maxClassLabel)
+                        maxClassLabel = data[i][j];
+          }
+          else if (imp.getBitDepth() == 16)
+          {
+            Short[][] data = (Short[][])imp.getStack().getImageArray();
+            for (int i = 0; i < imp.getStack().getSize(); ++i)
+                for (int j = 0; j < data[i].length; j++)
+                    if (data[i][j] > maxClassLabel)
+                        maxClassLabel = data[i][j];
+          }
+        }
+        if (maxClassLabel > oldMax) {
+          IJ.showMessage("WARNING: Your validation set contains more classes " +
+                         "than your training set. Extra classes will not be " +
+                         "learnt!");
+        }
+      }
+      else maxClassLabel = 1;
+
+      _finetunedModel.classNames = new String[maxClassLabel + 1];
+      _finetunedModel.classNames[0] = "Background";
+      for (int i = 1; i <= maxClassLabel; ++i)
+          _finetunedModel.classNames[i] = "Class " + i;
+
       // Convert and upload caffe blobs
       File outfile = null;
       if (sshSession() != null) {
@@ -1397,63 +1382,19 @@ public class FinetuneJob extends Job implements PlugIn {
         outfile.delete();
       }
 
-      // Get class label information from annotations
-      progressMonitor().initNewTask(
-          "Searching class labels", progressMonitor().taskProgressMax(), 0);
-      if (model().nDims() == 3 ||
-          _treatRoiNamesAsClassesCheckBox.isSelected()) {
-        Vector<String> classNames = new Vector<String>();
-        classNames.add("Background");
-        for (Object o : ((DefaultListModel<ImagePlus>)
-                         _trainFileList.getModel()).toArray()) {
-          ImagePlus imp = (ImagePlus)o;
-          for (Roi roi: imp.getOverlay().toArray()) {
-            String roiName = roi.getName();
-            if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*")) continue;
-            String className = roiName.replaceFirst(
-                "(#[0-9]+)?(-[0-9]+)*$", "");
-            if (classNames.contains(className)) continue;
-            classNames.add(className);
-            IJ.log("  Adding class " + className);
-          }
-        }
-        for (Object o : ((DefaultListModel<ImagePlus>)
-                         _validFileList.getModel()).toArray()) {
-          ImagePlus imp = (ImagePlus)o;
-          for (Roi roi: imp.getOverlay().toArray()) {
-            String roiName = roi.getName();
-            if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*")) continue;
-            String className = roiName.replaceFirst(
-                "(#[0-9]+)?(-[0-9]+)*$", "");
-            if (classNames.contains(className)) continue;
-            classNames.add(className);
-            IJ.log("  Adding class " + className);
-            String msg = "WARNING: Training set does not contain instances " +
-                "of class " + className + ". This class will not be learnt!";
-            IJ.log(msg);
-            IJ.showMessage(msg);
-          }
-        }
-        _finetunedModel.classNames = new String[classNames.size()];
-        for (int i = 0; i < classNames.size(); ++i)
-            _finetunedModel.classNames[i] = classNames.get(i);
-      }
-      else _finetunedModel.classNames = new String[] {
-              "Background", "Foreground" };
-
       // Process train files
       for (int i = 0; i < nTrainImages; i++) {
-        ImagePlus imp =
-            ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i);
+        TrainImagePair t = ((DefaultListModel<TrainImagePair>)
+                            _trainFileList.getModel()).get(i);
         progressMonitor().initNewTask(
-            "Converting " + imp.getTitle(),
+            "Converting " + t.rawdata().getTitle(),
             0.05f * ((float)i + ((sshSession() == null) ? 1.0f : 0.5f)) /
             (float)nImages, 0);
         trainBlobFileNames[i] = processFolder() + id() + "_train_" + i + ".h5";
         if (sshSession() == null) outfile = new File(trainBlobFileNames[i]);
-        Tools.saveHDF5Blob(
-            imp, outfile, _finetunedModel, progressMonitor(), true, true,
-            false);
+        t.saveHDF5Blob(
+            labelsAreClasses ? _finetunedModel.classNames : null, outfile,
+            _finetunedModel, progressMonitor());
         if (interrupted()) throw new InterruptedException();
         if (sshSession() != null) {
           progressMonitor().initNewTask(
@@ -1470,17 +1411,17 @@ public class FinetuneJob extends Job implements PlugIn {
 
       // Process validation files
       for (int i = 0; i < nValidImages; i++) {
-        ImagePlus imp =
-            ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i);
+        TrainImagePair t = ((DefaultListModel<TrainImagePair>)
+                            _validFileList.getModel()).get(i);
         progressMonitor().initNewTask(
-            "Converting " + imp.getTitle(),
-            0.05f + 0.05f *
-            ((float)i + ((sshSession() == null) ? 1.0f : 0.5f)) /
-            (float)nImages, 1);
+            "Converting " + t.rawdata().getTitle(),
+            0.05f * ((float)i + ((sshSession() == null) ? 1.0f : 0.5f)) /
+            (float)nImages, 0);
         String fileNameStub = (sshSession() == null) ?
             processFolder() + id() + "_valid_" + i : null;
-        File[] generatedFiles = Tools.saveHDF5TiledBlob(
-            imp, fileNameStub, _finetunedModel, progressMonitor());
+        File[] generatedFiles = t.saveHDF5TiledBlob(
+            labelsAreClasses ? _finetunedModel.classNames : null, fileNameStub,
+            _finetunedModel, progressMonitor());
 
         if (sshSession() == null)
             for (File f : generatedFiles)
@@ -1694,6 +1635,7 @@ public class FinetuneJob extends Job implements PlugIn {
       sb.setMaxIter((Integer)_iterationsSpinner.getValue());
       sb.setSnapshotPrefix(processFolder() + id() + "-snapshot");
       sb.setLrPolicy("fixed");
+      sb.setType("Adam");
       sb.setSnapshotFormat(Caffe.SolverParameter.SnapshotFormat.HDF5);
 
       if (validBlobFileNames.size() != 0) {
@@ -1714,7 +1656,8 @@ public class FinetuneJob extends Job implements PlugIn {
         tmpFile.delete();
       }
       else {
-        File solverFile = new File(_finetunedModel.solverPrototxtAbsolutePath);
+        File solverFile =
+            new File(_finetunedModel.solverPrototxtAbsolutePath);
         solverFile.createNewFile();
         _finetunedModel.saveSolverPrototxt(solverFile);
         solverFile.deleteOnExit();
@@ -1726,6 +1669,11 @@ public class FinetuneJob extends Job implements PlugIn {
       if (interrupted()) throw new InterruptedException();
 
       setReady(true);
+    }
+    catch (BlobException e) {
+      IJ.error(id(), "Could not compute connected components:\n" + e);
+      abort();
+      return;
     }
     catch (IOException e) {
       IJ.error(id(), "Input/Output error:\n" + e);
@@ -1748,10 +1696,6 @@ public class FinetuneJob extends Job implements PlugIn {
       return;
     }
     catch (InterruptedException e) {
-      abort();
-    }
-    catch (BlobException e) {
-      IJ.error(id(), "Blob conversion failed:\n" + e);
       abort();
     }
   }

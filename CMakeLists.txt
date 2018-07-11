@@ -43,6 +43,10 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/SegmentationJob.java
   src/de/unifreiburg/unet/DetectionJob.java
   src/de/unifreiburg/unet/FinetuneJob.java
+  src/de/unifreiburg/unet/FinetuneWithImagePairsJob.java
+  src/de/unifreiburg/unet/TrainImagePair.java
+  src/de/unifreiburg/unet/TrainImagePairListView.java
+  src/de/unifreiburg/unet/TrainImagePairException.java
   src/de/unifreiburg/unet/Tools.java
   src/de/unifreiburg/unet/MyUserInfo.java
   src/de/unifreiburg/unet/ProgressMonitor.java
@@ -55,6 +59,11 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/Pair.java
   src/de/unifreiburg/unet/BlobException.java
   src/de/unifreiburg/unet/Blob.java
+  src/de/unifreiburg/unet/ByteBlob.java
+  src/de/unifreiburg/unet/ShortBlob.java
+  src/de/unifreiburg/unet/IntBlob.java
+  src/de/unifreiburg/unet/FloatBlob.java
+  src/de/unifreiburg/unet/GenericBlob.java
   caffe/Caffe.java
   caffe/caffe.proto COPYING.txt plugins.config
   resources/README.html INCLUDE_JARS protobuf-java-3.3.1.jar)

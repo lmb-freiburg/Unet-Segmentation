@@ -105,7 +105,7 @@ public class JobManager extends PlugInFrame {
 
     JButton newFinetuneJobButton = new JButton("Finetuning");
     newFinetuneJobButton.setToolTipText(
-        "Finetune U-Net model to new data");
+        "Finetune U-Net model to new data based on ImageJ ROI annotations");
     newFinetuneJobButton.addActionListener(
         new ActionListener() {
           @Override
@@ -164,7 +164,7 @@ public class JobManager extends PlugInFrame {
     c.fill = GridBagConstraints.BOTH;
     c.anchor = GridBagConstraints.CENTER;
     c.gridx = 0;
-    c.gridwidth = 4;
+    c.gridwidth = 5;
     add(tableScroller, c);
     c.weighty = 0;
     c.fill = GridBagConstraints.NONE;

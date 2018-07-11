@@ -30,69 +30,63 @@
 
 package de.unifreiburg.unet;
 
-import ij.ImagePlus;
-
 import java.awt.Component;
-import java.awt.datatransfer.DataFlavor;
-import java.awt.datatransfer.StringSelection;
-import java.awt.datatransfer.Transferable;
-import java.awt.datatransfer.UnsupportedFlavorException;
-import java.awt.dnd.DnDConstants;
-import java.awt.dnd.DragGestureEvent;
-import java.awt.dnd.DragGestureListener;
-import java.awt.dnd.DragGestureRecognizer;
-import java.awt.dnd.DragSource;
-import java.awt.dnd.DragSourceDragEvent;
-import java.awt.dnd.DragSourceDropEvent;
-import java.awt.dnd.DragSourceEvent;
-import java.awt.dnd.DragSourceListener;
 import java.awt.event.KeyListener;
 import java.awt.event.KeyEvent;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.dnd.DragSourceListener;
+import java.awt.dnd.DragGestureListener;
+import java.awt.dnd.DragSource;
+import java.awt.dnd.DragGestureEvent;
+import java.awt.dnd.DragSourceDragEvent;
+import java.awt.dnd.DragSourceEvent;
+import java.awt.dnd.DragSourceDropEvent;
+import java.awt.dnd.DragGestureRecognizer;
+import java.awt.dnd.DnDConstants;
 
 import java.io.IOException;
 
 import java.util.List;
 
-import javax.swing.ListSelectionModel;
+import javax.swing.JList;
 import javax.swing.DefaultListModel;
 import javax.swing.DefaultListCellRenderer;
-import javax.swing.DropMode;
-import javax.swing.JFrame;
-import javax.swing.JList;
-import javax.swing.JScrollPane;
 import javax.swing.TransferHandler;
+import javax.swing.ListSelectionModel;
+import javax.swing.DropMode;
 
+public class TrainImagePairListView extends JList<TrainImagePair> {
 
-public class ImagePlusListView extends JList<ImagePlus> {
+  private DefaultListModel<TrainImagePair> model;
 
-  private DefaultListModel<ImagePlus> model;
-
-  public ImagePlusListView() {
-    super(new DefaultListModel<ImagePlus>());
-    model = (DefaultListModel<ImagePlus>) getModel();
+  public TrainImagePairListView() {
+    super(new DefaultListModel<TrainImagePair>());
+    model = (DefaultListModel<TrainImagePair>) getModel();
     setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     setDragEnabled(true);
     setDropMode(DropMode.INSERT);
-    setTransferHandler(new ImagePlusListViewDropHandler(this));
-    setCellRenderer(new ImagePlusListViewNameRenderer());
-    new ImagePlusListViewDragListener(this);
-    addKeyListener(new ImagePlusListViewKeyListener(this));
+    setTransferHandler(new TrainImagePairListViewDropHandler(this));
+    setCellRenderer(new TrainImagePairListViewNameRenderer());
+    new TrainImagePairListViewDragListener(this);
+    addKeyListener(new TrainImagePairListViewKeyListener(this));
   }
 
 }
 
 
-class ImagePlusListViewNameRenderer extends DefaultListCellRenderer {
+class TrainImagePairListViewNameRenderer extends DefaultListCellRenderer {
 
-  public ImagePlusListViewNameRenderer() {
+  public TrainImagePairListViewNameRenderer() {
     setOpaque(true);
   }
 
   @Override
   public Component getListCellRendererComponent(
-      JList<?> list, Object img, int index,
+      JList<?> list, Object imgPair, int index,
       boolean isSelected, boolean cellHasFocus) {
-    setText(((ImagePlus)img).getTitle());
+    setText(((TrainImagePair)imgPair).toString());
     if (isSelected) {
       setBackground(list.getSelectionBackground());
       setForeground(list.getSelectionForeground());
@@ -105,19 +99,20 @@ class ImagePlusListViewNameRenderer extends DefaultListCellRenderer {
 }
 
 
-class ImagePlusListViewKeyListener implements KeyListener
+class TrainImagePairListViewKeyListener implements KeyListener
 {
 
-  private ImagePlusListView _list;
+  private TrainImagePairListView _list;
 
-  public ImagePlusListViewKeyListener(ImagePlusListView list) {
+  public TrainImagePairListViewKeyListener(TrainImagePairListView list) {
     this._list = list;
   }
 
   public void keyPressed(KeyEvent e) {
     if (e.getKeyCode() == KeyEvent.VK_DELETE)
-        for (ImagePlus img : (List<ImagePlus>)_list.getSelectedValuesList())
-            ((DefaultListModel)_list.getModel()).removeElement(img);
+        for (TrainImagePair imgPair :
+                 (List<TrainImagePair>)_list.getSelectedValuesList())
+            ((DefaultListModel)_list.getModel()).removeElement(imgPair);
   }
 
   public void keyReleased(KeyEvent e) {}
@@ -127,42 +122,43 @@ class ImagePlusListViewKeyListener implements KeyListener
 }
 
 
-class TransferableImagePlus implements Transferable {
+class TransferableTrainImagePair implements Transferable {
 
-  public static final DataFlavor IMAGE_PLUS_FLAVOR =
-      new DataFlavor(ImagePlus.class, "java/ImagePlus");
+  public static final DataFlavor TRAIN_IMAGE_PAIR_FLAVOR =
+      new DataFlavor(TrainImagePair.class, "java/TrainImagePair");
 
-  private ImagePlus _img;
+  private TrainImagePair _imgPair;
 
-  public TransferableImagePlus(ImagePlus img) {
-    this._img = img;
+  public TransferableTrainImagePair(TrainImagePair imgPair) {
+    this._imgPair = imgPair;
   }
 
   @Override
   public DataFlavor[] getTransferDataFlavors() {
-    return new DataFlavor[]{IMAGE_PLUS_FLAVOR};
+    return new DataFlavor[]{TRAIN_IMAGE_PAIR_FLAVOR};
   }
 
   @Override
   public boolean isDataFlavorSupported(DataFlavor flavor) {
-    return flavor.equals(IMAGE_PLUS_FLAVOR);
+    return flavor.equals(TRAIN_IMAGE_PAIR_FLAVOR);
   }
 
   @Override
   public Object getTransferData(DataFlavor flavor)
       throws UnsupportedFlavorException, IOException {
-    return _img;
+    return _imgPair;
   }
 }
 
 
-class ImagePlusListViewDragListener
+
+class TrainImagePairListViewDragListener
     implements DragSourceListener, DragGestureListener {
-  private ImagePlusListView _list;
-  private ImagePlus _img = null;
+  private TrainImagePairListView _list;
+  private TrainImagePair _imgPair = null;
   private DragSource _ds = new DragSource();
 
-  public ImagePlusListViewDragListener(ImagePlusListView list) {
+  public TrainImagePairListViewDragListener(TrainImagePairListView list) {
     this._list = list;
     DragGestureRecognizer dgr =
         _ds.createDefaultDragGestureRecognizer(
@@ -170,9 +166,9 @@ class ImagePlusListViewDragListener
   }
 
   public void dragGestureRecognized(DragGestureEvent dge) {
-    _img = _list.getSelectedValue();
+    _imgPair = _list.getSelectedValue();
     _ds.startDrag(dge, DragSource.DefaultMoveDrop,
-                 new TransferableImagePlus(_img), this);
+                  new TransferableTrainImagePair(_imgPair), this);
   }
 
   public void dragEnter(DragSourceDragEvent dsde) {}
@@ -183,23 +179,25 @@ class ImagePlusListViewDragListener
 
   public void dragDropEnd(DragSourceDropEvent dsde) {
     if (dsde.getDropSuccess())
-        ((DefaultListModel<ImagePlus>)_list.getModel()).removeElement(_img);
+        ((DefaultListModel<TrainImagePair>)
+         _list.getModel()).removeElement(_imgPair);
   }
 
   public void dropActionChanged(DragSourceDragEvent dsde) {}
 }
 
 
-class ImagePlusListViewDropHandler extends TransferHandler {
-  private ImagePlusListView _list;
 
-  public ImagePlusListViewDropHandler(ImagePlusListView list) {
+class TrainImagePairListViewDropHandler extends TransferHandler {
+  private TrainImagePairListView _list;
+
+  public TrainImagePairListViewDropHandler(TrainImagePairListView list) {
     this._list = list;
   }
 
   public boolean canImport(TransferHandler.TransferSupport support) {
     if (!support.isDataFlavorSupported(
-            TransferableImagePlus.IMAGE_PLUS_FLAVOR)) return false;
+            TransferableTrainImagePair.TRAIN_IMAGE_PAIR_FLAVOR)) return false;
     JList.DropLocation dl = (JList.DropLocation) support.getDropLocation();
     return dl.getIndex() != -1;
   }
@@ -208,10 +206,10 @@ class ImagePlusListViewDropHandler extends TransferHandler {
     if (!canImport(support)) return false;
 
     Transferable transferable = support.getTransferable();
-    ImagePlus img;
+    TrainImagePair imgPair;
     try {
-      img = (ImagePlus) transferable.getTransferData(
-          TransferableImagePlus.IMAGE_PLUS_FLAVOR);
+      imgPair = (TrainImagePair) transferable.getTransferData(
+          TransferableTrainImagePair.TRAIN_IMAGE_PAIR_FLAVOR);
     }
     catch (Exception e) {
       return false;
@@ -220,7 +218,7 @@ class ImagePlusListViewDropHandler extends TransferHandler {
     JList.DropLocation dl = (JList.DropLocation) support.getDropLocation();
     int dropTargetIndex = dl.getIndex();
 
-    ((DefaultListModel<ImagePlus>)_list.getModel()).addElement(img);
+    ((DefaultListModel<TrainImagePair>)_list.getModel()).addElement(imgPair);
     return true;
   }
 }

@@ -57,6 +57,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.Vector;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Locale;
 
 // For remote SSH connections
@@ -77,7 +78,6 @@ import ch.systemsx.cisd.hdf5.IHDF5Reader;
 import ch.systemsx.cisd.hdf5.HDF5DataSetInformation;
 import ch.systemsx.cisd.base.mdarray.MDFloatArray;
 
-
 public class Tools {
 
 /*======================================================================*/
@@ -88,17 +88,17 @@ public class Tools {
  *   the input ImagePlus is returned
  *
  *   \param imp The ImagePlus to convert to a composite multi channel image
- *   \param job Task progress will be reported via this Job.
+ *   \param pr Task progress will be reported to this ProgressMonitor.
  *
  *   \return The newly created ImagePlus or if no conversion was required
  *     a reference to imp
  */
 /*======================================================================*/
-  public static ImagePlus makeComposite(ImagePlus imp, Job job) {
+  public static ImagePlus makeComposite(ImagePlus imp, ProgressMonitor pr) {
     if (imp.getType() != ImagePlus.COLOR_256 &&
         imp.getType() != ImagePlus.COLOR_RGB) return imp;
 
-    job.progressMonitor().count("Splitting color channels", 0);
+    if (pr != null) pr.count("Splitting color channels", 0);
     ImagePlus out = CompositeConverter.makeComposite(imp);
     out.setTitle(imp.getTitle() + " - composite");
     out.setCalibration(imp.getCalibration().copy());
@@ -113,33 +113,30 @@ public class Tools {
  *   the input ImagePlus is returned
  *
  *   \param imp The ImagePlus to convert to float
- *   \param job Task progress will be reported via this Job.
+ *   \param pr Task progress will be reported to this ProgressMonitor.
  *
  *   \return The newly created ImagePlus or if no conversion was required
  *     a reference to imp
  */
 /*======================================================================*/
-  public static ImagePlus convertToFloat(ImagePlus imp, Job job)
+  public static ImagePlus convertToFloat(ImagePlus imp, ProgressMonitor pr)
       throws InterruptedException {
     if (imp.getBitDepth() == 32) return imp;
 
-    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
-    job.progressMonitor().count("Converting hyperstack to float", 0);
+    if (pr != null) {
+      pr.init(0, "", "", imp.getImageStackSize());
+      pr.count("Converting hyperstack to float", 0);
+    }
     ImagePlus out = IJ.createHyperStack(
         imp.getTitle() + " - 32-Bit", imp.getWidth(), imp.getHeight(),
         imp.getNChannels(), imp.getNSlices(), imp.getNFrames(), 32);
     out.setCalibration(imp.getCalibration().copy());
 
-    if (imp.getStackSize() == 1) {
-      job.progressMonitor().count(1);
-      out.setProcessor(imp.getProcessor().duplicate().convertToFloat());
-      return out;
-    }
-
     for (int i = 1; i <= imp.getImageStackSize(); i++) {
-      if (job.interrupted())
-          throw new InterruptedException("Aborted by user");
-      job.progressMonitor().count(1);
+      if (pr != null) {
+        pr.count(1);
+        if (pr.canceled()) throw new InterruptedException();
+      }
       out.getStack().setProcessor(
           imp.getStack().getProcessor(i).duplicate().convertToFloat(), i);
     }
@@ -148,23 +145,23 @@ public class Tools {
 
 /*======================================================================*/
 /*!
- *   If the model definition of the given Job requires 2-D data, both
- *   time and z will be interpreted as time. The stack layout is changed
- *   accordingly. For 3-D models or if the image only contains one slice
- *   per time point, this method is a noop and a reference to
- *   the input ImagePlus is returned
+ *   If the model definition requires 2-D data, both time and z will be
+ *   interpreted as time. The stack layout is changed accordingly. For 3-D
+ *   models or if the image only contains one slice per time point, this
+ *   method is a noop and a reference to the input ImagePlus is returned
  *
  *   \param imp The ImagePlus to rearrange
- *   \param job The Job containing the model definition. Task progress
- *     will be reported via this Job.
+ *   \param model The ModelDefinition to use for conversion
+ *   \param pr Task progress will be reported to this ProgressMonitor.
  *
  *   \return The newly created ImagePlus or if no conversion was required
  *     a reference to imp
  */
 /*======================================================================*/
-  public static ImagePlus fixStackLayout(ImagePlus imp, Job job)
+  public static ImagePlus fixStackLayout(
+      ImagePlus imp, ModelDefinition model, ProgressMonitor pr)
       throws InterruptedException {
-    if (job.model().nDims() == 3 || imp.getNSlices() == 1) return imp;
+    if (model.nDims() == 3 || imp.getNSlices() == 1) return imp;
     if (!IJ.showMessageWithCancel(
             "2-D model selected", "The selected model " +
             "requires 2-D Input.\n" +
@@ -177,12 +174,15 @@ public class Tools {
     Calibration cal = imp.getCalibration().copy();
     cal.pixelDepth = 1;
     out.setCalibration(cal);
-    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
-    job.progressMonitor().count("Fixing stack layout", 0);
+    if (pr != null) {
+      pr.init(0, "", "", imp.getImageStackSize());
+      pr.count("Fixing stack layout", 0);
+    }
     for (int i = 1; i <= imp.getImageStackSize(); ++i) {
-      if (job.interrupted())
-          throw new InterruptedException("Aborted by user");
-      job.progressMonitor().count(1);
+      if (pr != null) {
+        pr.count(1);
+        if (pr.canceled()) throw new InterruptedException();
+      }
       out.getStack().setProcessor(
           imp.getStack().getProcessor(i).duplicate(), i);
     }
@@ -190,33 +190,36 @@ public class Tools {
   }
 
   public static ImagePlus rescaleXY(
-      ImagePlus imp, int interpolationMethod, Job job)
-      throws InterruptedException {
+      ImagePlus imp, int interpolationMethod, ModelDefinition model,
+      ProgressMonitor pr) throws InterruptedException {
     Calibration cal = imp.getCalibration().copy();
-    int offs = (job.model().nDims() == 2) ? 0 : 1;
-    float[] elSize = job.model().elementSizeUm();
-    cal.pixelHeight = elSize[offs];
-    cal.pixelWidth = elSize[offs + 1];
+    int offs = (model.nDims() == 2) ? 0 : 1;
+    double[] elSizeModel = model.elementSizeUm();
+    double[] elSizeData = getElementSizeUmFromCalibration(cal, model.nDims());
+    cal.setUnit("um");
+    cal.pixelDepth = (model.nDims() == 3) ? elSizeData[0] : 1;
+    cal.pixelHeight = elSizeModel[offs];
+    cal.pixelWidth = elSizeModel[offs + 1];
 
-    float[] scales = new float[2];
-    scales[0] = (float)(imp.getCalibration().pixelHeight / cal.pixelHeight);
-    scales[1] = (float)(imp.getCalibration().pixelWidth / cal.pixelWidth);
+    double[] scales = new double[2];
+    scales[0] = elSizeData[offs] / elSizeModel[offs];
+    scales[1] = elSizeData[offs + 1] / elSizeModel[offs + 1];
     if (scales[0] == 1 && scales[1] == 1) return imp;
 
-    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
-    job.progressMonitor().count("Rescaling hyperstack (xy)", 0);
-    IJ.log("Rescaling Hyperstack (xy) from [" +
-           imp.getCalibration().pixelDepth + ", " +
-           imp.getCalibration().pixelHeight + ", " +
-           imp.getCalibration().pixelWidth + "] to [" +
-           cal.pixelDepth + ", " +
-           cal.pixelHeight + ", " +
-           cal.pixelWidth + "]");
+    if (pr != null) {
+      pr.init(0, "", "", imp.getImageStackSize());
+      pr.count("Rescaling hyperstack (xy)", 0);
+    }
+    IJ.log("Rescaling Hyperstack (xy) from (" +
+           ((model.nDims() == 3) ? (elSizeData[0] + ", ") : "") +
+           elSizeData[offs] + ", " + elSizeData[offs + 1] + ") to (" +
+           ((model.nDims() == 3) ? (elSizeModel[0] + ", ") : "") +
+           elSizeModel[offs] + ", " + elSizeModel[offs + 1] + ")");
 
     ImagePlus out = IJ.createHyperStack(
         imp.getTitle() + " - rescaled (xy)",
-        (int)(imp.getWidth() * scales[1]),
-        (int)(imp.getHeight() * scales[0]), imp.getNChannels(),
+        (int)Math.round(imp.getWidth() * scales[1]),
+        (int)Math.round(imp.getHeight() * scales[0]), imp.getNChannels(),
         imp.getNSlices(), imp.getNFrames(), 32);
     out.setCalibration(cal);
 
@@ -224,34 +227,36 @@ public class Tools {
     // To ensure proper interpolation we do the interpolation ourselves
     int W = imp.getWidth();
     int H = imp.getHeight();
+    int Wout = out.getWidth();
+    int Hout = out.getHeight();
     for (int i = 0; i < imp.getImageStackSize(); ++i) {
-      if (job.interrupted())
-          throw new InterruptedException("Aborted by user");
-      job.progressMonitor().count(1);
-      ImageProcessor ipIn =
-          (imp.getImageStackSize() == 1) ? imp.getProcessor() :
-          imp.getStack().getProcessor(i + 1);
-      ImageProcessor ipOut =
-          (imp.getImageStackSize() == 1) ? out.getProcessor() :
-          out.getStack().getProcessor(i + 1);
-      for (int y = 0; y < out.getHeight(); ++y) {
-        float yRd = y / scales[0];
-        int yBase = (int)Math.floor(yRd);
-        float dy = yRd - yBase;
-        for (int x = 0; x < out.getWidth(); ++x) {
-          float xRd = x / scales[1];
-          int xBase = (int)Math.floor(xRd);
-          float dx = xRd - xBase;
+      if (pr != null) {
+        pr.count(1);
+        if (pr.canceled()) throw new InterruptedException();
+      }
+      ImageProcessor ipIn = imp.getStack().getProcessor(i + 1);
+      ImageProcessor ipOut = out.getStack().getProcessor(i + 1);
+      for (int y = 0; y < Hout; ++y) {
+        double yRd = y / scales[0];
+        int yL = (int)Math.floor(yRd);
+        int yU = (yL + 1 < H) ? yL + 1 : (2 * (H - 1) - (yL + 1));
+        double dy = yRd - yL;
+        for (int x = 0; x < Wout; ++x) {
+          double xRd = x / scales[1];
+          int xL = (int)Math.floor(xRd);
+          int xU = (xL + 1 < W) ? xL + 1 : (2 * (W - 1) - (xL + 1));
+          double dx = xRd - xL;
           if (interpolationMethod == ImageProcessor.NEAREST_NEIGHBOR)
-              ipOut.setf(x, y, ipIn.getf(xBase, yBase));
+              ipOut.setf(
+                  x, y, ipIn.getf((int)Math.round(xRd), (int)Math.round(yRd)));
           else {
             ipOut.setf(
                 x, y,
-                (1 - dx) * (1 - dy) * ipIn.getf(xBase, yBase) +
-                (1 - dx) * dy * ipIn.getf(xBase, Math.min(yBase + 1, H - 1)) +
-                dx * (1 - dy) * ipIn.getf(Math.min(xBase + 1, W - 1), yBase) +
-                dx * dy * ipIn.getf(
-                    Math.min(xBase + 1, W - 1), Math.min(yBase + 1, H - 1)));
+                (float)(
+                    (1 - dx) * (1 - dy) * ipIn.getf(xL, yL) +
+                    (1 - dx) * dy * ipIn.getf(xL, yU) +
+                    dx * (1 - dy) * ipIn.getf(xU, yL) +
+                    dx * dy * ipIn.getf(xU, yU)));
           }
         }
       }
@@ -260,42 +265,40 @@ public class Tools {
   }
 
   public static ImagePlus rescaleZ(
-      ImagePlus imp, int interpolationMethod, Job job)
+      ImagePlus imp, int interpolationMethod, ModelDefinition model,
+      ProgressMonitor pr)
       throws InterruptedException {
-    if (job.model().nDims() == 2 || imp.getNSlices() == 1) return imp;
+    if (model.nDims() == 2 || imp.getNSlices() == 1) return imp;
 
-    float elSizeZ = job.model().elementSizeUm()[0];
-    double scale = imp.getCalibration().pixelDepth / elSizeZ;
+    double elSizeZ = model.elementSizeUm()[0];
+    Calibration cal = imp.getCalibration().copy();
+    double[] elSizeData = getElementSizeUmFromCalibration(cal, 3);
+    double scale = elSizeData[0] / elSizeZ;
     if (scale == 1) return imp;
 
-    Calibration cal = imp.getCalibration().copy();
+    cal.setUnit("um");
     cal.pixelDepth = elSizeZ;
+    cal.pixelHeight = elSizeData[1];
+    cal.pixelWidth = elSizeData[2];
     ImagePlus out = IJ.createHyperStack(
         imp.getTitle() + " - rescaled (z)",
         imp.getWidth(), imp.getHeight(), imp.getNChannels(),
-        (int)(imp.getNSlices() * scale), imp.getNFrames(), 32);
+        (int)Math.round(imp.getNSlices() * scale), imp.getNFrames(), 32);
     out.setCalibration(cal);
-    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
-    job.progressMonitor().count("Rescaling hyperstack (z)", 0);
-    IJ.log("Rescaling Hyperstack (z) from [" +
-           imp.getCalibration().pixelDepth + ", " +
-           imp.getCalibration().pixelHeight + ", " +
-           imp.getCalibration().pixelWidth + "] to [" +
-           cal.pixelDepth + ", " +
-           cal.pixelHeight + ", " +
-           cal.pixelWidth + "] (scale factor = " + scale + ")");
-    IJ.log("  Input shape = [" +
-           imp.getNFrames() + ", " +
-           imp.getNChannels() + ", " +
-           imp.getNSlices() + ", " +
-           imp.getHeight() + ", " +
-           imp.getWidth() + "]");
-    IJ.log("  Output shape = [" +
-           out.getNFrames() + ", " +
-           out.getNChannels() + ", " +
-           out.getNSlices() + ", " +
-           out.getHeight() + ", " +
-           out.getWidth() + "]");
+    if (pr != null) {
+      pr.init(0, "", "", imp.getImageStackSize());
+      pr.count("Rescaling hyperstack (z)", 0);
+    }
+    IJ.log("Rescaling Hyperstack (z) from (" +
+           elSizeData[0] + ", " + elSizeData[1] + ", " + elSizeData[2] +
+           ") to (" + cal.pixelDepth + ", " + cal.pixelHeight + ", " +
+           cal.pixelWidth + ")");
+    IJ.log("  Input shape = [" + imp.getNFrames() + ", " +
+           imp.getNChannels() + ", " + imp.getNSlices() + ", " +
+           imp.getHeight() + ", " + imp.getWidth() + "]");
+    IJ.log("  Output shape = [" + out.getNFrames() + ", " +
+           out.getNChannels() + ", " + out.getNSlices() + ", " +
+           out.getHeight() + ", " + out.getWidth() + "]");
 
     for (int t = 1; t <= out.getNFrames(); ++t) {
       for (int z = 1; z <= out.getNSlices(); ++z) {
@@ -304,14 +307,15 @@ public class Tools {
           int zIn = (int)Math.floor(zTmp);
           double lambda = zTmp - zIn;
           int zIn2 = zIn + 1;
-          if (zIn >= out.getNSlices())
-              zIn = 2 * (out.getNSlices() - 1) - zIn;
-          if (zIn2 >= out.getNSlices())
-              zIn2 = 2 * (out.getNSlices() - 1) - zIn2;
+          if (zIn >= imp.getNSlices())
+              zIn = 2 * (imp.getNSlices() - 1) - zIn;
+          if (zIn2 >= imp.getNSlices())
+              zIn2 = 2 * (imp.getNSlices() - 1) - zIn2;
           for (int c = 1; c <= out.getNChannels(); ++c) {
-            if (job.interrupted())
-                throw new InterruptedException("Aborted by user");
-            job.progressMonitor().count(1);
+            if (pr != null) {
+              if (pr.canceled()) throw new InterruptedException();
+              pr.count(1);
+            }
             ImageProcessor ip = imp.getStack().getProcessor(
                 imp.getStackIndex(c, zIn, t)).duplicate();
             if (lambda != 0) {
@@ -328,12 +332,13 @@ public class Tools {
         }
         else {
           int zIn = (int)Math.round(zTmp);
-          if (zIn >= out.getNSlices())
-              zIn = 2 * (out.getNSlices() - 1) - zIn;
+          if (zIn >= imp.getNSlices())
+              zIn = 2 * (imp.getNSlices() - 1) - zIn;
           for (int c = 1; c <= out.getNChannels(); ++c) {
-            if (job.interrupted())
-                throw new InterruptedException("Aborted by user");
-            job.progressMonitor().count(1);
+            if (pr != null) {
+              if (pr.canceled()) throw new InterruptedException();
+              pr.count(1);
+            }
             out.getStack().setProcessor(
                 imp.getStack().getProcessor(
                     imp.getStackIndex(c, zIn, t)).duplicate(),
@@ -345,29 +350,30 @@ public class Tools {
     return out;
   }
 
-  public static ImagePlus normalizeValues(ImagePlus imp, Job job)
+  public static ImagePlus normalizeValues(
+      ImagePlus imp, ModelDefinition model, ProgressMonitor pr)
       throws InterruptedException {
-    if (job.model().normalizationType == 0) return imp;
-    ImagePlus out = imp;
+    if (model.normalizationType == 0) return imp;
     float[] scales = new float[imp.getNFrames()];
     float[] offsets = new float[imp.getNFrames()];
+    boolean needsNormalization = false;
 
     long nSteps = 2 * imp.getStackSize();
-    if (job.model().normalizationType == 2) nSteps += imp.getStackSize();
-    job.progressMonitor().init(0, "", "", nSteps);
+    if (model.normalizationType == 2) nSteps += imp.getStackSize();
+    if (pr != null) pr.init(0, "", "", nSteps);
 
     for (int t = 1; t <= imp.getNFrames(); ++t) {
-      switch (job.model().normalizationType) {
+      switch (model.normalizationType) {
       case 1: { // MIN/MAX
         float minValue = Float.POSITIVE_INFINITY;
         float maxValue = Float.NEGATIVE_INFINITY;
         for (int z = 1; z <= imp.getNSlices(); ++z) {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
-            if (job.interrupted())
-                throw new InterruptedException("Aborted by user");
-            job.progressMonitor().count(
-                "Computing data min/max (t=" + t + ", z=" + z +
-                ", c=" + c + ")", 1);
+            if (pr != null) {
+              if (pr.canceled()) throw new InterruptedException();
+              pr.count("Computing data min/max (t=" + t + ", z=" + z +
+                       ", c=" + c + ")", 1);
+            }
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i) {
@@ -384,11 +390,11 @@ public class Tools {
         float sum = 0;
         for (int z = 1; z <= imp.getNSlices(); ++z) {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
-            if (job.interrupted())
-                throw new InterruptedException("Aborted by user");
-            job.progressMonitor().count(
-                "Computing data mean (t=" + t + ", z=" + z +
-                ", c=" + c + ")", 1);
+            if (pr != null) {
+              if (pr.canceled()) throw new InterruptedException();
+              pr.count("Computing data mean (t=" + t + ", z=" + z +
+                       ", c=" + c + ")", 1);
+            }
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
@@ -400,11 +406,11 @@ public class Tools {
         sum = 0;
         for (int z = 1; z <= imp.getNSlices(); ++z) {
           for (int c = 1; c <= imp.getNChannels(); ++c) {
-            if (job.interrupted())
-                throw new InterruptedException("Aborted by user");
-            job.progressMonitor().count(
-                "Computing data standard deviation (t=" + t + ", z=" + z +
-                ", c=" + c + ")", 1);
+            if (pr != null) {
+              if (pr.canceled()) throw new InterruptedException();
+              pr.count("Computing data standard deviation (t=" + t + ", z=" +
+                       z + ", c=" + c + ")", 1);
+            }
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
@@ -423,11 +429,11 @@ public class Tools {
           float[] sqrNorm = new float[imp.getHeight() * imp.getWidth()];
           Arrays.fill(sqrNorm, 0);
           for (int c = 1; c <= imp.getNChannels(); ++c) {
-            if (job.interrupted())
-                throw new InterruptedException("Aborted by user");
-            job.progressMonitor().count(
-                "Computing data norm (t=" + t + ", z=" + z +
-                ", c=" + c + ")", 1);
+            if (pr != null) {
+              if (pr.canceled()) throw new InterruptedException();
+              pr.count("Computing data norm (t=" + t + ", z=" +
+                       z + ", c=" + c + ")", 1);
+            }
             float[] values = (float[])
                 imp.getStack().getPixels(imp.getStackIndex(c, z, t));
             for (int i = 0; i < imp.getHeight() * imp.getWidth(); ++i)
@@ -446,52 +452,31 @@ public class Tools {
 
       IJ.log("t = " + t + ": scale = " + scales[t - 1] + ", offset = " +
              offsets[t - 1]);
+      needsNormalization |= offsets[t - 1] != 0 || scales[t - 1] != 1;
+    }
 
-      if (imp == out && (scales[t - 1] != 1 || offsets[t - 1] != 0)) {
-        out = IJ.createHyperStack(
-            imp.getTitle() + " - normalized", imp.getWidth(),
-            imp.getHeight(), imp.getNChannels(), imp.getNSlices(),
-            imp.getNFrames(), 32);
-        out.setCalibration(imp.getCalibration().copy());
+    if (!needsNormalization) return imp;
 
-        // Special treatment for single image
-        if (imp.getImageStackSize() == 1) {
-          job.progressMonitor().count("Normalizing", 1);
-          ImageProcessor ip = imp.getProcessor().duplicate();
+    ImagePlus out = IJ.createHyperStack(
+        imp.getTitle() + " - normalized", imp.getWidth(),
+        imp.getHeight(), imp.getNChannels(), imp.getNSlices(),
+        imp.getNFrames(), 32);
+    out.setCalibration(imp.getCalibration().copy());
+    for (int t = 1; t <= imp.getNFrames(); ++t) {
+      for (int z = 1; z <= imp.getNSlices(); ++z) {
+        for (int c = 1; c <= imp.getNChannels(); ++c) {
+          if (pr != null) {
+            if (pr.canceled()) throw new InterruptedException();
+            pr.count(
+                "Normalizing (t=" + t + ", z=" + z + ", c=" + c + ")", 1);
+          }
+          ImageProcessor ip =
+              imp.getStack().getProcessor(
+                  imp.getStackIndex(c, z, t)).duplicate();
           ip.add(offsets[t - 1]);
           ip.multiply(scales[t - 1]);
-          out.setProcessor(ip);
-          return out;
-        }
-
-        for (int z = 1; z <= imp.getNSlices(); ++z) {
-          for (int c = 1; c <= imp.getNChannels(); ++c) {
-            job.progressMonitor().count(
-                "Normalizing (t=" + t + ", z=" + z +
-                ", c=" + c + ")", 1);
-            ImageProcessor ip =
-                imp.getStack().getProcessor(
-                    imp.getStackIndex(c, z, t)).duplicate();
-            ip.add(offsets[t - 1]);
-            ip.multiply(scales[t - 1]);
-            out.getStack().setProcessor(ip, out.getStackIndex(c, z, t));
-          }
-        }
-      }
-      else {
-        for (int z = 1; z <= imp.getNSlices(); ++z) {
-          for (int c = 1; c <= imp.getNChannels(); ++c) {
-            job.progressMonitor().count(
-                "Normalizing (t=" + t + ", z=" + z +
-                ", c=" + c + ")", 1);
-            ImageProcessor ip =
-                imp.getStack().getProcessor(
-                    imp.getStackIndex(c, z, t)).duplicate();
-            ip.add(offsets[t - 1]);
-            ip.multiply(scales[t - 1]);
-            out.getStack().setProcessor(
-                ip, out.getStackIndex(c, z, t));
-          }
+          ip.setMinAndMax(0, 1);
+          out.getStack().setProcessor(ip, out.getStackIndex(c, z, t));
         }
       }
     }
@@ -508,10 +493,9 @@ public class Tools {
  *   ImagePlus before performing unwanted destructive changes. If a new
  *   ImagePlus is created it will be initially hidden.
  *
- *   \param imp The ImagePlus to convert to unet model compliant format
- *   \param job The unet job asking for the resize operation. Its model
- *     will be queried for the required output format. Task progress will
- *     be reported via the Job.
+ *   \param imp   The ImagePlus to convert to unet model compliant format
+ *   \param model The reference model for conversion
+ *   \param pr    Task progress will be reported to this ProgressMonitor.
  *
  *   \exception InterruptedException The user can abort this operation
  *     resulting in this error
@@ -522,16 +506,15 @@ public class Tools {
  */
 /*======================================================================*/
   public static ImagePlus convertToUnetFormat(
-      ImagePlus imp, Job job, boolean keepOriginal, boolean show)
-      throws InterruptedException {
+      ImagePlus imp, ModelDefinition model, ProgressMonitor pr,
+      boolean keepOriginal, boolean show) throws InterruptedException {
     ImagePlus out = normalizeValues(
         rescaleZ(
             rescaleXY(
                 fixStackLayout(
-                    convertToFloat(makeComposite(imp, job), job), job),
-                ImageProcessor.BILINEAR, job),
-            ImageProcessor.BILINEAR, job),
-        job);
+                    convertToFloat(makeComposite(imp, pr), pr), model, pr),
+                ImageProcessor.BILINEAR, model, pr),
+            ImageProcessor.BILINEAR, model, pr), model, pr);
 
     if (imp != out) {
       if (!keepOriginal) {
@@ -539,24 +522,178 @@ public class Tools {
         imp.close();
       }
       if (show) {
-        out.resetDisplayRange();
-        out.show();
+        out.setDisplayRange(0, 1);
+        out.updateAndDraw();
       }
     }
     return out;
   }
 
+  public static void addLabelsAndWeightsToBlobs(
+      int t, ConnectedComponentLabeling.ConnectedComponents instancelabels,
+      IntBlob classlabels, ImagePlus labels, ImagePlus weights,
+      ImagePlus samplePdf, ModelDefinition model, ProgressMonitor pr)
+        throws InterruptedException {
+
+    int T = labels.getNFrames();
+    int C = instancelabels.nComponents.length;
+    int D = labels.getNSlices();
+    int H = labels.getHeight();
+    int W = labels.getWidth();
+    int[] blobShape = (D == 1) ? new int[] { H, W } : new int[] { D, H, W };
+
+    int[] dx = null, dy = null, dz = null;
+    if (D == 1)
+    {
+      dx = new int[] { -1,  0,  1, -1 };
+      dy = new int[] { -1, -1, -1,  0 };
+      dz = new int[] {  0,  0,  0,  0 };
+    }
+    else
+    {
+      dx = new int[] { -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1 };
+      dy = new int[] { -1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0 };
+      dz = new int[] { -1, -1, -1, -1, -1, -1, -1, -1, -1,  0,  0,  0,  0 };
+    }
+
+    double foregroundBackgroundRatio = model.foregroundBackgroundRatio;
+    double sigma1Um = model.sigma1Um;
+    double borderWeightFactor = model.borderWeightFactor;
+    double borderWeightSigmaUm = model.borderWeightSigmaUm;
+    double[] elementSizeUm = model.elementSizeUm();
+
+    int[] inst = (int[])instancelabels.labels.data();
+    int[] classlabelsData = (int[])classlabels.data();
+
+    // Generate (multiclass) labels with gaps, set foreground weights and
+    // finalize sample pdf
+    for (int z = 0; z < D; ++z) {
+
+      int stackIdx = labels.getStackIndex(1, z + 1, t + 1);
+      ImageProcessor ipLabels = labels.getStack().getProcessor(stackIdx);
+      ipLabels.setValue(0.0f);
+      ipLabels.fill();
+      float[] labelsData = (float[])ipLabels.getPixels();
+      ImageProcessor ipWeights = weights.getStack().getProcessor(stackIdx);
+      ipWeights.setValue(-1.0f);
+      ipWeights.fill();
+      float[] weightsData = (float[])ipWeights.getPixels();
+      ImageProcessor ipSamplePdf =
+          samplePdf.getStack().getProcessor(stackIdx);
+      ipSamplePdf.setValue(foregroundBackgroundRatio);
+      ipSamplePdf.fill();
+      float[] samplePdfData = (float[])ipSamplePdf.getPixels();
+
+      int idx = 0;
+      for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x, ++idx) {
+          int classLabel = classlabelsData[z * H * W + idx];
+          if (classLabel == 0) { // Ignore label
+            weightsData[idx] = 0.0f;
+            samplePdfData[idx] = 0.0f;
+            continue;
+          }
+          if (classLabel == 1) continue;
+          int instanceLabel = inst[
+              ((classLabel - 2) * D + z) * H * W + idx];
+          // Check top left 8-neighorhood for different instance with same
+          // class label, if there is one, treat this pixel as background,
+          // otherwise mark as foreground
+          int nbIdx = 0;
+          for (; nbIdx < dx.length; ++nbIdx) {
+            if (z + dz[nbIdx] < 0 ||
+                y + dy[nbIdx] < 0 || y + dy[nbIdx] >= H ||
+                x + dx[nbIdx] < 0 || x + dx[nbIdx] >= W)
+                continue;
+            int nbInst = inst[(((classLabel - 2) * D + z + dz[nbIdx]) * H +
+                               y + dy[nbIdx]) * W + x + dx[nbIdx]];
+            if (nbInst > 0 && nbInst != instanceLabel) break;
+          }
+          if (nbIdx == dx.length) { // Fine, can be labeled
+            labelsData[idx] = classLabel - 1;
+            weightsData[idx] = 1.0f;
+            samplePdfData[idx] = 1.0f;
+          }
+        }
+      }
+    }
+
+    // Compute extra weights (per class (outer), per instance (inner))
+    FloatBlob extraWeightsBlob = new FloatBlob(blobShape, elementSizeUm);
+    float[] extraWeights = (float[])extraWeightsBlob.data();
+    Arrays.fill(extraWeights, 0.0f);
+    FloatBlob min1DistBlob = new FloatBlob(blobShape, elementSizeUm);
+    float[] min1Dist = (float[])min1DistBlob.data();
+    FloatBlob min2DistBlob = new FloatBlob(blobShape, elementSizeUm);
+    float[] min2Dist = (float[])min2DistBlob.data();
+    double va = 1.0 - foregroundBackgroundRatio;
+    for (int c = 0; c < C; ++c) {
+      Arrays.fill(min1Dist, DistanceTransform.BG_VALUE);
+      Arrays.fill(min2Dist, DistanceTransform.BG_VALUE);
+      IntBlob instances = null;
+      if (C == 1) instances = instancelabels.labels;
+      else {
+        instances = new IntBlob(blobShape, elementSizeUm);
+        for (int i = 0; i < D * H * W; ++i)
+            ((int[])instances.data())[i] =
+                ((int[])instancelabels.labels.data())[c * D * W * H + i];
+      }
+      for (int i = 1; i <= instancelabels.nComponents[c]; i++) {
+        if (pr != null) {
+          if (pr.canceled()) throw new InterruptedException();
+          pr.count("Processing slice " + (t + 1) + " / " + T + ", Class " +
+                   (c + 1) + " / " + C + ": object " + i + " / " +
+                   instancelabels.nComponents[c], 1);
+        }
+        FloatBlob d = DistanceTransform.getDistance(
+            instances, i, DistanceTransform.Mode.DISTANCE_TO_FOREGROUND,
+            true, null);
+        for (int j = 0; j < D * H * W; j++) {
+          float min1dist = min1Dist[j];
+          float min2dist = Math.min(min2Dist[j], ((float[])d.data())[j]);
+          min1Dist[j] = Math.min(min1dist, min2dist);
+          min2Dist[j] = Math.max(min1dist, min2dist);
+        }
+      }
+
+      for (int z = 0; z < D; ++z)
+      {
+        float[] w = (float[])weights.getStack().getProcessor(
+            weights.getStackIndex(1, z + 1, t + 1)).getPixels();
+        for (int i = 0; i < W * H; ++i) {
+          if (w[i] >= 0.0f) continue;
+          float d1 = min1Dist[z * W * H + i];
+          float d2 = min2Dist[z * W * H + i];
+          double wa = Math.exp(-(d1 * d1) / (2 * sigma1Um * sigma1Um));
+          double we = Math.exp(
+              -(d1 + d2) * (d1 + d2) /
+              (2 * borderWeightSigmaUm * borderWeightSigmaUm));
+          extraWeights[z * H * W + i] += borderWeightFactor * we + va * wa;
+        }
+      }
+    }
+
+    for (int z = 0; z < D; ++z) {
+      float[] w = (float[])weights.getStack().getProcessor(
+          weights.getStackIndex(1, z + 1, t + 1)).getPixels();
+      for (int i = 0; i < W * H; ++i) {
+        if (w[i] >= 0.0f) continue;
+        w[i] = (float)foregroundBackgroundRatio + extraWeights[z * H * W + i];
+      }
+    }
+  }
+
 /*======================================================================*/
 /*!
  *   Extracts annotations stored as overlay from the given ImagePlus and
- *   generates corresponding labels and weights. Annotation names indicate
- *   class labels if at least two names are identical. If ROI names contain
+ *   generates corresponding labels and weights. If ROI names contain
  *   ignore, they will be treated as ignore regions. Point ROIs will be
  *   treated as detection ROIs and instead of single points small disks are
  *   rendered as labels. Finetuning only works for 2D models at the moment.
  *
  *   \param imp The ImagePlus to generate labels and weights for
- *   \param job Task progress will be reported via this Job.
+ *   \param model The model definition used for conversion
+ *   \param pr Task progress will be reported to this ProgressMonitor
  *
  *   \exception InterruptedException The user can quit this operation
  *     resulting in this error
@@ -567,269 +704,253 @@ public class Tools {
  */
 /*======================================================================*/
   public static ImagePlus[] convertAnnotationsToLabelsAndWeights(
-      ImagePlus imp, String[] classes, Job job)
-      throws InterruptedException, NotImplementedException {
+      ImagePlus imp, ModelDefinition model, ProgressMonitor pr)
+      throws InterruptedException, NotImplementedException, BlobException {
 
-    int nDims = job.model().nDims();
-    if (nDims != 2) throw new NotImplementedException(
-        "Sorry, " + nDims + "D finetuning is not implemented yet");
+    double[] elSizeModel = model.elementSizeUm();
+    double[] elSizeData = getElementSizeUmFromCalibration(
+        imp.getCalibration(), model.nDims());
+    double scaleZ = (model.nDims() == 3) ? elSizeData[0] / elSizeModel[0] : 1.0;
 
-    float[] elSizeModel = job.model().elementSizeUm();
-    float foregroundBackgroundRatio = job.model().foregroundBackgroundRatio;
-    float sigma1_px = job.model().sigma1Um / elSizeModel[1];
-    float borderWeightFactor = job.model().borderWeightFactor;
-    float sigma2_px = job.model().borderWeightSigmaUm / elSizeModel[1];
-    double diskRadiusXPx = 2.0 * elSizeModel[nDims - 1] /
-        imp.getCalibration().pixelWidth;
-    double diskRadiusYPx = 2.0 * elSizeModel[nDims - 2] /
-        imp.getCalibration().pixelHeight;
+    double foregroundBackgroundRatio = model.foregroundBackgroundRatio;
+    double sigma1Um = model.sigma1Um;
+    double bwFactor = model.borderWeightFactor;
+    double bwSigmaUm = model.borderWeightSigmaUm;
+    int diskRadiusPx = 2;
 
-    ImagePlus[] blobs = new ImagePlus[3];
-
-    // Fix layout of input ImagePlus and get dimensions
-    blobs[2] = fixStackLayout(imp, job);
-    int T = blobs[2].getNFrames();
-    int Z = blobs[2].getNSlices();
-    int W = blobs[2].getWidth();
-    int H = blobs[2].getHeight();
-
-    // Create output blobs
-    blobs[0] = IJ.createHyperStack(
-        imp.getTitle() + " - labels", W, H, 1, Z, T, 32);
-    blobs[0].setCalibration(imp.getCalibration().copy());
-    blobs[1] = IJ.createHyperStack(
-        imp.getTitle() + " - weights", W, H, 1, Z, T, 32);
-    blobs[1].setCalibration(imp.getCalibration().copy());
-    blobs[2] = IJ.createHyperStack(
-        imp.getTitle() + " - sample pdf", W, H, 1, Z, T, 32);
-    blobs[2].setCalibration(imp.getCalibration().copy());
-    ImagePlus instanceLabels = IJ.createHyperStack(
-        imp.getTitle() + " - instance labels", W, H, 1, Z, T, 32);
-    instanceLabels.setCalibration(imp.getCalibration().copy());
-
-    // Initialize output blobs
-    // Initialize the weights blob with -1, which indicates that no weight
-    // is assigned yet. When computing extra weights all regions with positive
-    // weight will be skipped!
-    for (int t = 1; t <= T; t++) {
-      for (int z = 1; z <= Z; z++) {
-        int stackIdx = blobs[0].getStackIndex(1, z, t);
-        ImageProcessor ip = blobs[0].getStack().getProcessor(stackIdx);
-        ip.setValue(0.0);
-        ip.fill();
-        ip = blobs[1].getStack().getProcessor(stackIdx);
-        ip.setValue(-1.0);
-        ip.fill();
-        ip = blobs[2].getStack().getProcessor(stackIdx);
-        ip.setValue(foregroundBackgroundRatio);
-        ip.fill();
-        ip = instanceLabels.getStack().getProcessor(stackIdx);
-        ip.setValue(0.0);
-        ip.fill();
+    // Generate small and large disks/spheres for PointRoi rendering
+    Vector<Integer> dxVec = new Vector<Integer>();
+    Vector<Integer> dyVec = new Vector<Integer>();
+    Vector<Integer> dzVec = new Vector<Integer>();
+    Vector<Integer> dxRVec = new Vector<Integer>();
+    Vector<Integer> dyRVec = new Vector<Integer>();
+    Vector<Integer> dzRVec = new Vector<Integer>();
+    for (int z = ((model.nDims() == 3) ? -2 * diskRadiusPx : 0);
+         z <= ((model.nDims() == 3) ? 2 * diskRadiusPx : 0); ++z) {
+      for (int y = -2 * diskRadiusPx; y <= 2 * diskRadiusPx; ++y) {
+        for (int x = -2 * diskRadiusPx; x <= 2 * diskRadiusPx; ++x) {
+          double rSqr = z*z + y*y + x*x;
+          if (rSqr <= diskRadiusPx * diskRadiusPx) {
+            dxVec.add(x);
+            dyVec.add(y);
+            dzVec.add(z);
+          }
+          else if (rSqr <= 4 * diskRadiusPx * diskRadiusPx) {
+            dxRVec.add(x);
+            dyRVec.add(y);
+            dzRVec.add(z);
+          }
+        }
       }
     }
+    int[] dxSmall = new int[dxVec.size()];
+    int[] dySmall = new int[dyVec.size()];
+    int[] dzSmall = new int[dzVec.size()];
+    for (int i = 0; i < dxVec.size(); ++i) {
+      dxSmall[i] = dxVec.get(i);
+      dySmall[i] = dyVec.get(i);
+      dzSmall[i] = dzVec.get(i);
+    }
+    int[] dxLarge = new int[dxRVec.size()];
+    int[] dyLarge = new int[dyRVec.size()];
+    int[] dzLarge = new int[dzRVec.size()];
+    for (int i = 0; i < dxRVec.size(); ++i) {
+      dxLarge[i] = dxRVec.get(i);
+      dyLarge[i] = dyRVec.get(i);
+      dzLarge[i] = dzRVec.get(i);
+    }
+
+    // Fix layout of input ImagePlus and get dimensions
+    ImagePlus[] blobs = new ImagePlus[] {
+        fixStackLayout(imp, model, pr), null, null };
+    int T = blobs[0].getNFrames();
+
+    int Ds = (int)Math.round(blobs[0].getNSlices() * scaleZ);
+    double[] elementSizeUm = Arrays.copyOf(elSizeData, model.nDims());
+    if (model.nDims() == 3) elementSizeUm[0] = elSizeModel[0];
+
+    int C = model.classNames.length - 1;
+    int W = blobs[0].getWidth();
+    int H = blobs[0].getHeight();
+
+    ImagePlus impInstPlane = IJ.createHyperStack("", W, H, C, 1, 1, 16);
+    ImageProcessor[] ipInst = new ImageProcessor[C];
+    for (int c = 0; c < C; ++c)
+        ipInst[c] = impInstPlane.getStack().getProcessor(c + 1);
+
+    ImagePlus impClassPlane = IJ.createHyperStack("", W, H, 1, 1, 1, 16);
+    ImageProcessor ipClass = impClassPlane.getProcessor();
+    short[] classPlaneData = (short[])ipClass.getPixels();
 
     Roi[] rois = (imp.getOverlay() == null) ?
         (new Roi[] { imp.getRoi() }) : imp.getOverlay().toArray();
-    int[] nObjects = new int[T];
-    int nObjectsTotal = 0;
-    Arrays.fill(nObjects, 0);
 
-    // First pass: Set ignore disks for point ROIs
-    for (Roi roi: rois) {
-      if (job.interrupted())
-          throw new InterruptedException("Aborted by user");
+    for (int t = 0; t < T; ++t) {
 
-      if (!(roi instanceof PointRoi)) continue;
-      int z = roi.getZPosition();
-      int t = roi.getTPosition();
-      int stackIndex = blobs[0].getStackIndex(1, z + 1, t + 1);
-      ImageProcessor ipWeights = blobs[1].getStack().getProcessor(stackIndex);
-      ImageProcessor ipPdf = blobs[2].getStack().getProcessor(stackIndex);
-      for (Point point: roi.getContainedPoints()) {
-        OvalRoi disk = new OvalRoi(
-            point.x - 2 * diskRadiusXPx, point.y - 2 * diskRadiusYPx,
-            4 * diskRadiusXPx + 1, 4 * diskRadiusYPx + 1);
-        ipWeights.setValue(0.0);
-        ipWeights.fill(disk);
-        ipPdf.setValue(0.0);
-        ipPdf.fill(disk);
-      }
-    }
+      int[] blobShape = (Ds == 1) ? new int[] { H, W } : new int[] { Ds, H, W };
+      int[] instShape = (C == 1) ? blobShape :
+          ((Ds == 1) ? new int[] { C, H, W } : new int[] { C, Ds, H, W });
 
-    // Second pass: Create labels, instancelabels, weights and pdf
-    for (Roi roi: rois) {
+      ConnectedComponentLabeling.ConnectedComponents instancelabels =
+          new ConnectedComponentLabeling.ConnectedComponents();
+      instancelabels.labels = new IntBlob(instShape, elementSizeUm);
+      int[] inst = (int[])instancelabels.labels.data();
+      Arrays.fill(inst, 0);
 
-      if (job.interrupted())
-          throw new InterruptedException("Aborted by user");
+      instancelabels.nComponents = new int[C];
+      Arrays.fill(instancelabels.nComponents, 0);
+      Vector< HashMap<Integer,Integer> > instMap =
+          new Vector< HashMap<Integer,Integer> >();
+      for (int c = 0; c < C; ++c) instMap.add(new HashMap<Integer,Integer>());
 
-      int z = roi.getZPosition();
-      int t = roi.getTPosition();
-      int stackIndex = blobs[0].getStackIndex(1, z + 1, t + 1);
-      ImageProcessor ipLabels = blobs[0].getStack().getProcessor(stackIndex);
-      ImageProcessor ipInstanceLabels =
-          instanceLabels.getStack().getProcessor(stackIndex);
-      ImageProcessor ipWeights = blobs[1].getStack().getProcessor(stackIndex);
-      ImageProcessor ipPdf = blobs[2].getStack().getProcessor(stackIndex);
-      if (roi.getName() != null &&
-          roi.getName().toLowerCase(Locale.ROOT).contains("ignore")) {
-        ipWeights.setValue(0.0);
-        ipWeights.fill(roi);
-        ipPdf.setValue(0.0);
-        ipPdf.fill(roi);
-      }
-      else {
-        String label = (roi.getName() != null) ?
-            roi.getName().replaceFirst("[-0-9]*$", "") : "foreground";
-        int labelIdx = 1;
-        if (classes != null) {
-          for (; labelIdx < classes.length &&
-                   !classes[labelIdx].equals(label); labelIdx++);
+      IntBlob classlabels = new IntBlob(blobShape, elementSizeUm);
+      int[] classlabelsData = (int[])classlabels.data();
+      Arrays.fill(classlabelsData, 1);
+
+      for (int z = 0; z < Ds; ++z) {
+        for (int c = 0; c < C; ++c) {
+          ipInst[c].setValue(0);
+          ipInst[c].fill();
         }
-        ipLabels.setValue(labelIdx);
+        ipClass.setValue(1);
+        ipClass.fill();
+        for (Roi roi : rois) {
+          int zRoi = Math.max(
+              1, (int)Math.round(roi.getZPosition() * scaleZ)) - 1;
+          int tRoi = Math.max(1, roi.getTPosition()) - 1;
 
-        if (roi instanceof PointRoi) {
-          for (Point point: roi.getContainedPoints()) {
-            OvalRoi disk = new OvalRoi(
-                point.x - diskRadiusXPx, point.y - diskRadiusYPx,
-                2 * diskRadiusXPx + 1, 2 * diskRadiusYPx + 1);
-            nObjects[t]++;
-            nObjectsTotal++;
-            ipInstanceLabels.setValue(nObjects[t]);
-            ipInstanceLabels.fill(disk);
-            ipLabels.fill(disk);
-            ipWeights.setValue(1.0);
-            ipWeights.fill(disk);
-            ipPdf.setValue(1.0);
-            ipPdf.fill(disk);
-          }
-        }
-        else {
-          nObjects[t]++;
-          nObjectsTotal++;
-          ipInstanceLabels.setValue(nObjects[t]);
-          ipInstanceLabels.fill(roi);
-          ipLabels.fill(roi);
-          ipWeights.setValue(1.0);
-          ipWeights.fill(roi);
-          ipPdf.setValue(1.0);
-          ipPdf.fill(roi);
-        }
-      }
-    }
+          // Only process area rois in the current slice
+          if (roi instanceof PointRoi || zRoi != z || tRoi != t) continue;
 
-    blobs[0] = rescaleZ(
-        rescaleXY(blobs[0], ImageProcessor.NEAREST_NEIGHBOR, job),
-        ImageProcessor.NEAREST_NEIGHBOR, job);
-    blobs[1] = rescaleZ(
-        rescaleXY(blobs[1], ImageProcessor.NEAREST_NEIGHBOR, job),
-        ImageProcessor.NEAREST_NEIGHBOR, job);
-    blobs[2] = rescaleZ(
-        rescaleXY(blobs[2], ImageProcessor.NEAREST_NEIGHBOR, job),
-        ImageProcessor.NEAREST_NEIGHBOR, job);
-    instanceLabels = rescaleZ(
-        rescaleXY(instanceLabels, ImageProcessor.NEAREST_NEIGHBOR, job),
-        ImageProcessor.NEAREST_NEIGHBOR, job);
-    Z = blobs[0].getNSlices();
-    W = blobs[0].getWidth();
-    H = blobs[0].getHeight();
-
-    // Here labels and instance labels are not separated by background,
-    // weights are -1 for background pixels, sample pdf is ready except for
-    // gaps between cells
-
-    int objIdx = 1;
-
-    job.progressMonitor().init(0, "", "", nObjectsTotal);
-
-    for (int t = 1; t <= T; ++t) {
-
-      ImageProcessor ip, wp, w2p, lp;
-      if (blobs[0].getStackSize() == 1) {
-        lp = blobs[0].getProcessor();
-        wp = blobs[1].getProcessor();
-        w2p = blobs[2].getProcessor();
-        ip = instanceLabels.getProcessor();
-      }
-      else {
-        lp = blobs[0].getStack().getProcessor(t);
-        wp = blobs[1].getStack().getProcessor(t);
-        w2p = blobs[2].getStack().getProcessor(t);
-        ip = instanceLabels.getStack().getProcessor(t);
-      }
-
-      // Create background ridges between touching instances
-      for (int y = 0; y < H; y++) {
-        for (int x = 0; x < W; x++) {
-          float instanceLabel = ip.getf(x, y);
-          if (instanceLabel == 0 || wp.getf(x, y) == 0.0f) continue;
-          float classLabel = lp.getf(x, y);
-          for (int dy = -1; dy <= 0 && instanceLabel != 0; dy++) {
-            if (y + dy < 0 || y + dy >= H) continue;
-            for (int dx = -1; dx <= 1 && instanceLabel != 0; dx++) {
-              if ((dy == 0 && dx >= 0) || x + dx < 0 || x + dx >= W)
-                  continue;
-              float nbInstanceLabel = ip.getf(x + dx, y + dy);
-              float nbClassLabel = lp.getf(x + dx, y + dy);
-              if (nbInstanceLabel == 0 ||
-                  nbInstanceLabel == instanceLabel ||
-                  classLabel != nbClassLabel) continue;
-              instanceLabel = 0;
-              ip.setf(x, y, instanceLabel);
-              lp.setf(x, y, 0);
-              // Mark as "pixel needs extraweight computation"
-              wp.setf(x, y, -1.0f);
-              w2p.setf(x, y, foregroundBackgroundRatio);
+          RoiLabel rl = parseROIName(roi.getName());
+          if (rl.className.toLowerCase().equals("ignore")) ipClass.setValue(0);
+          else {
+            int label = 1;
+            if (C > 1) {
+              while (label < model.classNames.length &&
+                     !rl.className.equals(model.classNames[label])) ++label;
+              if (label == model.classNames.length)
+                  throw new BlobException("No such class: " + rl.className);
             }
+            ipClass.setValue(label + 1);
+            ipClass.fill(roi);
+
+            if (rl.instance > 0)
+            {
+              if (!instMap.get(label - 1).containsKey(rl.instance))
+              {
+                instancelabels.nComponents[label - 1]++;
+                instMap.get(label - 1).put(
+                    rl.instance, instancelabels.nComponents[label - 1]);
+              }
+              ipInst[label - 1].setValue(
+                  instMap.get(label - 1).get(rl.instance));
+            }
+            else {
+              instancelabels.nComponents[label - 1]++;
+              instMap.get(label - 1).put(
+                  instancelabels.nComponents[label - 1],
+                  instancelabels.nComponents[label - 1]);
+
+              ipInst[label - 1].setValue(
+                  instMap.get(label - 1).get(
+                      instancelabels.nComponents[label - 1]));
+            }
+            ipInst[label - 1].fill(roi);
+          }
+        }
+        for (int i = 0; i < H * W; ++i)
+            classlabelsData[z * H * W + i] = classPlaneData[i];
+        for (int c = 0; c < C; ++c) {
+          short[] in = (short[])ipInst[c].getPixels();
+          for (int i = 0; i < H * W; ++i)
+              inst[(c * Ds + z) * H * W + i] = in[i];
+        }
+      }
+
+      // Rescale instance labels and class labels
+      instancelabels.labels.rescale(
+          model.elementSizeUm(), Blob.InterpolationType.NEAREST, pr);
+      classlabels.rescale(
+          model.elementSizeUm(), Blob.InterpolationType.NEAREST, pr);
+      inst = (int[])instancelabels.labels.data();
+      classlabelsData = (int[])classlabels.data();
+      blobShape = classlabels.shape();
+      instShape = instancelabels.labels.shape();
+      int Hs = blobShape[blobShape.length - 2];
+      int Ws = blobShape[blobShape.length - 1];
+
+      // Add PointRois
+      for (Roi roi : rois) {
+        int tRoi = Math.max(1, roi.getTPosition()) - 1;
+        if (!(roi instanceof PointRoi) || tRoi != t) continue;
+        int zRoi = Math.max(
+            1, (int)Math.round(roi.getZPosition() * scaleZ)) - 1;
+        int label = 1;
+        RoiLabel rl = parseROIName(roi.getName());
+        if (C > 1) {
+          while (label < model.classNames.length &&
+                 !rl.className.equals(model.classNames[label])) ++label;
+          if (label == model.classNames.length)
+              throw new BlobException("No such class: " + rl.className);
+        }
+        for (Point p : roi.getContainedPoints()) {
+          instancelabels.nComponents[label - 1]++;
+          // Draw ignore disk/sphere
+          int yRoi = (int)(p.getY() * (double)Hs / (double)H);
+          int xRoi = (int)(p.getX() * (double)Ws / (double)W);
+          for (int i = 0; i < dxLarge.length; ++i) {
+            int z = zRoi + dzLarge[i];
+            int y = yRoi + dyLarge[i];
+            int x = xRoi + dxLarge[i];
+            if (z < 0 || z >= Ds || y < 0 || y >= Hs || x < 0 || x >= Ws ||
+                classlabelsData[(z * Hs + y) * Ws + x] != 1) continue;
+            classlabelsData[(z * Hs + y) * Ws + x] = 0;
+          }
+          // Draw label and instance label
+          for (int i = 0; i < dxSmall.length; ++i) {
+            int z = zRoi + dzSmall[i];
+            int y = yRoi + dySmall[i];
+            int x = xRoi + dxSmall[i];
+            if (z < 0 || z >= Ds || y < 0 || y >= Hs || x < 0 || x >= Ws)
+                continue;
+            classlabelsData[(z * Hs + y) * Ws + x] = label + 1;
+            inst[(((label - 1) * Ds + z) * Hs + y) * Ws + x] =
+                instancelabels.nComponents[label - 1];
           }
         }
       }
 
-      // Compute extra weights
-      ImageProcessor impMin1Dist = ip.duplicate();
-      impMin1Dist.setValue(DistanceTransform.BG_VALUE);
-      impMin1Dist.fill();
-      float[] min1Dist = (float[])impMin1Dist.getPixels();
-      ImageProcessor impMin2Dist = ip.duplicate();
-      impMin2Dist.setValue(DistanceTransform.BG_VALUE);
-      impMin2Dist.fill();
-      float[] min2Dist = (float[])impMin2Dist.getPixels();
-      for (int i = 1; i <= nObjects[t - 1]; i++, objIdx++) {
-        if (job.interrupted())
-            throw new InterruptedException("Aborted by user");
-        job.progressMonitor().count(
-            "Processing slice " + t + " / " + T + ": object " + i +
-            " / " + nObjects[t - 1], 1);
-        float[] d = (float[])DistanceTransform.getDistanceToForegroundPixels(
-            (FloatProcessor)ip.duplicate(), i).getPixels();
-        for (int j = 0; j < H * W; j++) {
-          float min1dist = min1Dist[j];
-          float min2dist = Math.min(min2Dist[j], d[j]);
-          min1Dist[j] = Math.min(min1dist, min2dist);
-          min2Dist[j] = Math.max(min1dist, min2dist);
-        }
+      if (blobs[0] == null || blobs[1] == null || blobs[2] == null) {
+        // Create output blobs
+        Calibration cal = new Calibration();
+        cal.setUnit("um");
+        cal.pixelDepth = (model.nDims() == 2) ? 1 : model.elementSizeUm()[0];
+        cal.pixelHeight =
+            model.elementSizeUm()[model.elementSizeUm().length - 2];
+        cal.pixelWidth =
+            model.elementSizeUm()[model.elementSizeUm().length - 1];
+        blobs[0] = IJ.createHyperStack(
+            imp.getTitle() + " - labels", Ws, Hs, 1, Ds, T, 32);
+        blobs[0].setCalibration(cal);
+        blobs[1] = IJ.createHyperStack(
+            imp.getTitle() + " - weights", Ws, Hs, 1, Ds, T, 32);
+        blobs[1].setCalibration(cal);
+        blobs[2] = IJ.createHyperStack(
+            imp.getTitle() + " - sample pdf", Ws, Hs, 1, Ds, T, 32);
+        blobs[2].setCalibration(cal);
       }
 
-      float va = 1 - foregroundBackgroundRatio;
-      float[] w = (float[])wp.getPixels();
-      for (int i = 0; i < W * H; ++i) {
-        if (w[i] >= 0.0f) continue;
-        float d1 = min1Dist[i];
-        float d2 = min2Dist[i];
-        float wa = (float)Math.exp(
-            -(d1 * d1) / (2 * sigma1_px * sigma1_px));
-        float we = (float)Math.exp(
-            -(d1 + d2) * (d1 + d2) / (2 * sigma2_px * sigma2_px));
-        w[i] = borderWeightFactor * we + va * wa +
-            foregroundBackgroundRatio;
-      }
+      addLabelsAndWeightsToBlobs(
+          t, instancelabels, classlabels, blobs[0], blobs[1], blobs[2], model,
+          pr);
     }
 
     return blobs;
   }
 
-  private static void save2DBlob(
-      ImagePlus imp, IHDF5Writer writer, String dsName, Job job)
+  public static void save2DBlob(
+      ImagePlus imp, IHDF5Writer writer, String dsName, ProgressMonitor pr)
         throws InterruptedException {
     int T = imp.getNFrames();
     int Z = imp.getNSlices();
@@ -841,7 +962,9 @@ public class Tools {
     int[] blockDims = { 1, 1, H, W };
     long[] blockIdx = { 0, 0, 0, 0 };
 
-    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
+    double elSize[] = getElementSizeUmFromCalibration(imp.getCalibration(), 2);
+
+    if (pr != null) pr.init(0, "", "", imp.getImageStackSize());
 
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
@@ -855,9 +978,9 @@ public class Tools {
     for (int t = 0; t < T; ++t) {
       for (int z = 0; z < Z; ++z, ++blockIdx[0]) {
         for (int c = 0; c < C; ++c) {
-          if (!job.progressMonitor().count(
+          if (pr != null && !pr.count(
                   "Saving " + dsName + " t=" + t + ", z=" + z + ", c=" + c, 1))
-              throw new InterruptedException("Aborted by user");
+              throw new InterruptedException();
           blockIdx[1] = c;
           int stackIndex = imp.getStackIndex(c + 1, z + 1, t + 1);
           System.arraycopy(stack.getPixels(stackIndex), 0, dataFlat, 0, H * W);
@@ -865,10 +988,11 @@ public class Tools {
         }
       }
     }
+    writer.float64().setArrayAttr(dsName, "element_size_um", elSize);
   }
 
-  private static void save3DBlob(
-      ImagePlus imp, IHDF5Writer writer, String dsName, Job job)
+  public static void save3DBlob(
+      ImagePlus imp, IHDF5Writer writer, String dsName, ProgressMonitor pr)
         throws InterruptedException {
     int T = imp.getNFrames();
     int Z = imp.getNSlices();
@@ -879,7 +1003,9 @@ public class Tools {
     int[] blockDims = { 1, 1, 1, H, W };
     long[] blockIdx = { 0, 0, 0, 0, 0 };
 
-    job.progressMonitor().init(0, "", "", imp.getImageStackSize());
+    double[] elSize = getElementSizeUmFromCalibration(imp.getCalibration(), 3);
+
+    if (pr != null) pr.init(0, "", "", imp.getImageStackSize());
 
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
@@ -896,34 +1022,39 @@ public class Tools {
         blockIdx[2] = z;
         for (int c = 0; c < C; ++c) {
           blockIdx[1] = c;
-          if (!job.progressMonitor().count(
+          if (pr != null && !pr.count(
                   "Saving " + dsName + " t=" + t + ", z=" + z + ", c=" + c, 1))
-              throw new InterruptedException("Aborted by user");
+              throw new InterruptedException();
           int stackIndex = imp.getStackIndex(c + 1, z + 1, t + 1);
           System.arraycopy(stack.getPixels(stackIndex), 0, dataFlat, 0, H * W);
           writer.float32().writeMDArrayBlock(dsName, data, blockIdx);
         }
       }
     }
+    writer.float64().setArrayAttr(dsName, "element_size_um", elSize);
   }
 
   public static ImagePlus saveHDF5Blob(
-      ImagePlus imp, File outFile, Job job, boolean keepOriginal,
+      ImagePlus imp, File outFile, ModelDefinition model, ProgressMonitor pr,
+      boolean generateLabelBlobs, boolean keepOriginal, boolean show)
+      throws IOException, InterruptedException, NotImplementedException,
+      BlobException {
+    return saveHDF5Blob(
+        imp, null, outFile, model, pr, generateLabelBlobs, keepOriginal, show);
+  }
+
+  public static ImagePlus saveHDF5Blob(
+      ImagePlus imp, String[] classes, File outFile, ModelDefinition model,
+      ProgressMonitor pr, boolean generateLabelBlobs, boolean keepOriginal,
       boolean show)
-      throws IOException, InterruptedException, NotImplementedException {
-    return saveHDF5Blob(imp, null, outFile, job, keepOriginal, show);
-  }
-
-  public static ImagePlus saveHDF5Blob(
-      ImagePlus imp, String[] classes, File outFile, Job job,
-      boolean keepOriginal, boolean show)
-      throws IOException, InterruptedException, NotImplementedException {
-    if (job == null) {
-      IJ.error("Cannot save HDF5 blob without associated unet model");
-      throw new InterruptedException("No active unet job");
+      throws IOException, InterruptedException, NotImplementedException,
+      BlobException {
+    if (model == null) {
+      IJ.error("Cannot save HDF5 blob without associated U-Net model");
+      throw new InterruptedException("No U-Net model");
     }
 
-    String dsName = job.model().inputDatasetName;
+    String dsName = model.inputDatasetName;
 
     IJ.log("  Processing '" + imp.getTitle() + "': " +
            "#frames = " + imp.getNFrames() +
@@ -936,27 +1067,11 @@ public class Tools {
            imp.getCalibration().pixelHeight + ", " +
            imp.getCalibration().pixelWidth + "]");
 
-    ImagePlus impScaled = convertToUnetFormat(imp, job, keepOriginal, show);
+    ImagePlus impScaled =
+        convertToUnetFormat(imp, model, pr, keepOriginal, show);
 
     // Recursively create parent folders
-    Vector<File> createdFolders = new Vector<File>();
-    File folder = outFile.getParentFile();
-    while (folder != null && !folder.isDirectory()) {
-      createdFolders.add(folder);
-      folder = folder.getParentFile();
-    }
-    for (int i = createdFolders.size() - 1; i >= 0; --i) {
-      if (job.interrupted())
-          throw new InterruptedException("Aborted by user");
-      job.progressMonitor().count(
-          "Creating folder '" + createdFolders.get(i) + "'", 0);
-      IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
-      if (!createdFolders.get(i).mkdir())
-          throw new IOException(
-              "Could not create folder '" +
-              createdFolders.get(i).getAbsolutePath() + "'");
-      createdFolders.get(i).deleteOnExit();
-    }
+    createFolder(outFile.getParentFile(), true);
 
     // syncMode: Always wait on close and flush till all data is written!
     // useSimpleDataSpace: Save attributes as plain vectors
@@ -966,23 +1081,21 @@ public class Tools {
         .useSimpleDataSpaceForAttributes().overwrite().writer();
     outFile.deleteOnExit();
 
-    if (job.model().nDims() == 2)
-        save2DBlob(impScaled, writer, dsName, job);
-    else save3DBlob(impScaled, writer, dsName, job);
+    if (model.nDims() == 2) save2DBlob(impScaled, writer, dsName, pr);
+    else save3DBlob(impScaled, writer, dsName, pr);
 
-    if (job instanceof FinetuneJob && imp.getOverlay() != null) {
-      ImagePlus[] blobs =
-          convertAnnotationsToLabelsAndWeights(imp, classes, job);
+    if (generateLabelBlobs && imp.getOverlay() != null) {
+      ImagePlus[] blobs = convertAnnotationsToLabelsAndWeights(imp, model, pr);
 
-      if (job.model().nDims() == 2) {
-        save2DBlob(blobs[0], writer, "labels", job);
-        save2DBlob(blobs[1], writer, "weights", job);
-        save2DBlob(blobs[2], writer, "weights2", job);
+      if (model.nDims() == 2) {
+        save2DBlob(blobs[0], writer, "labels", pr);
+        save2DBlob(blobs[1], writer, "weights", pr);
+        save2DBlob(blobs[2], writer, "weights2", pr);
       }
       else {
-        save3DBlob(blobs[0], writer, "labels", job);
-        save3DBlob(blobs[1], writer, "weights", job);
-        save3DBlob(blobs[2], writer, "weights2", job);
+        save3DBlob(blobs[0], writer, "labels", pr);
+        save3DBlob(blobs[1], writer, "weights", pr);
+        save3DBlob(blobs[2], writer, "weights2", pr);
       }
     }
 
@@ -994,14 +1107,16 @@ public class Tools {
   }
 
   public static File[] saveHDF5TiledBlob(
-      ImagePlus imp, String[] classes, String fileNameStub, Job job)
-      throws IOException, InterruptedException, NotImplementedException {
-    if (job == null) {
-      IJ.error("Cannot save HDF5 blob without associated unet model");
-      throw new InterruptedException("No active unet job");
+      ImagePlus imp, String fileNameStub, ModelDefinition model,
+      ProgressMonitor pr)
+      throws IOException, InterruptedException, NotImplementedException,
+      BlobException {
+    if (model == null) {
+      IJ.error("Cannot save HDF5 blob without associated U-Net model");
+      throw new InterruptedException("No U-Net model");
     }
 
-    String dsName = job.model().inputBlobName;
+    String dsName = model.inputBlobName;
 
     IJ.log("  Processing '" + imp.getTitle() + "': " +
            "#frames = " + imp.getNFrames() + ", #slices = " + imp.getNSlices() +
@@ -1012,10 +1127,10 @@ public class Tools {
            imp.getCalibration().pixelHeight + ", " +
            imp.getCalibration().pixelWidth + "]");
 
-    ImagePlus data = convertToUnetFormat(imp, job, true, false);
+    ImagePlus data = convertToUnetFormat(imp, model, pr, true, false);
     ImagePlus[] annotations = null;
-    if (job instanceof FinetuneJob && imp.getOverlay() != null)
-        annotations = convertAnnotationsToLabelsAndWeights(imp, classes, job);
+    if (imp.getOverlay() != null)
+        annotations = convertAnnotationsToLabelsAndWeights(imp, model, pr);
 
     int T = data.getNFrames();
     int Z = data.getNSlices();
@@ -1023,8 +1138,8 @@ public class Tools {
     int W = data.getWidth();
     int H = data.getHeight();
 
-    int[] inShape = job.model().getTileShape();
-    int[] outShape = job.model().getOutputTileShape(inShape);
+    int[] inShape = model.getTileShape();
+    int[] outShape = model.getOutputTileShape(inShape);
     int[] tileOffset = new int[inShape.length];
     for (int d = 0; d < tileOffset.length; d++)
         tileOffset[d] = (inShape[d] - outShape[d]) / 2;
@@ -1052,27 +1167,8 @@ public class Tools {
     File[] outfiles = new File[nTiles];
 
     // Recursively create parent folders
-    if (fileNameStub != null) {
-      File outFile = new File(fileNameStub);
-      Vector<File> createdFolders = new Vector<File>();
-      File folder = outFile.getParentFile();
-      while (folder != null && !folder.isDirectory()) {
-        createdFolders.add(folder);
-        folder = folder.getParentFile();
-      }
-      for (int i = createdFolders.size() - 1; i >= 0; --i) {
-        if (job.interrupted())
-            throw new InterruptedException("Aborted by user");
-        job.progressMonitor().count(
-            "Creating folder '" + createdFolders.get(i) + "'", 0);
-        IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
-        if (!createdFolders.get(i).mkdir())
-            throw new IOException(
-                "Could not create folder '" +
-                createdFolders.get(i).getAbsolutePath() + "'");
-        createdFolders.get(i).deleteOnExit();
-      }
-    }
+    if (fileNameStub != null)
+        createFolder(new File(fileNameStub).getParentFile(), true);
 
     // Create output ImagePlus
     ImagePlus dataTile = IJ.createHyperStack(
@@ -1084,15 +1180,16 @@ public class Tools {
         imp.getTitle() + " - weightsTile",
         outShape[1], outShape[0], 1, Z, T, 32);
 
-    job.progressMonitor().init(0, "", "", nTiles);
+    if (pr != null) pr.init(0, "", "", nTiles);
 
     int tileIdx = 0;
     if (outShape.length == 2) {
       for (int yIdx = 0; yIdx < tiling[0]; yIdx++) {
         for (int xIdx = 0; xIdx < tiling[1]; xIdx++, tileIdx++) {
 
-          job.progressMonitor().count(
-              "Processing tile (" + yIdx + "," + xIdx + ")", 1);
+          if (pr != null &&
+              !pr.count("Processing tile (" + yIdx + "," + xIdx + ")", 1))
+              throw new InterruptedException();
 
           for (int t = 0; t < T; t++) {
 
@@ -1148,49 +1245,47 @@ public class Tools {
               }
             }
           }
-          if (job.interrupted()) throw new InterruptedException();
+          if (pr != null && pr.canceled()) throw new InterruptedException();
 
           // Save tile
           File outFile = null;
           if (fileNameStub == null) {
-            outFile = File.createTempFile(job.id(), ".h5");
+            outFile = File.createTempFile("unet-", ".h5");
             outFile.delete();
           }
-          else {
-            outFile = new File(fileNameStub + "_" + tileIdx + ".h5");
-          }
+          else outFile = new File(fileNameStub + "_" + tileIdx + ".h5");
           IHDF5Writer writer =
               HDF5Factory.configure(outFile.getAbsolutePath()).syncMode(
                   IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
               .useSimpleDataSpaceForAttributes().overwrite().writer();
           outFile.deleteOnExit();
 
-          save2DBlob(dataTile, writer, dsName, job);
-          save2DBlob(labelsTile, writer, "/labels", job);
-          save2DBlob(weightsTile, writer, "/weights", job);
+          save2DBlob(dataTile, writer, dsName, pr);
+          save2DBlob(labelsTile, writer, "/labels", pr);
+          save2DBlob(weightsTile, writer, "/weights", pr);
           writer.file().close();
 
           outfiles[tileIdx] = outFile;
 
-          if (job.interrupted()) throw new InterruptedException();
+          if (pr != null && pr.canceled()) throw new InterruptedException();
         }
       }
     }
     else {
-      throw new NotImplementedException("3D not yet implemented");
+      throw new NotImplementedException("3D from ROI not implemented");
     }
 
     return outfiles;
   }
 
-  public static ProcessResult execute(Vector<String> command, Job job)
+  public static ProcessResult execute(
+      Vector<String> command, ProgressMonitor pr)
       throws IOException, InterruptedException {
     if (command == null || command.size() == 0)
         throw new IOException("Tools.execute() Received empty command");
     String cmdString = command.get(0);
-    for (int i = 1; i < command.size(); ++i)
-        cmdString += " " + command.get(i);
-    job.progressMonitor().count("Executing '" + cmdString + "'", 0);
+    for (int i = 1; i < command.size(); ++i) cmdString += " " + command.get(i);
+    if (pr != null) pr.count("Executing '" + cmdString + "'", 0);
     IJ.log("$ " + cmdString);
 
     Process p = new ProcessBuilder(command).start();
@@ -1223,10 +1318,9 @@ public class Tools {
   }
 
   public static ProcessResult execute(
-      String command, Session session, Job job)
+      String command, Session session, ProgressMonitor pr)
       throws JSchException, InterruptedException, IOException {
-    job.progressMonitor().count(
-        "Executing remote command '" + command + "'", 0);
+    if (pr != null) pr.count("Executing remote command '" + command + "'", 0);
     IJ.log(session.getUserName() + "@" + session.getHost() +
            "$ " + command);
 
@@ -1259,6 +1353,82 @@ public class Tools {
       }
       Thread.sleep(100);
     }
+  }
+
+  public static Vector<File> createFolder(File path, boolean temporary)
+      throws IOException {
+    Vector<File> createdFolders = new Vector<File>();
+    while (path != null && !path.isDirectory()) {
+      createdFolders.add(path);
+      path = path.getParentFile();
+    }
+    for (int i = createdFolders.size() - 1; i >= 0; --i) {
+      IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
+      if (!createdFolders.get(i).mkdir())
+          throw new IOException(
+              "Could not create folder '" +
+              createdFolders.get(i).getAbsolutePath() + "'");
+      if (temporary) createdFolders.get(i).deleteOnExit();
+    }
+    return createdFolders;
+  }
+
+  public static double[] getElementSizeUmFromCalibration(
+      Calibration cal, int nDims) {
+    double factor = 1;
+    switch (cal.getUnit())
+    {
+    case "m":
+    case "meter":
+      factor = 1000000.0;
+    break;
+    case "cm":
+    case "centimeter":
+      factor = 10000.0;
+    break;
+    case "mm":
+    case "millimeter":
+      factor = 1000.0;
+    break;
+    case "nm":
+    case "nanometer":
+      factor = 0.0001;
+    break;
+    case "pm":
+    case "pikometer":
+      factor = 0.0000001;
+    break;
+    }
+    if (nDims == 2)
+        return new double[] {
+            cal.pixelHeight * factor, cal.pixelWidth * factor };
+    else
+        return new double[] {
+            cal.pixelDepth * factor, cal.pixelHeight * factor,
+            cal.pixelWidth * factor };
+  }
+
+  private static class RoiLabel {
+    String className = "Foreground";
+    int instance = -1;
+  }
+
+  private static RoiLabel parseROIName(String roiName) {
+    if (roiName == null) return new RoiLabel();
+    // Remove trailing clutter
+    String tmp = roiName.replaceFirst("(-[0-9]+)*$", "");
+    String[] comps = roiName.split("#");
+    RoiLabel res = new RoiLabel();
+    res.className = comps[0];
+    if (comps.length > 1) {
+      try {
+        res.instance = Integer.parseInt(comps[1]);
+      }
+      catch (NumberFormatException e) {
+        IJ.log("Could not parse instance label for ROI " + roiName);
+      }
+    }
+    return res;
   }
 
 }

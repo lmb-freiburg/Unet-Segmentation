@@ -156,7 +156,7 @@ public class ModelDefinition {
     }
   }
 
-  public void setElementSizeUm(float[] elSize) {
+  public void setElementSizeUm(double[] elSize) {
     if (elSize == null || elSize.length < 2 || elSize.length > 3) return;
 
     if (elSize.length != _nDims) {
@@ -184,24 +184,28 @@ public class ModelDefinition {
     }
   }
 
-  public float[] elementSizeUm() {
+  public double[] elementSizeUm() {
     if (!isValid()) return null;
-    float[] res = new float[_nDims];
+    double[] res = new double[_nDims];
     if (_nDims == 2) {
-      res[0] = ((Double)_elSizeYSpinner.getValue()).floatValue();
-      res[1] = ((Double)_elSizeXSpinner.getValue()).floatValue();
+      res[0] = ((Double)_elSizeYSpinner.getValue()).doubleValue();
+      res[1] = ((Double)_elSizeXSpinner.getValue()).doubleValue();
     }
     else {
-      res[0] = ((Double)_elSizeZSpinner.getValue()).floatValue();
-      res[1] = ((Double)_elSizeYSpinner.getValue()).floatValue();
-      res[2] = ((Double)_elSizeXSpinner.getValue()).floatValue();
+      res[0] = ((Double)_elSizeZSpinner.getValue()).doubleValue();
+      res[1] = ((Double)_elSizeYSpinner.getValue()).doubleValue();
+      res[2] = ((Double)_elSizeXSpinner.getValue()).doubleValue();
     }
     return res;
   }
 
   public ModelDefinition duplicate() {
     ModelDefinition dup = new ModelDefinition(_job);
-    dup._minOutTileShape = _minOutTileShape;
+    if (_minOutTileShape != null)
+        dup._minOutTileShape = Arrays.copyOf(
+            _minOutTileShape, _minOutTileShape.length);
+    dup._nDims = _nDims;
+    dup.file = new File(file.getPath());
     dup.remoteAbsolutePath = remoteAbsolutePath;
     dup.modelPrototxtAbsolutePath = modelPrototxtAbsolutePath;
     dup.solverPrototxtAbsolutePath = solverPrototxtAbsolutePath;
@@ -215,19 +219,13 @@ public class ModelDefinition {
     dup.padding = padding;
     dup.normalizationType = normalizationType;
     if (elementSizeUm() != null) dup.setElementSizeUm(elementSizeUm());
-    if (downsampleFactor != null) {
-      dup.downsampleFactor = new int[downsampleFactor.length];
-      dup.downsampleFactor = Arrays.copyOf(
-          downsampleFactor, downsampleFactor.length);
-    }
-    if (padInput != null) {
-      dup.padInput = new int[padInput.length];
-      dup.padInput = Arrays.copyOf(padInput, padInput.length);
-    }
-    if (padOutput != null) {
-      dup.padOutput = new int[padOutput.length];
-      dup.padOutput = Arrays.copyOf(padOutput, padInput.length);
-    }
+    if (downsampleFactor != null)
+        dup.downsampleFactor = Arrays.copyOf(
+            downsampleFactor, downsampleFactor.length);
+    if (padInput != null)
+        dup.padInput = Arrays.copyOf(padInput, padInput.length);
+    if (padOutput != null)
+        dup.padOutput = Arrays.copyOf(padOutput, padInput.length);
     if (memoryMap != null) {
       dup.memoryMap = new int[memoryMap.length][memoryMap[0].length];
       for (int r = 0; r < memoryMap.length; r++)
@@ -237,12 +235,12 @@ public class ModelDefinition {
     dup.borderWeightSigmaUm = borderWeightSigmaUm;
     dup.foregroundBackgroundRatio = foregroundBackgroundRatio;
     dup.sigma1Um = sigma1Um;
-    dup.weightFile = weightFile;
     if (classNames != null) {
       dup.classNames = new String[classNames.length];
       for (int i = 0; i < classNames.length; i++)
           dup.classNames[i] = classNames[i];
     }
+    dup.weightFile = weightFile;
     dup._initGUIElements();
     if (_nTilesSpinner != null)
         dup._nTilesSpinner.setValue((Integer)_nTilesSpinner.getValue());
@@ -279,7 +277,7 @@ public class ModelDefinition {
     modelPrototxt = reader.string().read("/model_prototxt");
     padding = reader.string().read("/unet_param/padding");
     normalizationType = reader.int32().read("/unet_param/normalization_type");
-    setElementSizeUm(reader.float32().readArray("/unet_param/element_size_um"));
+    setElementSizeUm(reader.float64().readArray("/unet_param/element_size_um"));
     downsampleFactor = reader.int32().readArray("/unet_param/downsampleFactor");
     padInput = reader.int32().readArray("/unet_param/padInput");
     padOutput = reader.int32().readArray("/unet_param/padOutput");
@@ -550,7 +548,7 @@ public class ModelDefinition {
     writer.int32().writeArray("/unet_param/downsampleFactor", downsampleFactor);
     writer.int32().writeArray("/unet_param/padInput", padInput);
     writer.int32().writeArray("/unet_param/padOutput", padOutput);
-    writer.float32().writeArray("/unet_param/element_size_um", elementSizeUm());
+    writer.float64().writeArray("/unet_param/element_size_um", elementSizeUm());
     writer.float32().write(
         "/unet_param/pixelwise_loss_weights/borderWeightFactor",
         borderWeightFactor);
@@ -734,6 +732,81 @@ public class ModelDefinition {
   @Override
   public String toString() {
     return name;
+  }
+
+  public String dump() {
+    String res =
+        "ModelDefinition {\n" +
+        "  file = " + ((file != null) ? file.getAbsolutePath() : "N/A") + "\n" +
+        "  remoteAbsolutePath = " +
+        ((remoteAbsolutePath != null) ? remoteAbsolutePath : "N/A") + "\n" +
+        "  modelPrototxtAbsolutePath = " +
+        ((modelPrototxtAbsolutePath != null) ? modelPrototxtAbsolutePath :
+         "N/A") + "\n" +
+        "  solverPrototxtAbsolutePath = " +
+        ((solverPrototxtAbsolutePath != null) ? solverPrototxtAbsolutePath :
+         "N/A") + "\n" +
+        "  id = " + id + "\n" +
+        "  name = " + name + "\n" +
+        "  description = " + description + "\n" +
+        "  inputBlobName = " +
+        ((inputBlobName != null) ? inputBlobName : "N/A") + "\n" +
+        "  inputDatasetName = " +
+        ((inputDatasetName != null) ? inputDatasetName : "N/A") + "\n" +
+        "  solverPrototxt = " +
+        ((solverPrototxt != null) ? solverPrototxt : "N/A") + "\n" +
+        "  modelPrototxt = " +
+        ((modelPrototxt != null) ? modelPrototxt : "N/A") + "\n" +
+        "  padding = " + ((padding != null) ? padding : "N/A") + "\n" +
+        "  normalizationType = " + normalizationType + "\n" +
+        "  downsampleFactor = ";
+    if (downsampleFactor != null) {
+      for (int f : downsampleFactor) res += f + " ";
+      res += "\n";
+    }
+    else res += "N/A\n";
+    res += "  padInput = ";
+    if (padInput != null) {
+      for (int f : padInput) res += f + " ";
+      res += "\n";
+    }
+    else res += "N/A\n";
+    res += "  padOutput = ";
+    if (padOutput != null) {
+      for (int f : padOutput) res += f + " ";
+      res += "\n";
+    }
+    else res += "N/A\n";
+    res += "  elementSizeUm = ";
+    if (elementSizeUm() != null) {
+      for (double f : elementSizeUm()) res += f + " ";
+      res += "\n";
+    }
+    else res += "N/A\n";
+    res += "  memoryMap = ";
+    if (memoryMap != null) {
+      for (int[] m : memoryMap) {
+        for (int mm : m) res += mm + " ";
+        res += ";";
+      }
+      res += "\n";
+    }
+    else res += "N/A\n";
+    res +=
+        "  borderWeightFactor = " + borderWeightFactor + "\n" +
+        "  borderWeightSigmaUm = " + borderWeightSigmaUm + "\n" +
+        "  foregroundBackgroundRatio = " + foregroundBackgroundRatio + "\n" +
+        "  sigma1Um = " + sigma1Um + "\n";
+    res += "  classNames = ";
+    if (classNames != null) {
+      for (String f : classNames) res += f + " ";
+      res += "\n";
+    }
+    else res += "N/A\n";
+    res +=
+        "  weightFile = " + ((weightFile != null) ? weightFile : "N/A") + "\n" +
+        "}";
+    return res;
   }
 
 };

@@ -79,9 +79,9 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
               String command =
                   "call('de.unifreiburg.unet.DetectionJob." +
                   "processHyperStack', " +
-                  "'modelFilename=" + originalModel().file.getAbsolutePath() +
+                  "'modelFilename=" + model().file.getAbsolutePath() +
                   ",weightsFilename=" + weightsFileName() +
-                  "," + originalModel().getTilingParameterString() +
+                  "," + model().getTilingParameterString() +
                   ",gpuId=" + selectedGPUString() +
                   ",useRemoteHost=" + String.valueOf(sshSession() != null);
               if (sshSession() != null) {
@@ -134,7 +134,7 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
     model.load(new File(parameters.get("modelFilename")));
     job.setModel(model);
     job.setWeightsFileName(parameters.get("weightsFilename"));
-    job.originalModel().setFromTilingParameterString(parameterStrings[2]);
+    job.model().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
     if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
       try {

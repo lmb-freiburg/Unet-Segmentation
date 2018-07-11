@@ -177,9 +177,9 @@ public class SegmentationJob extends Job implements PlugIn {
               String command =
                   "call('de.unifreiburg.unet.SegmentationJob." +
                   "processHyperStack', " +
-                  "'modelFilename=" + originalModel().file.getAbsolutePath() +
+                  "'modelFilename=" + model().file.getAbsolutePath() +
                   ",weightsFilename=" + weightsFileName() +
-                  "," + originalModel().getTilingParameterString() +
+                  "," + model().getTilingParameterString() +
                   ",gpuId=" + selectedGPUString() +
                   ",useRemoteHost=" + String.valueOf(sshSession() != null);
               if (sshSession() != null) {
@@ -279,7 +279,7 @@ public class SegmentationJob extends Job implements PlugIn {
             Vector<String> cmd = new Vector<String>();
             cmd.add(Prefs.get(
                         "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-            res = Tools.execute(cmd, this);
+            res = Tools.execute(cmd, progressMonitor());
           }
           catch (IOException e) {
             res = new ProcessResult();
@@ -290,7 +290,7 @@ public class SegmentationJob extends Job implements PlugIn {
           try {
             String cmd = Prefs.get(
                 "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
-            res = Tools.execute(cmd, sshSession(), this);
+            res = Tools.execute(cmd, sshSession(), progressMonitor());
           }
           catch (JSchException e) {
             res.exitStatus = 1;
@@ -322,12 +322,12 @@ public class SegmentationJob extends Job implements PlugIn {
       if (sshSession() != null) {
 
         try {
-          originalModel().remoteAbsolutePath =
+          model().remoteAbsolutePath =
               processFolder() + id() + "_model.h5";
           _createdRemoteFolders.addAll(
               new SftpFileIO(sshSession(), progressMonitor()).put(
-                  originalModel().file, originalModel().remoteAbsolutePath));
-          _createdRemoteFiles.add(originalModel().remoteAbsolutePath);
+                  model().file, model().remoteAbsolutePath));
+          _createdRemoteFiles.add(model().remoteAbsolutePath);
           Prefs.set("unet.processfolder", processFolder());
         }
         catch (SftpException|JSchException e) {
@@ -351,10 +351,10 @@ public class SegmentationJob extends Job implements PlugIn {
                 Prefs.get("unet.caffe_unetBinary",
                           caffeBaseDir + "caffe_unet") +
                 " check_model_and_weights_h5 -model \"" +
-                originalModel().remoteAbsolutePath + "\" -weights \"" +
+                model().remoteAbsolutePath + "\" -weights \"" +
                 weightsFileName() + "\" -n_channels " + nChannels + " " +
                 caffeGPUParameter();
-            res = Tools.execute(cmd, sshSession(), this);
+            res = Tools.execute(cmd, sshSession(), progressMonitor());
             if (weightsUploaded && res.exitStatus != 0) break;
             if (!weightsUploaded && res.exitStatus != 0) {
               int selectedOption = JOptionPane.showConfirmDialog(
@@ -366,10 +366,10 @@ public class SegmentationJob extends Job implements PlugIn {
               switch (selectedOption) {
               case JOptionPane.YES_OPTION: {
                 File startFile =
-                    (originalModel() == null ||
-                     originalModel().file == null ||
-                     originalModel().file.getParentFile() == null) ?
-                    new File(".") : originalModel().file.getParentFile();
+                    (model() == null ||
+                     model().file == null ||
+                     model().file.getParentFile() == null) ?
+                    new File(".") : model().file.getParentFile();
                 JFileChooser f = new JFileChooser(startFile);
                 f.setDialogTitle("Select trained U-Net weights");
                 f.setFileFilter(
@@ -436,7 +436,7 @@ public class SegmentationJob extends Job implements PlugIn {
                       "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
           cmd.add("check_model_and_weights_h5");
           cmd.add("-model");
-          cmd.add(originalModel().file.getAbsolutePath());
+          cmd.add(model().file.getAbsolutePath());
           cmd.add("-weights");
           cmd.add(weightsFileName());
           cmd.add("-n_channels");
@@ -445,7 +445,7 @@ public class SegmentationJob extends Job implements PlugIn {
             cmd.add(caffeGPUParameter().split(" ")[0]);
             cmd.add(caffeGPUParameter().split(" ")[1]);
           }
-          res = Tools.execute(cmd, this);
+          res = Tools.execute(cmd, progressMonitor());
         }
         catch (IOException e) {
           res.exitStatus = 1;
@@ -485,7 +485,7 @@ public class SegmentationJob extends Job implements PlugIn {
       throws JSchException, IOException, InterruptedException {
 
     String gpuParm = caffeGPUParameter();
-    String nTilesParm = originalModel().getCaffeTilingParameter();
+    String nTilesParm = model().getCaffeTilingParameter();
     String averagingParm = new String();
     if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
         averagingParm = "-average_mirror";
@@ -496,7 +496,7 @@ public class SegmentationJob extends Job implements PlugIn {
         Prefs.get("unet.caffe_unetBinary", "caffe_unet") +
         " tiled_predict -infileH5 \"" + fileName +
         "\" -outfileH5 \"" + fileName + "\" -model \"" +
-        originalModel().remoteAbsolutePath + "\" -weights \"" +
+        model().remoteAbsolutePath + "\" -weights \"" +
         weightsFileName() + "\" -iterations 0 " +
         nTilesParm + " " + averagingParm + " " + gpuParm;
 
@@ -616,7 +616,7 @@ public class SegmentationJob extends Job implements PlugIn {
     else if (((String)_averagingComboBox.getSelectedItem()).equals("rotate"))
         averagingParm = "-average_rotate";
 
-    String[] parameters = originalModel().getCaffeTilingParameter().split(
+    String[] parameters = model().getCaffeTilingParameter().split(
         "\\s");
     String nTilesAttribute = parameters[0];
     String nTilesValue = parameters[1];
@@ -628,7 +628,7 @@ public class SegmentationJob extends Job implements PlugIn {
         commandString + " tiled_predict -infileH5 \"" +
         file.getAbsolutePath() + "\" -outfileH5 \"" +
         file.getAbsolutePath() + "\" -model \"" +
-        originalModel().file.getAbsolutePath() + "\" -weights \"" +
+        model().file.getAbsolutePath() + "\" -weights \"" +
         weightsFileName() + "\" -iterations 0 " +
         nTilesAttribute + " " + nTilesValue + " " + averagingParm + " " +
         gpuAttribute + " " + gpuValue);
@@ -638,7 +638,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", originalModel().file.getAbsolutePath(), "-weights",
+              "-model", model().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue, gpuAttribute,
               gpuValue);
@@ -646,7 +646,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", originalModel().file.getAbsolutePath(), "-weights",
+              "-model", model().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue);
     }
@@ -655,7 +655,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", originalModel().file.getAbsolutePath(), "-weights",
+              "-model", model().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue, averagingParm, gpuAttribute,
               gpuValue);
@@ -663,7 +663,7 @@ public class SegmentationJob extends Job implements PlugIn {
           pb = new ProcessBuilder(
               commandString, "tiled_predict", "-infileH5",
               file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", originalModel().file.getAbsolutePath(), "-weights",
+              "-model", model().file.getAbsolutePath(), "-weights",
               weightsFileName(), "-iterations", "0",
               nTilesAttribute, nTilesValue, averagingParm);
     }
@@ -757,7 +757,7 @@ public class SegmentationJob extends Job implements PlugIn {
     model.load(new File(parameters.get("modelFilename")));
     job.setModel(model);
     job.setWeightsFileName(parameters.get("weightsFilename"));
-    job.originalModel().setFromTilingParameterString(parameterStrings[2]);
+    job.model().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
     if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
       try {
@@ -846,12 +846,12 @@ public class SegmentationJob extends Job implements PlugIn {
 
         progressMonitor().initNewTask("Uploading Model", 0.01f, 1);
         if (!isInteractive()) {
-          originalModel().remoteAbsolutePath =
+          model().remoteAbsolutePath =
               processFolder() + id() + "_model.h5";
           _createdRemoteFolders.addAll(
-              sftp.put(originalModel().file,
-                       originalModel().remoteAbsolutePath));
-          _createdRemoteFiles.add(originalModel().remoteAbsolutePath);
+              sftp.put(model().file,
+                       model().remoteAbsolutePath));
+          _createdRemoteFiles.add(model().remoteAbsolutePath);
         }
 
         _localTmpFile = File.createTempFile(id(), ".h5");
@@ -861,8 +861,8 @@ public class SegmentationJob extends Job implements PlugIn {
         progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
         setImagePlus(
             Tools.saveHDF5Blob(
-                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected(),
-                true));
+                _imp, _localTmpFile, model(), progressMonitor(), false,
+                _keepOriginalCheckBox.isSelected(), true));
         if (interrupted()) throw new InterruptedException();
 
         progressMonitor().initNewTask("Uploading HDF5 blobs", 0.1f, 1);
@@ -884,8 +884,8 @@ public class SegmentationJob extends Job implements PlugIn {
         progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
         setImagePlus(
             Tools.saveHDF5Blob(
-                _imp, _localTmpFile, this, _keepOriginalCheckBox.isSelected(),
-                true));
+                _imp, _localTmpFile, model(), progressMonitor(), false,
+                _keepOriginalCheckBox.isSelected(), true));
         if (interrupted()) throw new InterruptedException();
 
         progressMonitor().initNewTask("U-Net Segmentation", 1.0f, 1);
@@ -911,6 +911,10 @@ public class SegmentationJob extends Job implements PlugIn {
     }
     catch (NotImplementedException e) {
       IJ.error(id(), "Sorry, the requested feature is not implemented:\n" + e);
+      abort();
+    }
+    catch (BlobException e) {
+      IJ.error(id(), "Blob conversion failed:\n" + e);
       abort();
     }
  }
@@ -1119,7 +1123,7 @@ public class SegmentationJob extends Job implements PlugIn {
 
         // Connected component labeling
         progressMonitor().count("Connected component labeling", 0);
-        Pair< Integer[], Blob<Integer> > connComps =
+        ConnectedComponentLabeling.ConnectedComponents connComps =
             ConnectedComponentLabeling.label(
                 impMCClassification,
                 ConnectedComponentLabeling.SIMPLE_NEIGHBORHOOD,
@@ -1130,17 +1134,17 @@ public class SegmentationJob extends Job implements PlugIn {
         float[][] weightSum = new float[nFrames * (nClasses - 1)][];
         int[][] nPixels = new int[nFrames * (nClasses - 1)][];
         for (int i = 0; i < nFrames * (nClasses - 1); ++i) {
-          centerPosUm[i] = new float[connComps.first[i]][nDims];
-          weightSum[i] = new float[connComps.first[i]];
-          nPixels[i] = new int[connComps.first[i]];
-          for (int j = 0; j < connComps.first[i]; ++j) {
+          centerPosUm[i] = new float[connComps.nComponents[i]][nDims];
+          weightSum[i] = new float[connComps.nComponents[i]];
+          nPixels[i] = new int[connComps.nComponents[i]];
+          for (int j = 0; j < connComps.nComponents[i]; ++j) {
             for (int d = 0; d < nDims; ++d) centerPosUm[i][j][d] = 0.0f;
             weightSum[i][j] = 0.0f;
             nPixels[i][j] = 0;
           }
         }
-        Integer[] labels = connComps.second.data();
-        double[] elSize = connComps.second.elementSizeUm();
+        int[] labels = (int[])connComps.labels.data();
+        double[] elSize = connComps.labels.elementSizeUm();
         int lblIdx = 0;
         for (int t = 0; t < nFrames; ++t) {
           for (int c = 0; c < nClasses - 1; ++c) {
@@ -1188,7 +1192,7 @@ public class SegmentationJob extends Job implements PlugIn {
         for (int t = 0; t < nFrames; ++t) {
           for (int c = 0; c < nClasses - 1; ++c, ++volIdx) {
             PointRoi[] detections = new PointRoi[nLevs];
-            for (int j = 0; j < connComps.first[volIdx]; ++j) {
+            for (int j = 0; j < connComps.nComponents[volIdx]; ++j) {
               table.incrementCounter();
               table.addValue("frame", t + 1);
               for (int d = 0; d < nDims; ++d)

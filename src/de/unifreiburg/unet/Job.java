@@ -143,34 +143,8 @@ public abstract class Job extends Thread {
     return _progressMonitor;
   }
 
-/*======================================================================*/
-/*!
- *   The model selected by the user. This function may return null or
- *   an invalid ModelDefinition stub. Treat the returned reference as
- *   read-only! If you need a random-access model, create a new model
- *   in your subclass and override model() to point to your custom model.
- *   Please check isValid() of the returned ModelDefinition before using it.
- *
- *   \return The model selected by the user.
- */
-/*======================================================================*/
-  protected final ModelDefinition originalModel() {
+  protected final ModelDefinition model() {
     return (ModelDefinition)_modelComboBox.getSelectedItem();
-  }
-
-/*======================================================================*/
-/*!
- *   The model that will be used in the Job. The default implementation
- *   returns the ModelDefinition of originalModel(), i.e. the model selected by
- *   the user. Override this method if you need to apply changes to a
- *   copy of the selected model for processing your data, e.g. in
- *   finetuning and return a reference to the copy.
- *
- *   \return The model used for processing
- */
-/*======================================================================*/
-  public ModelDefinition model() {
-    return originalModel();
   }
 
   protected final void setModel(ModelDefinition model) {
@@ -345,20 +319,20 @@ public abstract class Job extends Thread {
   protected void processModelSelectionChange() {
     _tilingModeSelectorPanel.removeAll();
     _tilingParametersPanel.removeAll();
-    if (originalModel() != null) {
-      _weightsFileTextField.setText(originalModel().weightFile);
-      _tilingModeSelectorPanel.add(originalModel().tileModeSelector());
+    if (model() != null) {
+      _weightsFileTextField.setText(model().weightFile);
+      _tilingModeSelectorPanel.add(model().tileModeSelector());
       _tilingModeSelectorPanel.setMinimumSize(
-          originalModel().tileModeSelector().getPreferredSize());
+          model().tileModeSelector().getPreferredSize());
       _tilingModeSelectorPanel.setMaximumSize(
-          originalModel().tileModeSelector().getPreferredSize());
-      _tilingParametersPanel.add(originalModel().tileModePanel());
+          model().tileModeSelector().getPreferredSize());
+      _tilingParametersPanel.add(model().tileModePanel());
       _tilingParametersPanel.setMinimumSize(
-          originalModel().tileModePanel().getMinimumSize());
+          model().tileModePanel().getMinimumSize());
       _tilingParametersPanel.setMaximumSize(
           new Dimension(
               Integer.MAX_VALUE,
-              originalModel().tileModeSelector().getPreferredSize().height));
+              model().tileModeSelector().getPreferredSize().height));
     }
     _dialogPanel.setMaximumSize(
         new Dimension(
@@ -561,9 +535,9 @@ public abstract class Job extends Thread {
           @Override
           public void actionPerformed(ActionEvent e) {
             File startFolder =
-                (originalModel() == null || originalModel().file == null ||
-                 originalModel().file.getParentFile() == null) ?
-                new File(".") : originalModel().file.getParentFile();
+                (model() == null || model().file == null ||
+                 model().file.getParentFile() == null) ?
+                new File(".") : model().file.getParentFile();
             JFileChooser f = new JFileChooser(startFolder);
             f.setDialogTitle("Select U-Net model folder");
             f.setMultiSelectionEnabled(false);
@@ -584,18 +558,18 @@ public abstract class Job extends Thread {
         new DocumentListener() {
           @Override
           public void insertUpdate(DocumentEvent e) {
-            if (originalModel() != null)
-                originalModel().weightFile = _weightsFileTextField.getText();
+            if (model() != null)
+                model().weightFile = _weightsFileTextField.getText();
           }
           @Override
           public void removeUpdate(DocumentEvent e) {
-            if (originalModel() != null)
-                originalModel().weightFile = _weightsFileTextField.getText();
+            if (model() != null)
+                model().weightFile = _weightsFileTextField.getText();
           }
           @Override
           public void changedUpdate(DocumentEvent e) {
-            if (originalModel() != null)
-                originalModel().weightFile = _weightsFileTextField.getText();
+            if (model() != null)
+                model().weightFile = _weightsFileTextField.getText();
           }
         });
 
@@ -606,7 +580,7 @@ public abstract class Job extends Thread {
           public void actionPerformed(ActionEvent e) {
             File startFile = (!_weightsFileTextField.getText().equals("")) ?
                 new File(_weightsFileTextField.getText()) :
-                originalModel().file;
+                model().file;
             JFileChooser f = new JFileChooser(startFile);
             f.setDialogTitle("Select trained U-Net weights");
             f.setFileFilter(
@@ -620,7 +594,6 @@ public abstract class Job extends Thread {
             if (res != JFileChooser.APPROVE_OPTION) return;
             _weightsFileTextField.setText(
                 f.getSelectedFile().getAbsolutePath());
-            originalModel().weightFile = _weightsFileTextField.getText();
           }});
 
     // ProcessFolderChooser affects ProcessFolderTextField (not critical)
@@ -691,14 +664,14 @@ public abstract class Job extends Thread {
     Prefs.set("unet.processfolder", processFolder());
     Prefs.set("unet.gpuId", selectedGPUString());
 
-    if (!originalModel().isValid()) {
+    if (!model().isValid()) {
       IJ.showMessage("Please select a model. Probably you first need " +
                      "to select a folder containing models.");
       return false;
     }
 
-    Prefs.set("unet.modelId", originalModel().id);
-    originalModel().savePreferences();
+    Prefs.set("unet.modelId", model().id);
+    model().savePreferences();
 
     if (_weightsFileTextField.getText() == "") {
       IJ.showMessage("Please enter the (remote) path to the weights file.");

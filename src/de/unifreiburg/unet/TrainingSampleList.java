@@ -63,6 +63,7 @@ import javax.swing.JScrollPane;
 import javax.swing.TransferHandler;
 
 
+
 public class ImagePlusListView extends JList<ImagePlus> {
 
   private DefaultListModel<ImagePlus> model;
@@ -80,6 +81,7 @@ public class ImagePlusListView extends JList<ImagePlus> {
   }
 
 }
+
 
 
 class ImagePlusListViewNameRenderer extends DefaultListCellRenderer {
@@ -105,6 +107,7 @@ class ImagePlusListViewNameRenderer extends DefaultListCellRenderer {
 }
 
 
+
 class ImagePlusListViewKeyListener implements KeyListener
 {
 
@@ -125,6 +128,7 @@ class ImagePlusListViewKeyListener implements KeyListener
   public void keyTyped(KeyEvent e) {}
 
 }
+
 
 
 class TransferableImagePlus implements Transferable {
@@ -154,6 +158,7 @@ class TransferableImagePlus implements Transferable {
     return _img;
   }
 }
+
 
 
 class ImagePlusListViewDragListener
@@ -188,6 +193,7 @@ class ImagePlusListViewDragListener
 
   public void dropActionChanged(DragSourceDragEvent dsde) {}
 }
+
 
 
 class ImagePlusListViewDropHandler extends TransferHandler {

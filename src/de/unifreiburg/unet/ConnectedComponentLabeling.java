@@ -50,58 +50,47 @@ public class ConnectedComponentLabeling implements PlugIn {
   public static final int SIMPLE_NEIGHBORHOOD = 0;
   public static final int COMPLEX_NEIGHBORHOOD = 1;
 
-  private static class TreeNode<K,V> {
+  public static class ConnectedComponents {
 
-    private K _key;
-    private V _value;
+    public int[] nComponents = null;
+    public IntBlob labels = null;
 
-    private TreeNode<K,V> _parent = null;
-    private final List< TreeNode<K,V> > _children =
-        new LinkedList< TreeNode<K,V> >();
+  }
 
-    private TreeNode<K,V> _root = null;
+  private static class TreeNode {
 
-    public TreeNode(K key) {
+    private int _key;
+
+    private TreeNode _root = null;
+    private TreeNode _parent = null;
+    private final List<TreeNode> _children = new LinkedList<TreeNode>();
+
+    public TreeNode(int key) {
             _key = key;
-            _value = null;
             _root = this;
           }
 
-    public TreeNode(K key, V value) {
-            _key = key;
-            _value = _value;
-            _root = this;
-          }
-
-    public K key() {
+    public int key() {
       return _key;
     }
 
-    public void setKey(K key) {
+    public void setKey(int key) {
       _key = key;
     }
 
-    public V value() {
-      return _value;
-    }
-
-    public void setValue(V value) {
-      _value = value;
-    }
-
-    public TreeNode<K,V> parent() {
+    public TreeNode parent() {
       return _parent;
     }
 
-    public List< TreeNode<K,V> > children() {
-            return _children;
-          }
+    public List<TreeNode> children() {
+      return _children;
+    }
 
-    public TreeNode<K,V> root() {
+    public TreeNode root() {
       return _root;
     }
 
-    public void reparent(TreeNode<K,V> parent) {
+    public void reparent(TreeNode parent) {
       if (_parent == parent) return;
       if (_parent != null) _parent._removeChild(this);
       _parent = parent;
@@ -109,27 +98,28 @@ public class ConnectedComponentLabeling implements PlugIn {
       _updateRoot();
     }
 
-    public void addChild(TreeNode<K,V> child) {
+    public void addChild(TreeNode child) {
       child.reparent(this);
     }
 
-    public void removeChild(TreeNode<K,V> child) {
+    public void removeChild(TreeNode child) {
       child.reparent(null);
     }
 
-    private void _removeChild(TreeNode<K,V> child) {
+    private void _removeChild(TreeNode child) {
       _children.remove(child);
     }
 
-    private void _addChild(TreeNode<K,V> child) {
+    private void _addChild(TreeNode child) {
       _children.add(child);
     }
 
     private void _updateRoot() {
       if (_parent == null) _root = this;
       else _root = _parent._root;
-      for (TreeNode<K,V> node: _children) node._updateRoot();
+      for (TreeNode node : _children) node._updateRoot();
     }
+
   }
 
 /*======================================================================*/
@@ -147,21 +137,21 @@ public class ConnectedComponentLabeling implements PlugIn {
  *   \return 1. The number of connected components per channel and frame where
  *           the number of connected components in channel c of frame t is
  *           stored at array index t * nChannels + c.
- *           2. an integer Blob containing the labeled connected component
+ *           2. an IntBlob containing the labeled connected component
  *           masks. The label for pixel (t,c,z,y,x) is stored at position
  *           ((t * nChannels + c) * nSlices + z) * height + y) * width + x.
  */
 /*======================================================================*/
-  public static Pair< Integer[],Blob<Integer> >
-  label(ImagePlus imp, int nhood, ProgressMonitor pr) {
+  public static ConnectedComponents label(
+      ImagePlus imp, int nhood, ProgressMonitor pr) {
 
     int T = imp.getNFrames();
     int C = imp.getNChannels();
     int D = imp.getNSlices();
-    int W = imp.getWidth();
     int H = imp.getHeight();
+    int W = imp.getWidth();
 
-    if (pr.getMax() == 0) pr.init(0, "", "", 2 * T * C * D);
+    if (pr != null && pr.getMax() == 0) pr.init(0, "", "", 2 * T * C * D);
 
     // Prepare upper left half of neighborhood (rest is not needed)
     int[] dx = null, dy = null, dz = null;
@@ -222,24 +212,23 @@ public class ConnectedComponentLabeling implements PlugIn {
       break;
     }
 
-    int[] shape = null;
+    int[] shape = new int[] { T, C, D, H, W };
     double[] elSize = null;
     if (D == 1) {
-      shape = new int[] { T, C, H, W };
       elSize = new double[] {
           factor * cal.pixelHeight, factor * cal.pixelWidth };
     }
     else {
-      shape = new int[] { T, C, D, H, W };
       elSize = new double[] {
           factor * cal.pixelDepth, factor * cal.pixelHeight,
           factor * cal.pixelWidth };
     }
-    Blob<Integer> labelBlob = new Blob<Integer>(shape, elSize, Integer[].class);
-    Integer[] labels = (Integer[])labelBlob.data();
+    ConnectedComponents res = new ConnectedComponents();
+    res.labels = new IntBlob(shape, elSize);
+    int[] labels = (int[])res.labels.data();
     Arrays.fill(labels, 0);
 
-    Integer[] nComps = new Integer[T * C];
+    res.nComponents = new int[T * C];
 
     int outIdx = 0;
     for (int t = 0; t < T; ++t)
@@ -249,17 +238,14 @@ public class ConnectedComponentLabeling implements PlugIn {
         int stackStart = outIdx;
 
         int nextLabel = 1;
-        Vector< TreeNode<Integer,Object> > lbl =
-            new Vector< TreeNode<Integer,Object> >();
+        Vector<TreeNode> lbl = new Vector<TreeNode>();
         // Add a null entry for label 0, so that the array can be directly
         // indexed by the instance labels
         lbl.add(null);
 
         for (int z = 0; z < D; ++z) {
-          pr.count(1);
-          ImageProcessor ip = null;
-          if (imp.getStackSize() == 1) ip = imp.getProcessor();
-          else ip = imp.getStack().getProcessor(
+          if (pr != null) pr.count(1);
+          ImageProcessor ip = imp.getStack().getProcessor(
               imp.getStackIndex(c + 1, z + 1, t + 1));
           for (int y = 0; y < H; ++y) {
             for (int x = 0; x < W; ++x, ++outIdx) {
@@ -284,7 +270,7 @@ public class ConnectedComponentLabeling implements PlugIn {
               }
               if (val == 0) {
                 labels[outIdx] = nextLabel;
-                lbl.add(new TreeNode<Integer,Object>(nextLabel++));
+                lbl.add(new TreeNode(nextLabel++));
               }
             }
           }
@@ -300,20 +286,22 @@ public class ConnectedComponentLabeling implements PlugIn {
               labelMap[lbl.get(i).root().key()] = currentLabel++;
           labelMap[i] = labelMap[lbl.get(i).root().key()];
         }
-        nComps[t * C + c] = currentLabel - 1;
+        res.nComponents[t * C + c] = currentLabel - 1;
 
         // Re-map preliminary labels to final labels
         int i = 0;
         for (int z = 0; z < D; ++z) {
-          pr.count(1);
+          if (pr != null) pr.count(1);
           for (int j = 0; j < W * H; ++j, ++i) {
             labels[stackStart + i] = labelMap[labels[stackStart + i]];
           }
         }
       }
     }
-    pr.end();
-    return new Pair< Integer[],Blob<Integer> >(nComps, labelBlob);
+
+    if (pr != null) pr.end();
+
+    return res;
   }
 
   @Override
@@ -324,7 +312,10 @@ public class ConnectedComponentLabeling implements PlugIn {
     {
       ProgressMonitor pr = new ProgressMonitor(null);
       pr.initNewTask("Connected component labeling", 1.0f, 0);
-      label(imp, COMPLEX_NEIGHBORHOOD, pr).second.convertToImagePlus().show();
+      ImagePlus res = label(
+          imp, COMPLEX_NEIGHBORHOOD, pr).labels.convertToImagePlus();
+      res.setTitle(imp.getTitle() + " - Connected Components");
+      res.show();
     }
     catch(BlobException e)
     {
