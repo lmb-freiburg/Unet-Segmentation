@@ -87,6 +87,10 @@ public abstract class CaffeJob extends Job {
   private final String[] gpuList = {
       "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
       "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
+  private final JPanel _tilingModeSelectorPanel =
+      new JPanel(new BorderLayout());
+  private final JPanel _tilingParametersPanel = new JPanel(new BorderLayout());
+
   private final JComboBox<String> _useGPUComboBox = new JComboBox<>(gpuList);
   private Session _sshSession = null;
 
@@ -171,14 +175,24 @@ public abstract class CaffeJob extends Job {
 
   @Override
   protected void processModelSelectionChange() {
+    _tilingModeSelectorPanel.removeAll();
+    _tilingParametersPanel.removeAll();
+    if (model() != null) {
+      _tilingModeSelectorPanel.add(model().tileModeSelector());
+      _tilingModeSelectorPanel.setMinimumSize(
+          model().tileModeSelector().getPreferredSize());
+      _tilingModeSelectorPanel.setMaximumSize(
+          model().tileModeSelector().getPreferredSize());
+      _tilingParametersPanel.add(model().tileModePanel());
+      _tilingParametersPanel.setMinimumSize(
+          model().tileModePanel().getMinimumSize());
+      _tilingParametersPanel.setMaximumSize(
+          new Dimension(
+              Integer.MAX_VALUE,
+              model().tileModeSelector().getPreferredSize().height));
+      _weightsFileTextField.setText(model().weightFile);
+    }
     super.processModelSelectionChange();
-    if (model() != null) _weightsFileTextField.setText(model().weightFile);
-    _parametersDialog.invalidate();
-    _parametersDialog.setMinimumSize(_parametersDialog.getPreferredSize());
-    _parametersDialog.setMaximumSize(
-        new Dimension(Integer.MAX_VALUE,
-                      _parametersDialog.getPreferredSize().height));
-    _parametersDialog.validate();
   }
 
   @Override
@@ -246,7 +260,8 @@ public abstract class CaffeJob extends Job {
                     GroupLayout.Alignment.TRAILING)
                 .addComponent(weightsFileLabel)
                 .addComponent(processFolderLabel)
-                .addComponent(useGPULabel))
+                .addComponent(useGPULabel)
+                .addComponent(_tilingModeSelectorPanel))
             .addGroup(
                 _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
                 .addGroup(
@@ -257,7 +272,8 @@ public abstract class CaffeJob extends Job {
                     _dialogLayout.createSequentialGroup()
                     .addComponent(_processFolderTextField)
                     .addComponent(_processFolderChooseButton))
-                .addComponent(_useGPUComboBox)))
+                .addComponent(_useGPUComboBox)
+                .addComponent(_tilingParametersPanel)))
         .addComponent(_hostConfiguration);
 
     _verticalDialogLayoutGroup
@@ -275,6 +291,14 @@ public abstract class CaffeJob extends Job {
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(useGPULabel)
             .addComponent(_useGPUComboBox))
+        .addGroup(
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.CENTER)
+            .addComponent(
+                _tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
+                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)
+            .addComponent(
+                _tilingParametersPanel, GroupLayout.PREFERRED_SIZE,
+                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE))
         .addComponent(_hostConfiguration);
   }
 

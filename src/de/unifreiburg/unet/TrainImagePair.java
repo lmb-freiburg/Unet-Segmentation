@@ -115,6 +115,22 @@ public class TrainImagePair
     return rawlabels;
   }
 
+  public ImagePlus data() {
+    return data;
+  }
+
+  public ImagePlus labels() {
+    return labels;
+  }
+
+  public ImagePlus weights() {
+    return weights;
+  }
+
+  public ImagePlus samplePdf() {
+    return samplePdf;
+  }
+
   public void createCaffeBlobs(
       String[] classes, ModelDefinition model, ProgressMonitor pr)
       throws InterruptedException, IOException, BlobException,

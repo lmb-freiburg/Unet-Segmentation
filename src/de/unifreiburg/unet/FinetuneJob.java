@@ -180,7 +180,6 @@ public abstract class FinetuneJob extends CaffeJob {
   protected void processModelSelectionChange() {
     _finetunedModel = null;
     _elSizePanel.removeAll();
-    super.processModelSelectionChange();
     if (model() != null) {
       _elSizePanel.add(model().elementSizeUmPanel());
       _elSizePanel.setMinimumSize(
@@ -206,6 +205,7 @@ public abstract class FinetuneJob extends CaffeJob {
                          "[.-]modeldef$", "") +
                      "-finetuned.modeldef.h5") : "finetuned.modeldef.h5"));
     }
+    super.processModelSelectionChange();
   }
 
   @Override
@@ -583,7 +583,6 @@ public abstract class FinetuneJob extends CaffeJob {
       return false;
     }
 
-    boolean dialogOK = false;
     do {
       progressMonitor().initNewTask("Waiting for user input", 0.0f, 0);
       _parametersDialog.setVisible(true);

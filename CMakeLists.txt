@@ -40,6 +40,9 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/HostConfigurationPanel.java
   src/de/unifreiburg/unet/SftpFileIO.java
   src/de/unifreiburg/unet/Job.java
+  src/de/unifreiburg/unet/CreateBlobsJob.java
+  src/de/unifreiburg/unet/CreateBlobsWithRoisJob.java
+  src/de/unifreiburg/unet/CreateBlobsWithImagePairsJob.java
   src/de/unifreiburg/unet/CaffeJob.java
   src/de/unifreiburg/unet/SegmentationJob.java
   src/de/unifreiburg/unet/DetectionJob.java

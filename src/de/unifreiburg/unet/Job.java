@@ -91,9 +91,6 @@ public abstract class Job extends Thread {
       (UIManager.get("FileView.directoryIcon") instanceof Icon) ? new JButton(
           (Icon)UIManager.get("FileView.directoryIcon")) : new JButton("...");
   private final JPanel _dialogPanel = new JPanel();
-  private final JPanel _tilingModeSelectorPanel =
-      new JPanel(new BorderLayout());
-  private final JPanel _tilingParametersPanel = new JPanel(new BorderLayout());
 
   public Job() {
     _jobTableModel = null;
@@ -233,22 +230,6 @@ public abstract class Job extends Thread {
   }
 
   protected void processModelSelectionChange() {
-    _tilingModeSelectorPanel.removeAll();
-    _tilingParametersPanel.removeAll();
-    if (model() != null) {
-      _tilingModeSelectorPanel.add(model().tileModeSelector());
-      _tilingModeSelectorPanel.setMinimumSize(
-          model().tileModeSelector().getPreferredSize());
-      _tilingModeSelectorPanel.setMaximumSize(
-          model().tileModeSelector().getPreferredSize());
-      _tilingParametersPanel.add(model().tileModePanel());
-      _tilingParametersPanel.setMinimumSize(
-          model().tileModePanel().getMinimumSize());
-      _tilingParametersPanel.setMaximumSize(
-          new Dimension(
-              Integer.MAX_VALUE,
-              model().tileModeSelector().getPreferredSize().height));
-    }
     _dialogPanel.setMaximumSize(
         new Dimension(
             Integer.MAX_VALUE,
@@ -304,15 +285,13 @@ public abstract class Job extends Thread {
             .addGroup(
                 _dialogLayout.createParallelGroup(
                     GroupLayout.Alignment.TRAILING)
-                .addComponent(modelLabel)
-                .addComponent(_tilingModeSelectorPanel))
+                .addComponent(modelLabel))
             .addGroup(
                 _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
                 .addGroup(
                     _dialogLayout.createSequentialGroup()
                     .addComponent(_modelComboBox)
-                    .addComponent(_modelFolderChooseButton))
-                .addComponent(_tilingParametersPanel))));
+                    .addComponent(_modelFolderChooseButton)))));
 
     _dialogLayout.setVerticalGroup(
         _verticalDialogLayoutGroup
@@ -320,15 +299,7 @@ public abstract class Job extends Thread {
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
             .addComponent(modelLabel)
             .addComponent(_modelComboBox)
-            .addComponent(_modelFolderChooseButton))
-        .addGroup(
-            _dialogLayout.createParallelGroup(GroupLayout.Alignment.CENTER)
-            .addComponent(
-                _tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
-                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)
-            .addComponent(
-                _tilingParametersPanel, GroupLayout.PREFERRED_SIZE,
-                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)));
+            .addComponent(_modelFolderChooseButton)));
 
     // OK/Cancel buttons
     final JPanel okCancelPanel = new JPanel();

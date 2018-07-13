@@ -422,7 +422,6 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       return false;
     }
 
-    boolean dialogOK = false;
     do {
       progressMonitor().initNewTask("Waiting for user input", 0.0f, 0);
       _parametersDialog.setVisible(true);
