@@ -143,7 +143,7 @@ public class JobTableModel extends AbstractTableModel {
       noImageContainsOverlays &= !containsOverlay;
     }
     if (allImagesContainOverlays)
-        startJob(new FinetuneJob(this));
+        startJob(new FinetuneWithRoisJob(this));
     else if (noImageContainsOverlays)
         startJob(new FinetuneWithImagePairsJob(this));
     else {
@@ -152,7 +152,8 @@ public class JobTableModel extends AbstractTableModel {
           null, "Choose the type of label information you want to use for " +
           "finetuning", "Input", JOptionPane.INFORMATION_MESSAGE, null,
           possibleValues, possibleValues[0]);
-      if (selectedValue == possibleValues[0]) startJob(new FinetuneJob(this));
+      if (selectedValue == possibleValues[0])
+          startJob(new FinetuneWithRoisJob(this));
       else startJob(new FinetuneWithImagePairsJob(this));
     }
   }

@@ -86,7 +86,7 @@ import ch.systemsx.cisd.hdf5.IHDF5Reader;
 import ch.systemsx.cisd.hdf5.HDF5DataSetInformation;
 import ch.systemsx.cisd.base.mdarray.MDFloatArray;
 
-public class SegmentationJob extends Job implements PlugIn {
+public class SegmentationJob extends CaffeJob implements PlugIn {
 
   protected File _localTmpFile = null;
 
@@ -245,225 +245,163 @@ public class SegmentationJob extends Job implements PlugIn {
     _configPanel.add(_outputSoftmaxScoresCheckBox);
   }
 
-  public boolean getParameters() throws InterruptedException {
+  @Override
+  protected boolean checkParameters() throws InterruptedException {
 
-    progressMonitor().initNewTask("Checking parameters", 0.0f, 0);
+    progressMonitor().count("Checking parameters", 0);
 
-    if (_imp == null) setImagePlus(WindowManager.getCurrentImage());
-    if (_imp == null) {
-      IJ.showMessage(
-          "U-Net segmentation requires an open hyperstack to segment.");
-      return false;
-    }
+    if (!super.checkParameters()) return false;
 
-    boolean dialogOK = false;
-    while (!dialogOK) {
-      dialogOK = true;
-      _parametersDialog.setVisible(true);
+    int nChannels =
+        (_imp.getType() == ImagePlus.COLOR_256 ||
+         _imp.getType() == ImagePlus.COLOR_RGB) ? 3 : _imp.getNChannels();
 
-      // Dialog was cancelled
-      if (!_parametersDialog.isDisplayable())
-          throw new InterruptedException("Dialog canceled");
+    String caffe_unetBinary =
+        Prefs.get("unet.caffe_unetBinary", "caffe_unet");
 
-      dialogOK = checkParameters();
-      if (!dialogOK) continue;
+    ProcessResult res = null;
 
-      // Check whether caffe_unet binary exists and is executable
-      ProcessResult res = null;
-      String caffeBinaryPath = Prefs.get("unet.caffeBinary", "caffe");
-      String caffeBaseDir = caffeBinaryPath.replaceFirst("[^/]*$", "");
-      while (res == null)
-      {
-        if (sshSession() == null) {
-          try {
-            Vector<String> cmd = new Vector<String>();
-            cmd.add(Prefs.get(
-                        "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-            res = Tools.execute(cmd, progressMonitor());
-          }
-          catch (IOException e) {
-            res = new ProcessResult();
-            res.exitStatus = 1;
-          }
-        }
-        else {
-          try {
-            String cmd = Prefs.get(
-                "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
-            res = Tools.execute(cmd, sshSession(), progressMonitor());
-          }
-          catch (JSchException e) {
-            res.exitStatus = 1;
-          }
-          catch (IOException e) {
-            res.exitStatus = 1;
-          }
-        }
-        if (res.exitStatus != 0) {
-          String caffePath = JOptionPane.showInputDialog(
-              WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
-              "Please specify your caffe_unet binary\n",
-              Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-          if (caffePath == null)
-              throw new InterruptedException("Dialog canceled");
-          if (caffePath.equals(""))
-              Prefs.set("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
-          else Prefs.set("unet.caffe_unetBinary", caffePath);
-          res = null;
-        }
+    if (sshSession() != null) {
+
+      try {
+        model().remoteAbsolutePath = processFolder() + id() + "_model.h5";
+        _createdRemoteFolders.addAll(
+            new SftpFileIO(sshSession(), progressMonitor()).put(
+                model().file, model().remoteAbsolutePath));
+        _createdRemoteFiles.add(model().remoteAbsolutePath);
+        Prefs.set("unet.processfolder", processFolder());
+      }
+      catch (SftpException|JSchException e) {
+        showError("Model upload failed.\nDo you have sufficient " +
+            "permissions to create the processing folder on " +
+                  "the remote host?", e);
+        return false;
+      }
+      catch (IOException e) {
+        showError("Model upload failed. Could not read model file.", e);
+        return false;
       }
 
-      // Check whether combination of model and weights can be used for
-      // segmentation
-      int nChannels =
-          (_imp.getType() == ImagePlus.COLOR_256 ||
-           _imp.getType() == ImagePlus.COLOR_RGB) ? 3 : _imp.getNChannels();
-
-      if (sshSession() != null) {
-
-        try {
-          model().remoteAbsolutePath =
-              processFolder() + id() + "_model.h5";
-          _createdRemoteFolders.addAll(
-              new SftpFileIO(sshSession(), progressMonitor()).put(
-                  model().file, model().remoteAbsolutePath));
-          _createdRemoteFiles.add(model().remoteAbsolutePath);
-          Prefs.set("unet.processfolder", processFolder());
-        }
-        catch (SftpException|JSchException e) {
-          IJ.showMessage(
-              "Model upload failed.\nDo you have sufficient " +
-              "permissions to create the processing folder on " +
-              "the remote host?");
-          dialogOK = false;
-          continue;
-        }
-        catch (IOException e) {
-          IJ.showMessage("Model upload failed. Could not read model file.");
-          dialogOK = false;
-          continue;
-        }
-
-        try {
-          boolean weightsUploaded = false;
-          do {
-            String cmd =
-                Prefs.get("unet.caffe_unetBinary",
-                          caffeBaseDir + "caffe_unet") +
-                " check_model_and_weights_h5 -model \"" +
-                model().remoteAbsolutePath + "\" -weights \"" +
-                weightsFileName() + "\" -n_channels " + nChannels + " " +
-                caffeGPUParameter();
-            res = Tools.execute(cmd, sshSession(), progressMonitor());
-            if (weightsUploaded && res.exitStatus != 0) break;
-            if (!weightsUploaded && res.exitStatus != 0) {
-              int selectedOption = JOptionPane.showConfirmDialog(
-                  _imp.getWindow(), "No compatible weights found at the " +
-                  "given location on the backend server.\nDo you want " +
-                  "to upload weights from the local machine now?",
-                  "Upload weights?", JOptionPane.YES_NO_CANCEL_OPTION,
-                  JOptionPane.QUESTION_MESSAGE);
-              switch (selectedOption) {
-              case JOptionPane.YES_OPTION: {
-                File startFile =
-                    (model() == null ||
-                     model().file == null ||
-                     model().file.getParentFile() == null) ?
-                    new File(".") : model().file.getParentFile();
-                JFileChooser f = new JFileChooser(startFile);
-                f.setDialogTitle("Select trained U-Net weights");
-                f.setFileFilter(
-                    new FileNameExtensionFilter(
-                        "HDF5 and prototxt files", "h5", "H5",
-                        "prototxt", "PROTOTXT", "caffemodel", "CAFFEMODEL"));
-                f.setMultiSelectionEnabled(false);
-                f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-                int res2 = f.showDialog(_imp.getWindow(), "Select");
-                if (res2 != JFileChooser.APPROVE_OPTION)
-                    throw new InterruptedException("Aborted by user");
-                try {
-                  new SftpFileIO(sshSession(), progressMonitor()).put(
-                      f.getSelectedFile(), weightsFileName());
-                  weightsUploaded = true;
-                }
-                catch (SftpException e) {
-                  res.exitStatus = 3;
-                  res.shortErrorString =
-                      "Upload failed.\nDo you have sufficient " +
-                      "permissions to create a file at the given " +
-                      "backend server path?";
-                  res.cerr = e.getMessage();
-                  break;
-                }
+      try {
+        boolean weightsUploaded = false;
+        do {
+          String cmd =
+              caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
+              model().remoteAbsolutePath + "\" -weights \"" +
+              weightsFileName() + "\" -n_channels " + nChannels + " " +
+              caffeGPUParameter();
+          res = Tools.execute(cmd, sshSession(), progressMonitor());
+          if (weightsUploaded && res.exitStatus != 0) break;
+          if (!weightsUploaded && res.exitStatus != 0) {
+            int selectedOption = JOptionPane.showConfirmDialog(
+                _imp.getWindow(), "No compatible weights found at the " +
+                "given location on the backend server.\nDo you want " +
+                "to upload weights from the local machine now?",
+                "Upload weights?", JOptionPane.YES_NO_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE);
+            switch (selectedOption) {
+            case JOptionPane.YES_OPTION: {
+              File startFile =
+                  (model() == null ||
+                   model().file == null ||
+                   model().file.getParentFile() == null) ?
+                  new File(".") : model().file.getParentFile();
+              JFileChooser f = new JFileChooser(startFile);
+              f.setDialogTitle("Select trained U-Net weights");
+              f.setFileFilter(
+                  new FileNameExtensionFilter(
+                      "*.caffemodel.h5 or *.caffemodel",
+                      "caffemodel.h5", "CAFFEMODEL.H5",
+                      "caffemodel", "CAFFEMODEL"));
+              f.setMultiSelectionEnabled(false);
+              f.setFileSelectionMode(JFileChooser.FILES_ONLY);
+              int res2 = f.showDialog(
+                  WindowManager.getActiveWindow(), "Select");
+              if (res2 != JFileChooser.APPROVE_OPTION)
+                  throw new InterruptedException("Aborted by user");
+              try {
+                new SftpFileIO(sshSession(), progressMonitor()).put(
+                    f.getSelectedFile(), weightsFileName());
+                weightsUploaded = true;
+              }
+              catch (SftpException e) {
+                res.exitStatus = 3;
+                res.shortErrorString =
+                    "Upload failed.\nDo you have sufficient " +
+                    "permissions to create a file at the given " +
+                    "backend server path?";
+                res.cerr = e.getMessage();
+                res.cause = e;
                 break;
               }
-              case JOptionPane.NO_OPTION: {
-                res.exitStatus = 2;
-                res.shortErrorString = "Weight file selection required";
-                res.cerr = "Weight file " + weightsFileName() + " not found";
-                break;
-              }
-              case JOptionPane.CANCEL_OPTION:
-              case JOptionPane.CLOSED_OPTION:
-                throw new InterruptedException("Aborted by user");
-              }
-              if (res.exitStatus > 1) break;
-            }
-            else {
-              IJ.log(res.cerr);
-              res.shortErrorString = "Model/Weights check failed.";
-              res.cerr = "See log for further details";
               break;
             }
+            case JOptionPane.NO_OPTION: {
+              res.exitStatus = 2;
+              res.shortErrorString = "Weight file selection required";
+              res.cerr = "Weight file " + weightsFileName() + " not found";
+              break;
+            }
+            case JOptionPane.CANCEL_OPTION:
+            case JOptionPane.CLOSED_OPTION:
+              throw new InterruptedException("Aborted by user");
+            }
+            if (res.exitStatus > 1) break;
           }
-          while (res.exitStatus != 0);
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "SSH connection error";
-          res.cerr = e.getMessage();
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
-        }
-      }
-      else {
-        try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get(
-                      "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-          cmd.add("check_model_and_weights_h5");
-          cmd.add("-model");
-          cmd.add(model().file.getAbsolutePath());
-          cmd.add("-weights");
-          cmd.add(weightsFileName());
-          cmd.add("-n_channels");
-          cmd.add(new Integer(nChannels).toString());
-          if (!caffeGPUParameter().equals("")) {
-            cmd.add(caffeGPUParameter().split(" ")[0]);
-            cmd.add(caffeGPUParameter().split(" ")[1]);
+          else {
+            IJ.log(res.cerr);
+            res.shortErrorString = "Model/Weights check failed.";
+            res.cerr = "See log for further details";
+            break;
           }
-          res = Tools.execute(cmd, progressMonitor());
         }
-        catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
+        while (res.exitStatus != 0);
+      }
+      catch (JSchException e) {
+        res.exitStatus = 1;
+        res.shortErrorString = "SSH connection error";
+        res.cerr = e.getMessage();
+        res.cause = e;
+      }
+      catch (IOException e) {
+        res.exitStatus = 1;
+        res.shortErrorString = "Input/Output error";
+        res.cerr = e.getMessage();
+        res.cause = e;
+      }
+    }
+    else {
+      try {
+        Vector<String> cmd = new Vector<String>();
+        cmd.add(caffe_unetBinary);
+        cmd.add("check_model_and_weights_h5");
+        cmd.add("-model");
+        cmd.add(model().file.getAbsolutePath());
+        cmd.add("-weights");
+        cmd.add(weightsFileName());
+        cmd.add("-n_channels");
+        cmd.add(new Integer(nChannels).toString());
+        if (!caffeGPUParameter().equals("")) {
+          cmd.add(caffeGPUParameter().split(" ")[0]);
+          cmd.add(caffeGPUParameter().split(" ")[1]);
         }
+        res = Tools.execute(cmd, progressMonitor());
       }
-      if (res.exitStatus != 0) {
-        dialogOK = false;
-
-        // User decided to change weight file, so don't bother him with
-        // additional message boxes
-        if (res.exitStatus == 2) continue;
-
-        IJ.log(res.cerr);
-        IJ.showMessage("Model/Weight check failed:\n" + res.shortErrorString);
-        continue;
+      catch (IOException e) {
+        res.exitStatus = 1;
+        res.shortErrorString = "Input/Output error";
+        res.cerr = e.getMessage();
+        res.cause = e;
       }
+    }
+    if (res.exitStatus != 0) {
+      // User decided to change weight file, so don't bother him with
+      // additional message boxes
+      if (res.exitStatus == 2) return false;
+
+      showError(
+          "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
+      return false;
     }
 
     Prefs.set("unet.segmentation.keepOriginal",
@@ -473,6 +411,28 @@ public class SegmentationJob extends Job implements PlugIn {
     Prefs.set("unet.segmentation.outputSoftmaxScores",
               _outputSoftmaxScoresCheckBox.isSelected());
 
+    return true;
+  }
+
+  private boolean getParameters() throws InterruptedException {
+
+    if (_imp == null) setImagePlus(WindowManager.getCurrentImage());
+    if (_imp == null) {
+      showMessage("U-Net segmentation requires an open hyperstack to segment.");
+      return false;
+    }
+
+    boolean dialogOK = false;
+    do {
+      progressMonitor().initNewTask("Waiting for user input", 0.0f, 0);
+      _parametersDialog.setVisible(true);
+
+      // Dialog was cancelled
+      if (!_parametersDialog.isDisplayable())
+          throw new InterruptedException("Dialog canceled");
+    }
+    while (!checkParameters());
+
     _parametersDialog.dispose();
 
     if (jobTable() != null) jobTable().fireTableDataChanged();
@@ -480,7 +440,7 @@ public class SegmentationJob extends Job implements PlugIn {
     return true;
   }
 
-  public void runSegmentation(
+  private void runSegmentation(
       String fileName, Session session)
       throws JSchException, IOException, InterruptedException {
 

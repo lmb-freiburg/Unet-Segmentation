@@ -35,4 +35,5 @@ public class ProcessResult {
   public String shortErrorString = "See log for further details";
   public String cout = "";
   public String cerr = "";
+  public Exception cause = null;
 };

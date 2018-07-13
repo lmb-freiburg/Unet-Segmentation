@@ -48,26 +48,18 @@ import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
-import javax.swing.JTextField;
 import javax.swing.JFileChooser;
 import javax.swing.GroupLayout;
 import javax.swing.GroupLayout.Group;
-import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.BorderFactory;
-import javax.swing.event.DocumentListener;
-import javax.swing.event.DocumentEvent;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.FileFilter;
-import java.util.Vector;
 import java.util.UUID;
 
 import com.jcraft.jsch.Session;
-import com.jcraft.jsch.JSchException;
-import com.jcraft.jsch.SftpException;
 
 import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
 
@@ -89,37 +81,19 @@ public abstract class Job extends Thread {
   protected Group _horizontalDialogLayoutGroup = null;
   protected Group _verticalDialogLayoutGroup = null;
   protected final JPanel _configPanel = new JPanel();
+  private final JButton _okButton = new JButton("OK");
+  private final JButton _cancelButton = new JButton("Cancel");
 
+  // Model parameters
+  private final JComboBox<ModelDefinition> _modelComboBox =
+      new JComboBox<ModelDefinition>();
+  private final JButton _modelFolderChooseButton =
+      (UIManager.get("FileView.directoryIcon") instanceof Icon) ? new JButton(
+          (Icon)UIManager.get("FileView.directoryIcon")) : new JButton("...");
   private final JPanel _dialogPanel = new JPanel();
   private final JPanel _tilingModeSelectorPanel =
       new JPanel(new BorderLayout());
   private final JPanel _tilingParametersPanel = new JPanel(new BorderLayout());
-
-  private final JComboBox<ModelDefinition> _modelComboBox =
-      new JComboBox<ModelDefinition>();
-  private final JTextField _weightsFileTextField = new JTextField("", 20);
-  private final JTextField _processFolderTextField = new JTextField(
-      Prefs.get("unet.processfolder", ""), 20);
-  private final String[] gpuList = {
-      "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
-      "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
-  private final JComboBox<String> _useGPUComboBox = new JComboBox<>(gpuList);
-  private final HostConfigurationPanel _hostConfiguration =
-      new HostConfigurationPanel();
-  private final JButton _modelFolderChooseButton =
-      (UIManager.get("FileView.directoryIcon") instanceof Icon) ? new JButton(
-          (Icon)UIManager.get("FileView.directoryIcon")) : new JButton("...");
-  private final JButton _weightsFileChooseButton =
-      _hostConfiguration.weightsFileChooseButton();
-  private final JButton _processFolderChooseButton =
-      _hostConfiguration.processFolderChooseButton();
-  private final JButton _okButton = new JButton("OK");
-  private final JButton _cancelButton = new JButton("Cancel");
-
-  private Session _sshSession = null;
-
-  protected final Vector<String> _createdRemoteFolders = new Vector<String>();
-  protected final Vector<String> _createdRemoteFiles = new Vector<String>();
 
   public Job() {
     _jobTableModel = null;
@@ -129,6 +103,14 @@ public abstract class Job extends Thread {
   public Job(JobTableModel model) {
     _jobTableModel = model;
     _progressMonitor = new ProgressMonitor(this);
+  }
+
+  public String weightsFileName() {
+    return "N/A";
+  }
+
+  public Session sshSession() {
+    return null;
   }
 
   public final String id() {
@@ -160,55 +142,6 @@ public abstract class Job extends Thread {
 
   protected final void setInteractive(boolean interactive) {
     _isInteractive = interactive;
-  }
-
-  public final String weightsFileName() {
-    return _weightsFileTextField.getText();
-  }
-
-  protected final void setWeightsFileName(String name) {
-    _weightsFileTextField.setText(name);
-  }
-
-/*======================================================================*/
-/*!
- *   The process folder to use. This method returns the content of the
- *   corresponding dialog text field with a trailing '/' added if the
- *   field is not empty. The idea is to allow the user to give absolute and
- *   relative path strings. The path must be writable on the computer the
- *   actual work is done, i.e. for local computing, the local machine, for
- *   remote computing the remote machine. When giving a relative path
- *   (or leaving the field empty) temporary output will be written relative
- *   to the current folder (local mode) or to the home directory on the server
- *   (remote mode). Be careful when using relative paths, especially on
- *   Windows the current folder might be not writable by the user!
- *
- *   \return The process folder name as String with trailing slash appended
- *     if not the empty string
- */
-/*======================================================================*/
-  public final String processFolder() {
-    String folder = _processFolderTextField.getText();
-    if (folder.equals("") || folder.endsWith("/")) return folder;
-    return folder + "/";
-  }
-
-  protected final void setProcessFolder(String name) {
-    _processFolderTextField.setText(name);
-  }
-
-  protected final HostConfigurationPanel hostConfiguration() {
-    return _hostConfiguration;
-  }
-
-  public final Session sshSession() {
-    return _sshSession;
-  }
-
-  protected final void setSshSession(Session session) {
-    if (_sshSession == session) return;
-    if (_sshSession != null) _sshSession.disconnect();
-    _sshSession = session;
   }
 
   public final JButton readyCancelButton() {
@@ -299,28 +232,10 @@ public abstract class Job extends Thread {
     _parametersDialog.validate();
   }
 
-  protected String selectedGPUString() {
-    return (String)_useGPUComboBox.getSelectedItem();
-  }
-
-  protected void setGPUString(String gpu) {
-    _useGPUComboBox.setSelectedItem(gpu);
-  }
-
-  public String caffeGPUParameter() {
-    String gpuParm = "";
-    String selectedGPU = selectedGPUString();
-    if (selectedGPU.contains("GPU "))
-        gpuParm = "-gpu " + selectedGPU.substring(selectedGPU.length() - 1);
-    else if (selectedGPU.contains("all")) gpuParm = "-gpu all";
-    return gpuParm;
-  }
-
   protected void processModelSelectionChange() {
     _tilingModeSelectorPanel.removeAll();
     _tilingParametersPanel.removeAll();
     if (model() != null) {
-      _weightsFileTextField.setText(model().weightFile);
       _tilingModeSelectorPanel.add(model().tileModeSelector());
       _tilingModeSelectorPanel.setMinimumSize(
           model().tileModeSelector().getPreferredSize());
@@ -372,54 +287,6 @@ public abstract class Job extends Thread {
     _modelFolderChooseButton.setMargin(insets);
     _modelFolderChooseButton.setToolTipText("Select model definition folder");
 
-    // Weights
-    final JLabel weightsFileLabel = new JLabel("Weight file:");
-    _weightsFileTextField.setToolTipText(
-        "Location of the file containing the trained network weights " +
-        "on the backend server.\nIf not yet on the server, on-the-fly " +
-        "file upload will be offered.");
-    marginTop = (int) Math.ceil(
-        (_weightsFileChooseButton.getPreferredSize().getHeight() -
-         _weightsFileTextField.getPreferredSize().getHeight()) / 2.0);
-    marginBottom = (int) Math.floor(
-        (_weightsFileChooseButton.getPreferredSize().getHeight() -
-         _weightsFileTextField.getPreferredSize().getHeight()) / 2.0);
-    insets = _weightsFileChooseButton.getMargin();
-    insets.top -= marginTop;
-    insets.left = 1;
-    insets.bottom -= marginBottom;
-    insets.right = 1;
-    _weightsFileChooseButton.setMargin(insets);
-    _weightsFileChooseButton.setToolTipText(
-        "Choose the file containing the trained network weights.");
-
-    // Processing environment
-    final JLabel processFolderLabel = new JLabel("Process Folder:");
-    _processFolderTextField.setToolTipText(
-        "Folder for temporary files on the backend server. If left empty, " +
-        "temporary files are written directly to the user's home directory.");
-    marginTop = (int) Math.ceil(
-        (_processFolderChooseButton.getPreferredSize().getHeight() -
-         _processFolderTextField.getPreferredSize().getHeight()) / 2.0);
-    marginBottom = (int) Math.floor(
-        (_processFolderChooseButton.getPreferredSize().getHeight() -
-         _processFolderTextField.getPreferredSize().getHeight()) / 2.0);
-    insets = _processFolderChooseButton.getMargin();
-    insets.top -= marginTop;
-    insets.left = 1;
-    insets.bottom -= marginBottom;
-    insets.right = 1;
-    _processFolderChooseButton.setMargin(insets);
-    _processFolderChooseButton.setToolTipText(
-        "Select the folder to store temporary files.");
-
-    // GPU parameters
-    final JLabel useGPULabel = new JLabel("Use GPU:");
-    _useGPUComboBox.setToolTipText(
-        "Select the GPU id to use. Select CPU if you don't have any " +
-        "CUDA capable GPU available on the compute host. Select " +
-        "<autodetect> to leave the choice to caffe.");
-
     // Create Parameters Panel
     _dialogPanel.setBorder(BorderFactory.createEtchedBorder());
     _dialogLayout = new GroupLayout(_dialogPanel);
@@ -438,9 +305,6 @@ public abstract class Job extends Thread {
                 _dialogLayout.createParallelGroup(
                     GroupLayout.Alignment.TRAILING)
                 .addComponent(modelLabel)
-                .addComponent(weightsFileLabel)
-                .addComponent(processFolderLabel)
-                .addComponent(useGPULabel)
                 .addComponent(_tilingModeSelectorPanel))
             .addGroup(
                 _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
@@ -448,17 +312,7 @@ public abstract class Job extends Thread {
                     _dialogLayout.createSequentialGroup()
                     .addComponent(_modelComboBox)
                     .addComponent(_modelFolderChooseButton))
-                .addGroup(
-                    _dialogLayout.createSequentialGroup()
-                    .addComponent(_weightsFileTextField)
-                    .addComponent(_weightsFileChooseButton))
-                .addGroup(
-                    _dialogLayout.createSequentialGroup()
-                    .addComponent(_processFolderTextField)
-                    .addComponent(_processFolderChooseButton))
-                .addComponent(_useGPUComboBox)
-                .addComponent(_tilingParametersPanel)))
-        .addComponent(_hostConfiguration));
+                .addComponent(_tilingParametersPanel))));
 
     _dialogLayout.setVerticalGroup(
         _verticalDialogLayoutGroup
@@ -468,31 +322,13 @@ public abstract class Job extends Thread {
             .addComponent(_modelComboBox)
             .addComponent(_modelFolderChooseButton))
         .addGroup(
-            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(weightsFileLabel)
-            .addComponent(_weightsFileTextField)
-            .addComponent(_weightsFileChooseButton))
-        .addGroup(
-            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(processFolderLabel)
-            .addComponent(_processFolderTextField)
-            .addComponent(_processFolderChooseButton))
-        .addGroup(
-            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
-            .addComponent(useGPULabel)
-            .addComponent(_useGPUComboBox))
-        .addGroup(
             _dialogLayout.createParallelGroup(GroupLayout.Alignment.CENTER)
             .addComponent(
                 _tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
                 GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)
             .addComponent(
                 _tilingParametersPanel, GroupLayout.PREFERRED_SIZE,
-                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE))
-        .addComponent(_hostConfiguration));
-    _dialogPanel.setMaximumSize(
-        new Dimension(
-            Integer.MAX_VALUE, _dialogPanel.getPreferredSize().height));
+                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)));
 
     // OK/Cancel buttons
     final JPanel okCancelPanel = new JPanel();
@@ -514,6 +350,11 @@ public abstract class Job extends Thread {
 
   // Wire the elements and validate the dialog
   protected void finalizeDialog() {
+
+    _dialogPanel.setMaximumSize(
+        new Dimension(
+            Integer.MAX_VALUE, _dialogPanel.getPreferredSize().height));
+
     /*******************************************************************
      * Wire controls inner to outer before setting values so that
      * value changes trigger all required updates
@@ -553,65 +394,6 @@ public abstract class Job extends Thread {
                           f.getSelectedFile().getParentFile());
           }});
 
-    // WeightsFileTextField affects model.weightFile (not critical)
-    _weightsFileTextField.getDocument().addDocumentListener(
-        new DocumentListener() {
-          @Override
-          public void insertUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
-          }
-          @Override
-          public void removeUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
-          }
-          @Override
-          public void changedUpdate(DocumentEvent e) {
-            if (model() != null)
-                model().weightFile = _weightsFileTextField.getText();
-          }
-        });
-
-    // WeightsFileChooser affects WeightsFileTextField (not critical)
-    _weightsFileChooseButton.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            File startFile = (!_weightsFileTextField.getText().equals("")) ?
-                new File(_weightsFileTextField.getText()) :
-                model().file;
-            JFileChooser f = new JFileChooser(startFile);
-            f.setDialogTitle("Select trained U-Net weights");
-            f.setFileFilter(
-                new FileNameExtensionFilter(
-                    "HDF5 and prototxt files", "h5", "H5",
-                    "prototxt", "PROTOTXT", "caffemodel",
-                    "CAFFEMODEL"));
-            f.setMultiSelectionEnabled(false);
-            f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-            int res = f.showDialog(_parametersDialog, "Select");
-            if (res != JFileChooser.APPROVE_OPTION) return;
-            _weightsFileTextField.setText(
-                f.getSelectedFile().getAbsolutePath());
-          }});
-
-    // ProcessFolderChooser affects ProcessFolderTextField (not critical)
-    _processFolderChooseButton.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            File startFolder = new File(_processFolderTextField.getText());
-            JFileChooser f = new JFileChooser(startFolder);
-            f.setDialogTitle("Select (remote) processing folder");
-            f.setMultiSelectionEnabled(false);
-            f.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            int res = f.showDialog(_parametersDialog, "Select");
-            if (res != JFileChooser.APPROVE_OPTION) return;
-            _processFolderTextField.setText(
-                f.getSelectedFile().getAbsolutePath());
-          }});
-
     _okButton.addActionListener(
         new ActionListener() {
           @Override
@@ -639,9 +421,6 @@ public abstract class Job extends Thread {
     searchModels(
         new File(Prefs.get("unet.modelDefinitionFolder", ".")));
 
-    // Set uncritical fields
-    _useGPUComboBox.setSelectedItem(Prefs.get("unet.gpuId", "none"));
-
     // Free all resources and make isDisplayable() return false to
     // distinguish dialog close from accept
     _parametersDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -659,115 +438,33 @@ public abstract class Job extends Thread {
     finalizeDialog();
   }
 
-  public boolean checkParameters() throws InterruptedException {
-
-    Prefs.set("unet.processfolder", processFolder());
-    Prefs.set("unet.gpuId", selectedGPUString());
+  protected boolean checkParameters() throws InterruptedException {
 
     if (!model().isValid()) {
-      IJ.showMessage("Please select a model. Probably you first need " +
-                     "to select a folder containing models.");
+      showMessage("Please select a model. Probably you first need " +
+                  "to select a folder containing models.");
       return false;
     }
 
     Prefs.set("unet.modelId", model().id);
     model().savePreferences();
 
-    if (_weightsFileTextField.getText() == "") {
-      IJ.showMessage("Please enter the (remote) path to the weights file.");
-      return false;
-    }
-
-    try {
-      _sshSession = _hostConfiguration.sshSession();
-    }
-    catch (JSchException e) {
-      if (_hostConfiguration.hostname() == null) {
-        IJ.log("No hostname specified");
-        IJ.showMessage("Please enter the server name for remote processing.");
-      }
-      else
-      {
-        IJ.log("SSH connection to '" + _hostConfiguration.hostname() +
-               "' failed: " + e);
-        IJ.showMessage(
-            "Could not connect to remote host '" +
-            _hostConfiguration.hostname() +
-            "'\nPlease check your login credentials.\n" + e);
-      }
-      return false;
-    }
-
-    if (sshSession() != null) {
-      try {
-        File tmpFile = File.createTempFile(id(), null);
-        SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
-        _createdRemoteFolders.addAll(
-            sftp.put(tmpFile, processFolder() + tmpFile.getName()));
-        sftp.removeFile(processFolder() + tmpFile.getName());
-        tmpFile.delete();
-      }
-      catch (IOException e) {
-        IJ.log("Creation of local temporary file failed.");
-        IJ.error("Cannot create files in the temporary folder of your " +
-                 "local file system.\n" +
-                 "Check write permissions and avaliable disk space.");
-        return false;
-      }
-      catch (JSchException e) {
-        IJ.log("SSH connection failed.");
-        IJ.error("The SSH session has been prematurely disconnected.\n" +
-                 "This should not happen and indicates general network " +
-                 "problems.");
-        return false;
-      }
-      catch (SftpException e) {
-        IJ.log("Sftp transfer failed.");
-        IJ.error("File upload to " + processFolder() + " failed.\n" +
-                 "Please select a folder with write permissions.");
-        return false;
-      }
-    }
-    else {
-      try {
-        File tmpFile = new File(processFolder() + id() + ".tmp");
-        tmpFile.createNewFile();
-        tmpFile.delete();
-      }
-      catch (IOException e) {
-        IJ.log("Could not write to " + processFolder());
-        IJ.error("Cannot write to " + processFolder() + ".\n" +
-                 "Check write permissions and avaliable disk space.");
-        return false;
-      }
-    }
-
     return true;
   }
 
   public void cleanUp() {
-    for (int i = 0; i < _createdRemoteFiles.size(); i++) {
-      try {
-        new SftpFileIO(_sshSession, progressMonitor()).removeFile(
-            _createdRemoteFiles.get(i));
-      }
-      catch (Exception e) {
-        IJ.log("Could not remove temporary file " +
-               _createdRemoteFiles.get(i) + ": " + e);
-      }
-    }
-    for (int i = 0; i < _createdRemoteFolders.size(); i++) {
-      try {
-        new SftpFileIO(_sshSession, progressMonitor()).removeFolder(
-            _createdRemoteFolders.get(i));
-      }
-      catch (Exception e) {
-        IJ.log("Could not remove temporary folder " +
-               _createdRemoteFolders.get(i) + ": " + e);
-      }
-    }
-    if (_sshSession != null) _sshSession.disconnect();
     if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+  }
+
+  public final void showMessage(String msg) {
+    IJ.log(msg);
+    IJ.showMessage(msg);
+  }
+
+  public final void showError(String msg, Exception e) {
+    IJ.log(msg);
+    if (e != null) IJ.log("Error message: " + e);
+    IJ.error(msg);
   }
 
 };
