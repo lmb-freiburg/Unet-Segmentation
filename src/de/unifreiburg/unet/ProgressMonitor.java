@@ -132,12 +132,13 @@ public class ProgressMonitor implements SftpProgressMonitor {
     }
 
     private float totalProgress(float p) {
-      if (_parent == null) return p * (_pMax - _pMin) + _pMin;
-      return _parent.progress(p);
+      float pp = p * (_pMax - _pMin) + _pMin;
+      if (_parent == null) return pp;
+      return _parent.totalProgress(pp);
     }
 
     public float totalProgress() {
-      return totalProgress(progress());
+      return totalProgress((_max != 0) ? (float)_count / (float)_max : 0.0f);
     }
 
   }
@@ -228,17 +229,16 @@ public class ProgressMonitor implements SftpProgressMonitor {
   }
 
   public float taskProgress() {
-    return (_currentTask != null) ? _currentTask.progress() : 1;
+    return (_currentTask != null) ? _currentTask.progress() : 1.0f;
   }
 
   public float progress() {
-    return (_currentTask != null) ? _currentTask.totalProgress() : 1;
+    return (_currentTask != null) ? _currentTask.totalProgress() : 1.0f;
   }
 
   public void update() {
     update(false);
   }
-
 
   public void update(boolean immediate) {
     // If current percentage was already reported, do not show new progress
@@ -253,8 +253,8 @@ public class ProgressMonitor implements SftpProgressMonitor {
       SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
-              _job.jobTable().updateJobStatus(_job.id());
-              _job.jobTable().updateJobProgress(_job.id());
+              _job.jobTable().updateJobStatus(_job);
+              _job.jobTable().updateJobProgress(_job);
             }});
     }
     else {

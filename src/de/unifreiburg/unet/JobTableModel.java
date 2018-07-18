@@ -109,13 +109,11 @@ public class JobTableModel extends AbstractTableModel {
   }
 
   public void deleteJob(Job job) {
-    if (job == null) return;
-    int jobIdx = 0;
-    while (jobIdx < _jobs.size() && _jobs.get(jobIdx) != job) ++jobIdx;
-    if (jobIdx == _jobs.size()) return;
-    if (_jobs.get(jobIdx).isAlive()) _jobs.get(jobIdx).interrupt();
-    _jobs.remove(jobIdx);
-    fireTableRowsDeleted(jobIdx, jobIdx);
+    int row = getRow(job);
+    if (row < 0) return;
+    if (_jobs.get(row).isAlive()) _jobs.get(row).interrupt();
+    _jobs.remove(row);
+    fireTableRowsDeleted(row, row);
   }
 
   public void createSegmentationJob() {
@@ -140,52 +138,44 @@ public class JobTableModel extends AbstractTableModel {
     fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
   }
 
+  public Job job(int row) {
+    if (row >= _jobs.size()) return null;
+    return _jobs.get(row);
+  }
+
   public Job job(String jobId) {
-    int jobIdx = 0;
-    while (jobIdx < _jobs.size() && !_jobs.get(jobIdx).id().equals(jobId))
-        ++jobIdx;
-    if (jobIdx == _jobs.size()) return null;
-    return _jobs.get(jobIdx);
+    int row = getRow(jobId);
+    return (row >= 0) ? _jobs.get(row) : null;
   }
 
-  public void updateJobStatus(String jobId) {
-    int jobIdx = 0;
-    while (jobIdx < _jobs.size() && !_jobs.get(jobIdx).id().equals(jobId))
-        ++jobIdx;
-    if (jobIdx == _jobs.size()) return;
-    fireTableCellUpdated(jobIdx, 5);
+  public void updateJobStatus(Job job) {
+    int row = getRow(job);
+    if (row >= 0) fireTableCellUpdated(row, 5);
   }
 
-  public void updateJobProgress(String jobId) {
-    int jobIdx = 0;
-    while (jobIdx < _jobs.size() && !_jobs.get(jobIdx).id().equals(jobId))
-        ++jobIdx;
-    if (jobIdx == _jobs.size()) return;
-    fireTableCellUpdated(jobIdx, 6);
+  public void updateJobProgress(Job job) {
+    int row = getRow(job);
+    if (row >= 0) fireTableCellUpdated(row, 6);
   }
 
   public void updateJobDownloadEnabled(String jobId) {
-    int jobIdx = 0;
-    while (jobIdx < _jobs.size() && !_jobs.get(jobIdx).id().equals(jobId))
-        ++jobIdx;
-    if (jobIdx == _jobs.size()) return;
-    fireTableCellUpdated(jobIdx, 7);
+    int row = getRow(jobId);
+    if (row >= 0) fireTableCellUpdated(row, 7);
   }
 
-  public void cancelJob(String jobId) {
-    int jobIdx = 0;
-    while (jobIdx < _jobs.size() && !_jobs.get(jobIdx).id().equals(jobId))
-        ++jobIdx;
-    if (jobIdx == _jobs.size()) return;
-    if (_jobs.get(jobIdx).isAlive()) _jobs.get(jobIdx).interrupt();
+  private int getRow(Job job) {
+    if (job == null) return -1;
+    int row = 0;
+    while (row < _jobs.size() && _jobs.get(row) != job) ++row;
+    if (row == _jobs.size()) return -1;
+    return row;
   }
 
-  public void showAndDequeueJob(String jobId) {
-    int jobIdx = 0;
-    while (jobIdx < _jobs.size() && !_jobs.get(jobIdx).id().equals(jobId))
-        ++jobIdx;
-    if (jobIdx == _jobs.size()) return;
-    _jobs.get(jobIdx).finish();
+  private int getRow(String jobId) {
+    int row = 0;
+    while (row < _jobs.size() && !_jobs.get(row).id().equals(jobId)) ++row;
+    if (row == _jobs.size()) return -1;
+    return row;
   }
 
 };

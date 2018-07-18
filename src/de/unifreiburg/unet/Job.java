@@ -42,6 +42,8 @@ import java.awt.event.ItemListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseEvent;
 import javax.swing.JPanel;
 import javax.swing.JDialog;
 import javax.swing.Icon;
@@ -95,11 +97,22 @@ public abstract class Job extends Thread {
   public Job() {
     _jobTableModel = null;
     _progressMonitor = new ProgressMonitor(this);
+    wireReadyCancelButton();
   }
 
   public Job(JobTableModel model) {
     _jobTableModel = model;
     _progressMonitor = new ProgressMonitor(this);
+    wireReadyCancelButton();
+  }
+
+  private void wireReadyCancelButton() {
+    _readyCancelButton.addActionListener(new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            if (ready()) finish();
+            else if (isAlive()) interrupt();
+          }});
   }
 
   public String weightsFileName() {

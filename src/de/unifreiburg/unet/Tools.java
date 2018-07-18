@@ -993,7 +993,7 @@ public class Tools {
 
     double elSize[] = getElementSizeUmFromCalibration(imp.getCalibration(), 2);
 
-    if (pr != null) pr.init(0, "", "", imp.getImageStackSize());
+    if (pr != null) pr.init(imp.getImageStackSize());
 
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
@@ -1034,7 +1034,7 @@ public class Tools {
 
     double[] elSize = getElementSizeUmFromCalibration(imp.getCalibration(), 3);
 
-    if (pr != null) pr.init(0, "", "", imp.getImageStackSize());
+    if (pr != null) pr.init(imp.getImageStackSize());
 
     writer.float32().createMDArray(
         dsName, dims, blockDims, HDF5FloatStorageFeatures.createDeflation(3));
@@ -1078,6 +1078,7 @@ public class Tools {
       boolean show)
       throws IOException, InterruptedException, NotImplementedException,
       BlobException {
+
     if (model == null) {
       IJ.error("Cannot save HDF5 blob without associated U-Net model");
       throw new InterruptedException("No U-Net model");
@@ -1097,20 +1098,24 @@ public class Tools {
            imp.getCalibration().pixelWidth + "]");
 
     boolean genLabels = generateLabelBlobs && imp.getOverlay() != null;
+
     if (pr != null)
         pr.push("Converting data blob", 0.0f, genLabels ? 0.05f : 0.8f);
+
     ImagePlus impScaled =
         convertToUnetFormat(imp, model, pr, keepOriginal, show);
-    if (pr != null) pr.pop();
+
+    if (pr != null) {
+      pr.pop();
+      pr.push("Saving data blob", genLabels ? 0.05f : 0.8f,
+              genLabels ? 0.1f : 1.0f);
+    }
 
     // Recursively create parent folders
     createFolder(outFile.getParentFile(), true);
 
     // syncMode: Always wait on close and flush till all data is written!
     // useSimpleDataSpace: Save attributes as plain vectors
-    if (pr != null)
-        pr.push("Saving data blob", genLabels ? 0.05f : 0.8f,
-                genLabels ? 0.1f : 1.0f);
     IHDF5Writer writer =
         HDF5Factory.configure(outFile.getAbsolutePath()).syncMode(
             IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
@@ -1122,8 +1127,14 @@ public class Tools {
     if (pr != null) pr.pop();
 
     if (genLabels) {
-      if (pr != null) pr.push("Generating label and weight blobs", 0.1f, 1.0f);
+      if (pr != null) pr.push("Generating label and weight blobs", 0.1f, 0.9f);
+
       ImagePlus[] blobs = convertAnnotationsToLabelsAndWeights(imp, model, pr);
+
+      if (pr != null) {
+        pr.pop();
+        pr.push("Saving labels and weight blobs", 0.9f, 1.0f);
+      }
 
       if (model.nDims() == 2) {
         save2DBlob(blobs[0], writer, "labels", pr);

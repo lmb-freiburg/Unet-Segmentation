@@ -842,9 +842,9 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         progressMonitor().push("Downloading segmentation", 0.9f, 1.0f);
 
         sftp.get(remoteFileName, _localTmpFile);
-     }
+      }
       else {
-        progressMonitor().push("Creating HDF5 blobs", 0.01f, 0.1f);
+        progressMonitor().push("Creating HDF5 blobs", 0.0f, 0.1f);
 
         _localTmpFile = new File(processFolder() + id() + ".h5");
         setImagePlus(
