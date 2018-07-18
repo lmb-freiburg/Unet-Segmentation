@@ -193,7 +193,7 @@ public class JobManager extends PlugInFrame {
     _instance.setVisible(true);
   }
 
-};
+}
 
 class ProgressCellRenderer extends JProgressBar implements TableCellRenderer {
 
@@ -219,7 +219,7 @@ class ProgressCellRenderer extends JProgressBar implements TableCellRenderer {
     return this;
   }
 
-};
+}
 
 class ComponentCellRenderer implements TableCellRenderer {
 
@@ -230,7 +230,7 @@ class ComponentCellRenderer implements TableCellRenderer {
     if (value instanceof Component) return (Component)value;
     return null;
   }
-};
+}
 
 class JTableButtonMouseListener implements MouseListener {
   private JTable _table;
@@ -262,7 +262,7 @@ class JTableButtonMouseListener implements MouseListener {
     button.dispatchEvent(buttonEvent);
 
     // This is necessary so that when a button is pressed and released
-    // it gets rendered properly.  Otherwise, the button may still appear
+    // it gets rendered properly. Otherwise, the button may still appear
     // pressed down when it has been released.
     _table.repaint();
 
@@ -301,4 +301,4 @@ class JTableButtonMouseListener implements MouseListener {
     _forwardEventToButton(e);
   }
 
-};
+}

@@ -41,14 +41,10 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/SftpFileIO.java
   src/de/unifreiburg/unet/Job.java
   src/de/unifreiburg/unet/CreateBlobsJob.java
-  src/de/unifreiburg/unet/CreateBlobsWithRoisJob.java
-  src/de/unifreiburg/unet/CreateBlobsWithImagePairsJob.java
   src/de/unifreiburg/unet/CaffeJob.java
   src/de/unifreiburg/unet/SegmentationJob.java
   src/de/unifreiburg/unet/DetectionJob.java
   src/de/unifreiburg/unet/FinetuneJob.java
-  src/de/unifreiburg/unet/FinetuneWithRoisJob.java
-  src/de/unifreiburg/unet/FinetuneWithImagePairsJob.java
   src/de/unifreiburg/unet/TrainImagePair.java
   src/de/unifreiburg/unet/TrainImagePairListView.java
   src/de/unifreiburg/unet/TrainImagePairException.java
@@ -59,8 +55,11 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/ProcessResult.java
   src/de/unifreiburg/unet/ImagePlusListView.java
   src/de/unifreiburg/unet/NotImplementedException.java
+  src/de/unifreiburg/unet/IncompatibleImagesException.java
   src/de/unifreiburg/unet/DistanceTransform.java
   src/de/unifreiburg/unet/ConnectedComponentLabeling.java
+  src/de/unifreiburg/unet/MaskEmbedder.java
+  src/de/unifreiburg/unet/MaskExtractor.java
   src/de/unifreiburg/unet/Pair.java
   src/de/unifreiburg/unet/BlobException.java
   src/de/unifreiburg/unet/Blob.java

@@ -124,7 +124,7 @@ public class Tools {
     if (imp.getBitDepth() == 32) return imp;
 
     if (pr != null) {
-      pr.init(0, "", "", imp.getImageStackSize());
+      pr.init(imp.getImageStackSize());
       pr.count("Converting hyperstack to float", 0);
     }
     ImagePlus out = IJ.createHyperStack(
@@ -162,20 +162,15 @@ public class Tools {
       ImagePlus imp, ModelDefinition model, ProgressMonitor pr)
       throws InterruptedException {
     if (model.nDims() == 3 || imp.getNSlices() == 1) return imp;
-    if (!IJ.showMessageWithCancel(
-            "2-D model selected", "The selected model " +
-            "requires 2-D Input.\n" +
-            "Applying 2-D segmentation to all slices."))
-        throw new InterruptedException();
-
     ImagePlus out = IJ.createHyperStack(
         imp.getTitle() + " - reordered", imp.getWidth(), imp.getHeight(),
-        imp.getNChannels(), 1, imp.getNSlices() * imp.getNFrames(), 32);
+        imp.getNChannels(), 1, imp.getNSlices() * imp.getNFrames(),
+        imp.getBitDepth());
     Calibration cal = imp.getCalibration().copy();
     cal.pixelDepth = 1;
     out.setCalibration(cal);
     if (pr != null) {
-      pr.init(0, "", "", imp.getImageStackSize());
+      pr.init(imp.getImageStackSize());
       pr.count("Fixing stack layout", 0);
     }
     for (int i = 1; i <= imp.getImageStackSize(); ++i) {
@@ -207,7 +202,7 @@ public class Tools {
     if (scales[0] == 1 && scales[1] == 1) return imp;
 
     if (pr != null) {
-      pr.init(0, "", "", imp.getImageStackSize());
+      pr.init(imp.getImageStackSize());
       pr.count("Rescaling hyperstack (xy)", 0);
     }
     IJ.log("Rescaling Hyperstack (xy) from (" +
@@ -286,7 +281,7 @@ public class Tools {
         (int)Math.round(imp.getNSlices() * scale), imp.getNFrames(), 32);
     out.setCalibration(cal);
     if (pr != null) {
-      pr.init(0, "", "", imp.getImageStackSize());
+      pr.init(imp.getImageStackSize());
       pr.count("Rescaling hyperstack (z)", 0);
     }
     IJ.log("Rescaling Hyperstack (z) from (" +
@@ -360,7 +355,7 @@ public class Tools {
 
     long nSteps = 2 * imp.getStackSize();
     if (model.normalizationType == 2) nSteps += imp.getStackSize();
-    if (pr != null) pr.init(0, "", "", nSteps);
+    if (pr != null) pr.init(nSteps);
 
     for (int t = 1; t <= imp.getNFrames(); ++t) {
       switch (model.normalizationType) {
@@ -508,14 +503,34 @@ public class Tools {
   public static ImagePlus convertToUnetFormat(
       ImagePlus imp, ModelDefinition model, ProgressMonitor pr,
       boolean keepOriginal, boolean show) throws InterruptedException {
-    ImagePlus out = normalizeValues(
-        rescaleZ(
-            rescaleXY(
-                fixStackLayout(
-                    convertToFloat(makeComposite(imp, pr), pr), model, pr),
-                ImageProcessor.BILINEAR, model, pr),
-            ImageProcessor.BILINEAR, model, pr), model, pr);
-
+    if (pr != null) pr.push("Convert to composite", 0.0f, 0.05f);
+    ImagePlus out = makeComposite(imp, pr);
+    if (pr != null) {
+      pr.pop();
+      pr.push("Convert to 32-Bit float", 0.05f, 0.1f);
+    }
+    out = convertToFloat(out, pr);
+    if (pr != null) {
+      pr.pop();
+      pr.push("Fix stack layout", 0.1f, 0.15f);
+    }
+    out = fixStackLayout(out, model, pr);
+    if (pr != null) {
+      pr.pop();
+      pr.push("Rescale (xy)", 0.1f, 0.6f);
+    }
+    out = rescaleXY(out, ImageProcessor.BILINEAR, model, pr);
+    if (pr != null) {
+      pr.pop();
+      pr.push("Rescale (z)", 0.6f, 0.8f);
+    }
+    out = rescaleZ(out, ImageProcessor.BILINEAR, model, pr);
+    if (pr != null) {
+      pr.pop();
+      pr.push("Normalize values", 0.8f, 1.0f);
+    }
+    out = normalizeValues(out, model, pr);
+    if (pr != null) pr.pop();
     if (imp != out) {
       if (!keepOriginal) {
         imp.changes = false;
@@ -764,7 +779,6 @@ public class Tools {
     ImagePlus[] blobs = new ImagePlus[] {
         fixStackLayout(imp, model, pr), null, null };
     int T = blobs[0].getNFrames();
-
     int Ds = (int)Math.round(blobs[0].getNSlices() * scaleZ);
     double[] elementSizeUm = Arrays.copyOf(elSizeData, model.nDims());
     if (model.nDims() == 3) elementSizeUm[0] = elSizeModel[0];
@@ -815,12 +829,27 @@ public class Tools {
         ipClass.setValue(1);
         ipClass.fill();
         for (Roi roi : rois) {
-          int zRoi = Math.max(
-              1, (int)Math.round(roi.getZPosition() * scaleZ)) - 1;
-          int tRoi = Math.max(1, roi.getTPosition()) - 1;
+          int tRoi = 1;
+          int zRoi = 1;
+          if (roi.getPosition() != 0)
+          {
+            int[] pos = imp.convertIndexToPosition(roi.getPosition());
+            tRoi = pos[2];
+            zRoi = pos[1];
+          }
+          else {
+            if (roi.getTPosition() != 0) tRoi = roi.getTPosition();
+            if (roi.getZPosition() != 0) zRoi = roi.getZPosition();
+          }
+          if (Ds == 1) {
+            zRoi = 1;
+            tRoi = (tRoi - 1) * imp.getNSlices() + zRoi;
+          }
+          else zRoi = (int)Math.round((zRoi - 1) * scaleZ) + 1;
 
           // Only process area rois in the current slice
-          if (roi instanceof PointRoi || zRoi != z || tRoi != t) continue;
+          if (roi instanceof PointRoi || zRoi != z + 1 || tRoi != t + 1)
+              continue;
 
           RoiLabel rl = parseROIName(roi.getName());
           if (rl.className.toLowerCase().equals("ignore")) ipClass.setValue(0);
@@ -1067,14 +1096,21 @@ public class Tools {
            imp.getCalibration().pixelHeight + ", " +
            imp.getCalibration().pixelWidth + "]");
 
+    boolean genLabels = generateLabelBlobs && imp.getOverlay() != null;
+    if (pr != null)
+        pr.push("Converting data blob", 0.0f, genLabels ? 0.05f : 0.8f);
     ImagePlus impScaled =
         convertToUnetFormat(imp, model, pr, keepOriginal, show);
+    if (pr != null) pr.pop();
 
     // Recursively create parent folders
     createFolder(outFile.getParentFile(), true);
 
     // syncMode: Always wait on close and flush till all data is written!
     // useSimpleDataSpace: Save attributes as plain vectors
+    if (pr != null)
+        pr.push("Saving data blob", genLabels ? 0.05f : 0.8f,
+                genLabels ? 0.1f : 1.0f);
     IHDF5Writer writer =
         HDF5Factory.configure(outFile.getAbsolutePath()).syncMode(
             IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
@@ -1083,8 +1119,10 @@ public class Tools {
 
     if (model.nDims() == 2) save2DBlob(impScaled, writer, dsName, pr);
     else save3DBlob(impScaled, writer, dsName, pr);
+    if (pr != null) pr.pop();
 
-    if (generateLabelBlobs && imp.getOverlay() != null) {
+    if (genLabels) {
+      if (pr != null) pr.push("Generating label and weight blobs", 0.1f, 1.0f);
       ImagePlus[] blobs = convertAnnotationsToLabelsAndWeights(imp, model, pr);
 
       if (model.nDims() == 2) {
@@ -1097,6 +1135,7 @@ public class Tools {
         save3DBlob(blobs[1], writer, "weights", pr);
         save3DBlob(blobs[2], writer, "weights2", pr);
       }
+      if (pr != null) pr.pop();
     }
 
     writer.file().close();
@@ -1127,10 +1166,19 @@ public class Tools {
            imp.getCalibration().pixelHeight + ", " +
            imp.getCalibration().pixelWidth + "]");
 
+    if (pr != null) {
+      if (imp.getOverlay() != null) pr.push("Converting data", 0.0f, 0.1f);
+      else pr.push("Converting data", 0.0f, 0.3f);
+    }
     ImagePlus data = convertToUnetFormat(imp, model, pr, true, false);
+    if (pr != null) pr.pop();
+
     ImagePlus[] annotations = null;
-    if (imp.getOverlay() != null)
-        annotations = convertAnnotationsToLabelsAndWeights(imp, model, pr);
+    if (imp.getOverlay() != null) {
+      if (pr != null) pr.push("Converting annotations", 0.1f, 0.8f);
+      annotations = convertAnnotationsToLabelsAndWeights(imp, model, pr);
+      if (pr != null) pr.pop();
+    }
 
     int T = data.getNFrames();
     int Z = data.getNSlices();
@@ -1180,18 +1228,27 @@ public class Tools {
         imp.getTitle() + " - weightsTile",
         outShape[1], outShape[0], 1, Z, T, 32);
 
-    if (pr != null) pr.init(0, "", "", nTiles);
+    if (pr != null)
+        pr.push("Tiling", (annotations == null) ? 0.3f : 0.8f, 1.0f);
 
     int tileIdx = 0;
     if (outShape.length == 2) {
       for (int yIdx = 0; yIdx < tiling[0]; yIdx++) {
         for (int xIdx = 0; xIdx < tiling[1]; xIdx++, tileIdx++) {
 
-          if (pr != null &&
-              !pr.count("Processing tile (" + yIdx + "," + xIdx + ")", 1))
-              throw new InterruptedException();
+          if (pr != null) {
+            pr.push(
+                "Processing tile (" + yIdx + "," + xIdx + ")",
+                (float)tileIdx / (float)nTiles, (float)(tileIdx + 1) /
+                (float)nTiles);
+            pr.push(
+                "Extracting tile (" + yIdx + "," + xIdx + ")", 0.0f, 0.5f);
+            pr.init((long)T);
+          }
 
           for (int t = 0; t < T; t++) {
+
+            if (pr != null && pr.canceled()) throw new InterruptedException();
 
             // Copy data tile for sample t
             for (int c = 0; c < C; c++) {
@@ -1244,8 +1301,13 @@ public class Tools {
                     ipWeightsIn.getf(xR, yR) : 0.0f);
               }
             }
+            if (pr != null) pr.count(1);
           }
-          if (pr != null && pr.canceled()) throw new InterruptedException();
+
+          if (pr != null) {
+            pr.pop(); // Extract tile
+            pr.push("Saving tile (" + yIdx + "," + xIdx + ")", 0.5f, 1.0f);
+          }
 
           // Save tile
           File outFile = null;
@@ -1267,13 +1329,18 @@ public class Tools {
 
           outfiles[tileIdx] = outFile;
 
-          if (pr != null && pr.canceled()) throw new InterruptedException();
+          if (pr != null) {
+            pr.pop(); // Save tile
+            pr.pop(); // Process tile
+            if (pr.canceled()) throw new InterruptedException();
+          }
         }
       }
     }
     else {
       throw new NotImplementedException("3D from ROI not implemented");
     }
+    if (pr != null) pr.pop(); // Tiling
 
     return outfiles;
   }

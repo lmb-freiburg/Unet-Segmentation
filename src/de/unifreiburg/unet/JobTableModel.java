@@ -127,35 +127,7 @@ public class JobTableModel extends AbstractTableModel {
   }
 
   public void createFinetuneJob() {
-    // Some auto-magical heuristics to reduce to one button:
-    // All open images contain overlays ==> start a new FinetuneJob
-    // No open image contains overlays ==> start a new FinetuneWithImagePairsJob
-    // Mixed: Ask the user what kind of job he wants to start
-    if (WindowManager.getIDList().length == 0) {
-      IJ.noImage();
-      return;
-    }
-    boolean allImagesContainOverlays = true;
-    boolean noImageContainsOverlays = true;
-    for (int id : WindowManager.getIDList()) {
-      boolean containsOverlay = WindowManager.getImage(id).getOverlay() != null;
-      allImagesContainOverlays &= containsOverlay;
-      noImageContainsOverlays &= !containsOverlay;
-    }
-    if (allImagesContainOverlays)
-        startJob(new FinetuneWithRoisJob(this));
-    else if (noImageContainsOverlays)
-        startJob(new FinetuneWithImagePairsJob(this));
-    else {
-      Object[] possibleValues = { "Finetune from ROIs", "Finetune from masks" };
-      Object selectedValue = JOptionPane.showInputDialog(
-          null, "Choose the type of label information you want to use for " +
-          "finetuning", "Input", JOptionPane.INFORMATION_MESSAGE, null,
-          possibleValues, possibleValues[0]);
-      if (selectedValue == possibleValues[0])
-          startJob(new FinetuneWithRoisJob(this));
-      else startJob(new FinetuneWithImagePairsJob(this));
-    }
+    startJob(new FinetuneJob(this));
   }
 
   private void startJob(Job job) {

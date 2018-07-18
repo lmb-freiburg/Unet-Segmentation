@@ -177,8 +177,7 @@ public class DistanceTransform implements PlugIn {
     int H = imp.getHeight();
     int W = imp.getWidth();
 
-    if (pr != null && pr.getMax() == 0)
-        pr.init(0, "", "", 4 * T * C * D + ((D > 1) ? T * C * H : 0));
+    if (pr != null) pr.init(4 * T * C * D + ((D > 1) ? T * C * H : 0));
 
     Calibration cal = imp.getCalibration();
     double factor = 1.0;
@@ -344,9 +343,8 @@ public class DistanceTransform implements PlugIn {
         dataBlob.shape()[dataBlob.nDims() - 2] : 1;
     int W = dataBlob.shape()[dataBlob.nDims() - 1];
 
-    if (pr != null && pr.getMax() == 0)
-        pr.init(0, "", "",
-                3 * N * D + ((H > 1) ? N * D : 0) + ((D > 1) ? N * H : 0));
+    if (pr != null)
+        pr.init(3 * N * D + ((H > 1) ? N * D : 0) + ((D > 1) ? N * H : 0));
 
     FloatBlob dtBlob = new FloatBlob(
         dataBlob.shape(), dataBlob.elementSizeUm());
@@ -447,11 +445,12 @@ public class DistanceTransform implements PlugIn {
     try
     {
       ProgressMonitor pr = new ProgressMonitor(null);
-      pr.initNewTask("Distance transform", 1.0f, 0);
+      pr.push("Distance transform", 0.0f, 1.0f);
       ImagePlus res = getDistance(
           imp, 255, Mode.DISTANCE_TO_FOREGROUND,
           false, pr).convertToImagePlus();
       res.setTitle(imp.getTitle() + " - Euclidean Distance Transform");
+      pr.end();
       res.show();
     }
     catch(BlobException e)

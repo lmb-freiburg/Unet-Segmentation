@@ -382,21 +382,24 @@ public abstract class CaffeJob extends Job {
     Prefs.set("unet.processfolder", processFolder());
     Prefs.set("unet.gpuId", selectedGPUString());
 
-    if (_hostConfiguration.hostname() == null) {
-      showMessage(
-          "No hostname specified\n" +
-          "Please enter the server name for remote processing.");
-      return false;
-    }
+    if (_hostConfiguration.useRemoteHost()) {
+      if (_hostConfiguration.hostname() == null) {
+        showMessage(
+            "No hostname specified\n" +
+            "Please enter the server name for remote processing.");
+        return false;
+      }
 
-    try {
-      _sshSession = _hostConfiguration.sshSession();
-    }
-    catch (JSchException e) {
-      showError(
-          "Could not connect to remote host '" + _hostConfiguration.hostname() +
-          "'\nPlease check your login credentials.", e);
-      return false;
+      try {
+        _sshSession = _hostConfiguration.sshSession();
+      }
+      catch (JSchException e) {
+        showError(
+            "Could not connect to remote host '" +
+            _hostConfiguration.hostname() +
+            "'\nPlease check your login credentials.", e);
+        return false;
+      }
     }
 
     if (sshSession() != null) {

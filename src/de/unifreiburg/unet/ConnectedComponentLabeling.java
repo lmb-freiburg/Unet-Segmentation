@@ -151,7 +151,7 @@ public class ConnectedComponentLabeling implements PlugIn {
     int H = imp.getHeight();
     int W = imp.getWidth();
 
-    if (pr != null && pr.getMax() == 0) pr.init(0, "", "", 2 * T * C * D);
+    if (pr != null) pr.init(2 * T * C * D);
 
     // Prepare upper left half of neighborhood (rest is not needed)
     int[] dx = null, dy = null, dz = null;
@@ -311,10 +311,11 @@ public class ConnectedComponentLabeling implements PlugIn {
     try
     {
       ProgressMonitor pr = new ProgressMonitor(null);
-      pr.initNewTask("Connected component labeling", 1.0f, 0);
+      pr.push("Connected component labeling", 0.0f, 1.0f);
       ImagePlus res = label(
           imp, COMPLEX_NEIGHBORHOOD, pr).labels.convertToImagePlus();
       res.setTitle(imp.getTitle() + " - Connected Components");
+      pr.end();
       res.show();
     }
     catch(BlobException e)

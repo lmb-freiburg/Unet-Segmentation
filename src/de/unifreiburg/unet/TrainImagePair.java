@@ -156,21 +156,22 @@ public class TrainImagePair
       IJ.error("Cannot convert blob without associated U-Net model");
       throw new InterruptedException("No Model");
     }
-    if (model.elementSizeUm().length > elementSizeUm.length)
+    if (model.nDims() > elementSizeUm.length)
         throw new NotImplementedException(
             "Cannot process " + elementSizeUm.length + "-D images using a " +
-            model.elementSizeUm().length + "-D model.");
+            model.nDims() + "-D model.");
 
-    if (model.elementSizeUm().length < elementSizeUm.length) {
-      IJ.log("Warning: Model is " + model.elementSizeUm().length +
-             "-D, data is " + elementSizeUm.length +
-             "-D. Data will be treated as " + model.elementSizeUm().length +
-             "-D");
-      double[] elSize = new double[model.elementSizeUm().length];
-      for (int d = 0; d < model.elementSizeUm().length; ++d)
-          elSize[d] = elementSizeUm[d];
+    if (model.nDims() < elementSizeUm.length) {
+      IJ.log("Warning: Model is " + model.nDims() + "-D, data is " +
+             elementSizeUm.length + "-D. Data will be treated as " +
+             model.nDims() + "-D");
+      double[] elSize = new double[model.nDims()];
+      for (int d = 0; d < model.nDims(); ++d)
+          elSize[d] = elementSizeUm[d + (elementSizeUm.length - model.nDims())];
       elementSizeUm = elSize;
     }
+
+    if (pr != null) pr.count("Converting " + rawdata().getTitle(), 0);
 
     data = Tools.normalizeValues(
         Tools.rescaleZ(
@@ -181,16 +182,17 @@ public class TrainImagePair
                 ImageProcessor.BILINEAR, model, pr),
             ImageProcessor.BILINEAR, model, pr), model, pr);
 
-    labels = Tools.fixStackLayout(rawlabels, model, pr);
+    if (pr != null) pr.count("Converting " + rawlabels().getTitle(), 0);
 
-    int T = labels.getNFrames();
-    int D = labels.getNSlices();
-    int W = labels.getWidth();
-    int H = labels.getHeight();
+    ImagePlus impLabels = Tools.fixStackLayout(rawlabels, model, pr);
+
+    int T = impLabels.getNFrames();
+    int D = impLabels.getNSlices();
+    int W = impLabels.getWidth();
+    int H = impLabels.getHeight();
+    int[] blobShape = (D == 1) ? new int[] { H, W } : new int[] { D, H, W };
 
     for (int t = 0; t < T; ++t) {
-
-      int[] blobShape = (D == 1) ? new int[] { H, W } : new int[] { D, H, W };
 
       ConnectedComponentLabeling.ConnectedComponents instancelabels = null;
       IntBlob classlabels = new IntBlob(blobShape, elementSizeUm);
@@ -207,8 +209,8 @@ public class TrainImagePair
         int nextLabel = 1;
         int idx = 0;
         for (int z = 0; z < D; ++z) {
-          ImageProcessor ipIn = labels.getStack().getProcessor(
-              labels.getStackIndex(1, z + 1, t + 1));
+          ImageProcessor ipIn = impLabels.getStack().getProcessor(
+              impLabels.getStackIndex(1, z + 1, t + 1));
           for (int y = 0; y < H; ++y) {
             for (int x = 0; x < W; ++x, ++idx) {
               int label = (int)ipIn.getf(x, y);
@@ -227,8 +229,8 @@ public class TrainImagePair
             "binarylabels", W, H, classes.length - 2, D, 1, 8);
         int idx = 0;
         for (int z = 0; z < D; ++z) {
-          ImageProcessor ipSrc = labels.getStack().getProcessor(
-              labels.getStackIndex(1, z + 1, t + 1));
+          ImageProcessor ipSrc = impLabels.getStack().getProcessor(
+              impLabels.getStackIndex(1, z + 1, t + 1));
           ImageProcessor[] ipDest = new ImageProcessor[classes.length - 2];
           for (int c = 0; c < classes.length - 2; ++c) {
             ipDest[c] = tmp.getStack().getProcessor(
@@ -261,20 +263,20 @@ public class TrainImagePair
           model.elementSizeUm(), Blob.InterpolationType.NEAREST, pr);
 
       int C = instancelabels.nComponents.length;
-      D = (D > 1) ? classlabels.shape()[0] : 1;
-      H = classlabels.shape()[(D > 1) ? 1 : 0];
-      W = classlabels.shape()[(D > 1) ? 2 : 1];
+      int Ds = (D > 1) ? classlabels.shape()[0] : 1;
+      int Hs = classlabels.shape()[(D > 1) ? 1 : 0];
+      int Ws = classlabels.shape()[(D > 1) ? 2 : 1];
 
       if (labels == null || weights == null || samplePdf == null) {
         // Create output blobs
         labels = IJ.createHyperStack(
-            rawlabels.getTitle() + " - labels", W, H, 1, D, T, 32);
+            rawlabels.getTitle() + " - labels", Ws, Hs, 1, Ds, T, 32);
         labels.setCalibration(data.getCalibration().copy());
         weights = IJ.createHyperStack(
-            rawlabels.getTitle() + " - weights", W, H, 1, D, T, 32);
+            rawlabels.getTitle() + " - weights", Ws, Hs, 1, Ds, T, 32);
         weights.setCalibration(data.getCalibration().copy());
         samplePdf = IJ.createHyperStack(
-            rawlabels.getTitle() + " - sample pdf", W, H, 1, D, T, 32);
+            rawlabels.getTitle() + " - sample pdf", Ws, Hs, 1, Ds, T, 32);
         samplePdf.setCalibration(data.getCalibration().copy());
       }
 
@@ -613,17 +615,44 @@ public class TrainImagePair
 
   public static TrainImagePair selectImagePair() {
     int[] ids = WindowManager.getIDList();
+
+    int nPotentialLabelImages = 0;
+    for (int id : ids) {
+      ImagePlus imp = WindowManager.getImage(id);
+      if (imp.getBitDepth() <= 16 && imp.getNChannels() == 1)
+          nPotentialLabelImages++;
+    }
+    int[] labelIds = new int[nPotentialLabelImages];
+    int i = 0;
+    for (int id : ids) {
+      ImagePlus imp = WindowManager.getImage(id);
+      if (imp.getBitDepth() <= 16 && imp.getNChannels() == 1)
+          labelIds[i++] = id;
+    }
     Vector<ImagePlus> images = new Vector<ImagePlus>();
     Vector<String> names = new Vector<String>();
+    Vector<ImagePlus> labelImages = new Vector<ImagePlus>();
+    Vector<String> labelNames = new Vector<String>();
     for (int id : ids) {
       images.add(WindowManager.getImage(id));
       names.add(WindowManager.getImage(id).getTitle());
+      ImagePlus imp = WindowManager.getImage(id);
+      if (imp.getBitDepth() <= 16 && imp.getNChannels() == 1) {
+        labelImages.add(WindowManager.getImage(id));
+        labelNames.add(WindowManager.getImage(id).getTitle());
+      }
+    }
+
+    if (images.size() < 1 || labelImages.size() < 1) {
+      IJ.error("No label images found. Label images must be single " +
+               "channel 8- or 16-bit integer.");
+      return null;
     }
 
     final JLabel rawLabel = new JLabel("Raw Image");
     final JComboBox<String> rawBox = new JComboBox<String>(names);
     final JLabel labelLabel = new JLabel("Labels");
-    final JComboBox<String> labelBox = new JComboBox<String>(names);
+    final JComboBox<String> labelBox = new JComboBox<String>(labelNames);
 
     final JPanel dlgPanel = new JPanel();
     dlgPanel.setBorder(BorderFactory.createEtchedBorder());
@@ -688,7 +717,7 @@ public class TrainImagePair
     try {
       return new TrainImagePair(
           images.get(rawBox.getSelectedIndex()),
-          images.get(labelBox.getSelectedIndex()));
+          labelImages.get(labelBox.getSelectedIndex()));
     }
     catch (TrainImagePairException e) {
       IJ.error(e.toString());

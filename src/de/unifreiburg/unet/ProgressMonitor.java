@@ -36,117 +36,145 @@ import ij.IJ;
 
 import javax.swing.SwingUtilities;
 
+import java.lang.System;
+
 public class ProgressMonitor implements SftpProgressMonitor {
 
   private final Job _job;
-
-  // Task specific progress
-  private String _message = "";
+  private TaskMonitor _currentTask = new TaskMonitor();
   private long _reportedCount = 0;
-  private long _count = 0;
-  private long _max = 0;
-
-  // The lower and upper bounds of the current task with respect to
-  // the overall progress
-  private float _taskProgressMin = 0.0f;
-  private float _taskProgressMax = 0.0f;
-
-  // The overall progress of the job in [0, 1]
-  private float _jobProgress = 0.0f;
-
-  // Flag indicating that the job was canceled by the user
+  private String _reportedMessage = "";
+  private long _reportedTimeNano = System.nanoTime();
   private boolean _canceled = false;
 
-  // Flag indicating that the job is finished
-  private boolean _finished = false;
+  public class TaskMonitor implements SftpProgressMonitor {
+
+    private TaskMonitor _parent = null;
+    private float _pMin = 0.0f, _pMax = 1.0f;
+    private long _count = 0, _max = 0;
+    private String _msg = null;
+
+    public TaskMonitor() {}
+
+    public TaskMonitor(float pMin, float pMax) {
+      this._pMin = pMin;
+      this._pMax = pMax;
+    }
+
+    public TaskMonitor(String msg, float pMin, float pMax) {
+      this._msg = msg;
+      this._pMin = pMin;
+      this._pMax = pMax;
+    }
+
+    public TaskMonitor(TaskMonitor parent, float pMin, float pMax) {
+      this._parent = parent;
+      this._pMin = pMin;
+      this._pMax = pMax;
+    }
+
+    public TaskMonitor getParent() {
+      return _parent;
+    }
+
+    public String message() {
+      return (_msg != null) ?
+          _msg : ((_parent != null) ? _parent.message() : "");
+    }
+
+    public void init(long max) {
+      this._count = 0;
+      this._max = max;
+      update(true);
+    }
+
+    @Override
+    public void init(int op, String src, String dest, long max) {
+      this._msg = "Copying " + src + " -> " + dest;
+      this._count = 0;
+      this._max = max;
+      update(true);
+    }
+
+    @Override
+    public boolean count(long count) {
+      _count += count;
+      update();
+      return !_job.interrupted();
+    }
+
+    public boolean count(String msg, long count) {
+      _msg = msg;
+      return this.count(count);
+    }
+
+    @Override
+    public void end() {
+      _count = _max;
+      update(true);
+    }
+
+    public long getCount() {
+      return _count;
+    }
+
+    public long getMax() {
+      return _max;
+    }
+
+    private float progress(float p) {
+      if (_parent == null) return p;
+      return _parent.progress(p * (_pMax - _pMin) + _pMin);
+    }
+
+    public float progress() {
+      return (_max != 0) ? progress((float)_count / (float)_max) : 0.0f;
+    }
+
+    private float totalProgress(float p) {
+      if (_parent == null) return p * (_pMax - _pMin) + _pMin;
+      return _parent.progress(p);
+    }
+
+    public float totalProgress() {
+      return totalProgress(progress());
+    }
+
+  }
 
   public ProgressMonitor(Job job) {
     _job = job;
   }
 
-  // This must be called whenever a new task starts!
-  public void initNewTask(String message, float taskProgressMax, long max) {
-    _message = message;
-    _taskProgressMin = _taskProgressMax;
-    _taskProgressMax = taskProgressMax;
-    _count = 0;
-    _reportedCount = 0;
-    _max = max;
-    update();
+  public TaskMonitor getCurrentTaskMonitor() {
+    return _currentTask;
   }
 
   public void reset() {
-    _message = "";
+    _currentTask = new TaskMonitor();
     _reportedCount = 0;
-    _count = 0;
-    _max = 0;
-    _taskProgressMin = 0.0f;
-    _taskProgressMax = 0.0f;
-    _jobProgress = 0.0f;
+    _reportedMessage = "";
+    _reportedTimeNano = System.nanoTime();
     _canceled = false;
-    _finished = false;
   }
 
-  // This is called when using the ProgressMonitor in an Sftp operation
-  // It does not set the taskProgressMax, so please call initNewTask before
-  // passing the ProgressMonitor to the Sftp operation.
-  @Override
-  public void init(int op, String src, String dest, long max) {
-    _count = 0;
-    _reportedCount = 0;
-    _max = max;
-    update();
+  public void push(String message, float pMin, float pMax) {
+    _currentTask = new TaskMonitor(_currentTask, pMin, pMax);
+    _currentTask.count(message, 0);
+    update(true);
   }
 
-  @Override
-  public boolean count(long count) {
-    _count += count;
-    _jobProgress = _taskProgressMin + (
-        (_max > 0) ? ((float)_count / (float)_max *
-                      (_taskProgressMax - _taskProgressMin)) : 0.0f);
-    update();
-    if (_job.interrupted()) setCanceled(true);
-    return !_canceled;
+  public void push(float pMin, float pMax) {
+    _currentTask = new TaskMonitor(_currentTask, pMin, pMax);
+    update(true);
   }
 
-  public boolean count(String message, long count) {
-    _message = message;
-    return this.count(count);
-  }
-
-  @Override
-  public void end() {
-    _count = _max;
-  }
-
-  public String message() {
-    return _message;
-  }
-
-  public long getCount() {
-    return _count;
-  }
-
-  public long getMax() {
-    return _max;
-  }
-
-  public float taskProgressMin() {
-    return _taskProgressMin;
-  }
-
-  public float taskProgressMax() {
-    return _taskProgressMax;
-  }
-
-  public float progress() {
-    return _jobProgress;
+  public void pop() {
+    if (_currentTask != null) _currentTask = _currentTask.getParent();
   }
 
   public void setCanceled(boolean canceled) {
     _canceled = canceled;
-    if (canceled) _finished = _canceled;
-    end();
   }
 
   public boolean canceled() {
@@ -154,19 +182,73 @@ public class ProgressMonitor implements SftpProgressMonitor {
   }
 
   public void setFinished(boolean finished) {
-    _finished = finished;
-    end();
+    if (!finished && _currentTask == null) reset();
+    if (finished && _currentTask != null) _currentTask = null;
   }
 
   public boolean finished() {
-    return _finished;
+    return _currentTask == null;
+  }
+
+  @Override
+  public void init(int op, String src, String dest, long max) {
+    if (_currentTask != null) _currentTask.init(op, src, dest, max);
+  }
+
+  public void init(long max) {
+    if (_currentTask != null) _currentTask.init(max);
+  }
+
+  public boolean count(String msg, long count) {
+    if (_currentTask != null) return _currentTask.count(msg, count);
+    return false;
+  }
+
+  @Override
+  public boolean count(long count) {
+    if (_currentTask != null) return _currentTask.count(count);
+    return false;
+  }
+
+  @Override
+  public void end() {
+    if (_currentTask != null) _currentTask.end();
+  }
+
+  public String message() {
+    return (_currentTask != null) ? _currentTask.message() : "";
+  }
+
+  public long getCount() {
+    return (_currentTask != null) ? _currentTask.getCount() : 0;
+  }
+
+  public long getMax() {
+    return (_currentTask != null) ? _currentTask.getMax() : 0;
+  }
+
+  public float taskProgress() {
+    return (_currentTask != null) ? _currentTask.progress() : 1;
+  }
+
+  public float progress() {
+    return (_currentTask != null) ? _currentTask.totalProgress() : 1;
   }
 
   public void update() {
+    update(false);
+  }
+
+
+  public void update(boolean immediate) {
     // If current percentage was already reported, do not show new progress
-    if((int)(10000 * (float)_reportedCount / (float)_max) >=
-       (int)(10000 * (float)_count / (float)_max)) return;
-    _reportedCount = _count;
+    if (!immediate && System.nanoTime() - _reportedTimeNano < 100000) return;
+    if (message().equals(_reportedMessage) &&
+        (int)(10000 * (float)_reportedCount / (float)getMax()) >=
+        (int)(10000 * (float)getCount() / (float)getMax())) return;
+    _reportedTimeNano = System.nanoTime();
+    _reportedMessage = message();
+    _reportedCount = getCount();
     if (_job != null && _job.jobTable() != null) {
       SwingUtilities.invokeLater(new Runnable() {
             @Override
@@ -176,8 +258,8 @@ public class ProgressMonitor implements SftpProgressMonitor {
             }});
     }
     else {
-      IJ.showStatus(_message);
-      IJ.showProgress(_jobProgress);
+      IJ.showStatus(message());
+      IJ.showProgress(progress());
     }
   }
 

@@ -423,7 +423,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     }
 
     do {
-      progressMonitor().initNewTask("Waiting for user input", 0.0f, 0);
+      progressMonitor().count("Waiting for user input", 0);
       _parametersDialog.setVisible(true);
 
       // Dialog was cancelled
@@ -658,7 +658,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
             int nTiles = Integer.parseInt(line);
             if (!initialized)
             {
-              progressMonitor().init(0, "", "", nBatches * nTiles);
+              progressMonitor().init(nBatches * nTiles);
               initialized = true;
             }
             progressMonitor().count(
@@ -801,9 +801,9 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       if (isInteractive() && !getParameters()) return;
       if (sshSession() != null) {
 
-        SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
+        progressMonitor().push("Uploading Model", 0.0f, 0.01f);
 
-        progressMonitor().initNewTask("Uploading Model", 0.01f, 1);
+        SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
         if (!isInteractive()) {
           model().remoteAbsolutePath =
               processFolder() + id() + "_model.h5";
@@ -812,45 +812,54 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
                        model().remoteAbsolutePath));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
         }
-
         _localTmpFile = File.createTempFile(id(), ".h5");
         _localTmpFile.delete();
         String remoteFileName = processFolder() + id() + ".h5";
 
-        progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
+        progressMonitor().pop();
+        progressMonitor().push("Creating HDF5 blobs", 0.01f, 0.05f);
+
         setImagePlus(
             Tools.saveHDF5Blob(
                 _imp, _localTmpFile, model(), progressMonitor(), false,
                 _keepOriginalCheckBox.isSelected(), true));
-        if (interrupted()) throw new InterruptedException();
 
-        progressMonitor().initNewTask("Uploading HDF5 blobs", 0.1f, 1);
+        if (interrupted()) throw new InterruptedException();
+        progressMonitor().pop();
+        progressMonitor().push("Uploading HDF5 blobs", 0.05f, 0.1f);
+
         _createdRemoteFolders.addAll(sftp.put(_localTmpFile, remoteFileName));
         _createdRemoteFiles.add(remoteFileName);
-        if (interrupted()) throw new InterruptedException();
 
-        progressMonitor().initNewTask("U-Net segmentation", 0.9f, 1);
+        if (interrupted()) throw new InterruptedException();
+        progressMonitor().pop();
+        progressMonitor().push("U-Net segmentation", 0.1f, 0.9f);
+
         runSegmentation(remoteFileName, sshSession());
-        if (interrupted()) throw new InterruptedException();
 
-        progressMonitor().initNewTask("Downloading segmentation", 1.0f, 1);
-        sftp.get(remoteFileName, _localTmpFile);
         if (interrupted()) throw new InterruptedException();
+        progressMonitor().pop();
+        progressMonitor().push("Downloading segmentation", 0.9f, 1.0f);
+
+        sftp.get(remoteFileName, _localTmpFile);
      }
       else {
-        _localTmpFile = new File(processFolder() + id() + ".h5");
+        progressMonitor().push("Creating HDF5 blobs", 0.01f, 0.1f);
 
-        progressMonitor().initNewTask("Creating HDF5 blobs", 0.02f, 1);
+        _localTmpFile = new File(processFolder() + id() + ".h5");
         setImagePlus(
             Tools.saveHDF5Blob(
                 _imp, _localTmpFile, model(), progressMonitor(), false,
                 _keepOriginalCheckBox.isSelected(), true));
-        if (interrupted()) throw new InterruptedException();
 
-        progressMonitor().initNewTask("U-Net Segmentation", 1.0f, 1);
-        runSegmentation(_localTmpFile);
         if (interrupted()) throw new InterruptedException();
-      }
+        progressMonitor().pop();
+        progressMonitor().push("U-Net segmentation", 0.1f, 1.0f);
+
+        runSegmentation(_localTmpFile);
+     }
+      if (interrupted()) throw new InterruptedException();
+       progressMonitor().end();
       setReady(true);
     }
     catch (InterruptedException e) {
@@ -887,7 +896,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     boolean generateMarkers = (this instanceof DetectionJob);
 
     progressMonitor().reset();
-    progressMonitor().count("Creating visualization", 0);
+    progressMonitor().push("Creating visualization", 0.0f, 1.0f);
 
     boolean computeSoftmaxScores = outputSoftmaxScores || generateMarkers;
 
@@ -897,6 +906,11 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
     int dsIdx = 1;
     for (String dsName : outputs) {
+
+      progressMonitor().push(
+          "Creating visualization for " + dsName,
+          (float)(dsIdx - 1) / (float)outputs.size(),
+          (float)dsIdx / (float)outputs.size());
 
       String title = imageName() + " - " + dsName;
       HDF5DataSetInformation dsInfo =
@@ -937,9 +951,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
       int nOperations = nFrames * nLevs * nClasses;
       if (generateMarkers) nOperations += 4 * nFrames * nLevs * (nClasses - 1);
-      progressMonitor().initNewTask(
-          "Creating visualization for " + dsName,
-          (float)dsIdx / (float)outputs.size(), nOperations);
+      progressMonitor().init(nOperations);
       dsIdx++;
 
       for (int t = 0; t < nFrames; ++t) {
@@ -1205,11 +1217,11 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
         table.show(title + " (detections)");
         impClassification.setOverlay(overlay);
-
-        progressMonitor().end();
       }
+      progressMonitor().pop(); // Process dataset
     }
     reader.close();
+    progressMonitor().end();
   }
 
 };
