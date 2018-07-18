@@ -341,9 +341,8 @@ public abstract class CaffeJob extends Job {
             f.setDialogTitle("Select trained U-Net weights");
             f.setFileFilter(
                 new FileNameExtensionFilter(
-                    "HDF5 and prototxt files", "h5", "H5",
-                    "prototxt", "PROTOTXT", "caffemodel",
-                    "CAFFEMODEL"));
+                    "HDF5 and caffemodel files", "h5", "H5",
+                    "caffemodel", "CAFFEMODEL"));
             f.setMultiSelectionEnabled(false);
             f.setFileSelectionMode(JFileChooser.FILES_ONLY);
             int res = f.showDialog(_parametersDialog, "Select");

@@ -141,6 +141,13 @@ public class ProgressMonitor implements SftpProgressMonitor {
       return totalProgress((_max != 0) ? (float)_count / (float)_max : 0.0f);
     }
 
+    public String toString() {
+      String res = "Task: " + message() + " (" + _pMin + " - " + _pMax +
+          "), step = " + getCount() + " / " + getMax() + "\n";
+      if (_parent != null) res += _parent.toString();
+      return res;
+    }
+
   }
 
   public ProgressMonitor(Job job) {
@@ -261,6 +268,11 @@ public class ProgressMonitor implements SftpProgressMonitor {
       IJ.showStatus(message());
       IJ.showProgress(progress());
     }
+  }
+
+  public String taskString() {
+    if (_currentTask == null) return "No task";
+    else return _currentTask.toString();
   }
 
 };

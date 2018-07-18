@@ -440,8 +440,6 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
   @Override
   protected boolean checkParameters() throws InterruptedException {
 
-    progressMonitor().count("Checking parameters", 0);
-
     if (!super.checkParameters()) return false;
 
     if (_trainFileList.getModel().getSize() == 0) {
@@ -571,9 +569,8 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
               f.setDialogTitle("Select trained U-Net weights");
               f.setFileFilter(
                   new FileNameExtensionFilter(
-                      "*.caffemodel.h5 or *.caffemodel",
-                      "caffemodel.h5", "CAFFEMODEL.H5",
-                      "caffemodel", "CAFFEMODEL"));
+                      "*.h5 or *.caffemodel",
+                      "h5", "H5", "caffemodel", "CAFFEMODEL"));
               f.setMultiSelectionEnabled(false);
               f.setFileSelectionMode(JFileChooser.FILES_ONLY);
               int res2 = f.showDialog(
@@ -708,8 +705,9 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       return false;
     }
 
+    progressMonitor().push("Waiting for user input", 0.0f, 0.0f);
+
     do {
-      progressMonitor().count("Waiting for user input", 0);
       _parametersDialog.setVisible(true);
 
       // Dialog was cancelled
@@ -721,6 +719,8 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     _parametersDialog.dispose();
 
     if (jobTable() != null) jobTable().fireTableDataChanged();
+
+    progressMonitor().pop();
 
     return true;
   }
@@ -965,6 +965,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       throws InterruptedException, IOException, JSchException, SftpException {
 
     // Create train and valid file list files
+    progressMonitor().push("Creating train file list", 0.0f, 0.2f);
     String trainFileListAbsolutePath =
         processFolder() + id() + "-trainfilelist.txt";
     progressMonitor().count("Create train and valid file lists", 0);
@@ -983,6 +984,9 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       outfile.delete();
     }
     else outfile.deleteOnExit();
+
+    progressMonitor().pop();
+    progressMonitor().push("Creating validation file list", 0.2f, 0.4f);
 
     String validFileListAbsolutePath =
         processFolder() + id() + "-validfilelist.txt";
@@ -1004,10 +1008,10 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       else outfile.deleteOnExit();
     }
 
-    // Create prototxt files
+    progressMonitor().pop();
+    progressMonitor().push("Creating model prototxt", 0.4f, 0.6f);
 
     // model.prototxt
-    progressMonitor().count("Create model prototxt", 0);
     Caffe.NetParameter.Builder nb = Caffe.NetParameter.newBuilder();
     TextFormat.getParser().merge(_finetunedModel.modelPrototxt, nb);
 
@@ -1070,6 +1074,10 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     // Save model definition file before adding validation structures
     _finetunedModel.modelPrototxt = TextFormat.printToString(nb);
     _finetunedModel.save();
+
+    progressMonitor().pop();
+    progressMonitor().push(
+        "Adding validation structures to model prototxt", 0.6f, 0.8f);
 
     // Add test layers if a validation set is given
     if (validBlobFileNames.size() != 0) {
@@ -1136,6 +1144,9 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       modelFile.deleteOnExit();
     }
 
+    progressMonitor().pop();
+    progressMonitor().push("Creating solver prototxt", 0.8f, 1.0f);
+
     // solver.prototxt
     progressMonitor().count("Create solver prototxt", 0);
     Caffe.SolverParameter.Builder sb = Caffe.SolverParameter.newBuilder();
@@ -1174,6 +1185,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       solverFile.deleteOnExit();
     }
 
+    progressMonitor().pop();
   }
 
   protected final void runFinetuning()
@@ -1355,7 +1367,6 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
     if (sshSession() != null)
     {
-
       SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
 
       if (_downloadWeightsCheckBox.isSelected()) {
@@ -1371,7 +1382,6 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           // Download weights file
           sftp.get(processFolder() + id() + "-snapshot_iter_" + nIter +
                    ".caffemodel.h5", outfile);
-          progressMonitor().pop();
         }
         catch (SftpException e) {
           showError("Could not download weights " + processFolder() + id() +
@@ -1425,6 +1435,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           showMessage("Could not delete solverstate " +
                       solverstatefile.getAbsolutePath());
     }
+    progressMonitor().pop();
   }
 
   @Override
@@ -1434,6 +1445,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
   @Override
   public void run() {
+
     boolean trainImageFound = false;
     if (WindowManager.getIDList() != null) {
       for (int id: WindowManager.getIDList()) {
@@ -1452,6 +1464,8 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     }
     try
     {
+      progressMonitor().count("Fintuning", 0);
+
       prepareParametersDialog();
       if (isInteractive() && !getParameters()) return;
 
@@ -1599,13 +1613,14 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         outfile.delete();
       }
 
-      progressMonitor().pop();
-      progressMonitor().push("Data conversion", 0.01f, 0.10f);
+      progressMonitor().pop(); // Searching class labels (0.0 - 0.01)
+      progressMonitor().push("Data conversion", 0.01f, 0.1f);
 
       // Process train files
       progressMonitor().push(
           "Converting train files", 0.0f,
           (float)nTrainImages / (float)(nTrainImages + nValidImages));
+
       for (int i = 0; i < nTrainImages; ++i) {
         ImagePlus imp =
             ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i);
@@ -1614,13 +1629,14 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             "Converting " + imp.getTitle(),
             (float)i / (float)nTrainImages, (float)(i + 1) /
             (float)nTrainImages);
-        trainBlobFileNames[i] = processFolder() + id() + "_train_" + i + ".h5";
 
+        trainBlobFileNames[i] = processFolder() + id() + "_train_" + i + ".h5";
         if (sshSession() == null) {
           outfile = new File(trainBlobFileNames[i]);
           progressMonitor().push("Converting " + imp.getTitle(), 0.0f, 1.0f);
         }
         else progressMonitor().push("Converting " + imp.getTitle(), 0.0f, 0.5f);
+
         if (imagesContainRoiAnnotations)
             Tools.saveHDF5Blob(
                 imp, outfile, _finetunedModel, progressMonitor(), true, true,
@@ -1632,7 +1648,8 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
               labelsAreClasses ? _finetunedModel.classNames : null, outfile,
               _finetunedModel, progressMonitor());
         }
-        progressMonitor().pop();
+
+        progressMonitor().pop(); // Converting image (real)
 
         if (interrupted()) throw new InterruptedException();
         if (sshSession() != null) {
@@ -1643,23 +1660,28 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
                   outfile, trainBlobFileNames[i]));
           _createdRemoteFiles.add(trainBlobFileNames[i]);
           outfile.delete();
-          progressMonitor().pop();
+          progressMonitor().pop(); // Uploading image
           if (interrupted()) throw new InterruptedException();
         }
-        progressMonitor().pop();
+
+        progressMonitor().pop(); // Converting image
 
       }
-      progressMonitor().pop();
 
-      // Process validation files
-      progressMonitor().push("Converting validation files", 0.06f, 0.11f);
+      progressMonitor().pop(); // Converting train files
+      progressMonitor().push(
+          "Converting validation files",
+          (float)nTrainImages / (float)(nTrainImages + nValidImages), 1.0f);
+
       for (int i = 0; i < nValidImages; i++) {
         ImagePlus imp =
             ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i);
+
         progressMonitor().push(
             "Converting " + imp.getTitle(),
             (float)i / (float)nValidImages, (float)(i + 1) /
             (float)nValidImages);
+
         String fileNameStub = (sshSession() == null) ?
             processFolder() + id() + "_valid_" + i : null;
         File[] generatedFiles = null;
@@ -1678,15 +1700,19 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
               labelsAreClasses ? _finetunedModel.classNames : null,
               fileNameStub, _finetunedModel, progressMonitor());
         }
-        progressMonitor().pop();
+        progressMonitor().pop(); // Converting image (real)
+
         if (sshSession() == null)
             for (File f : generatedFiles)
                 validBlobFileNames.add(f.getAbsolutePath());
         else {
+
             progressMonitor().push(
-                "Converting " + imp.getTitle(), 0.5f, 1.0f);
+                "Uploading " + imp.getTitle(), 0.5f, 1.0f);
+
           for (int j = 0; j < generatedFiles.length; j++) {
-            progressMonitor().push("Converting " + imp.getTitle(),
+            progressMonitor().push(
+                "Uploading " + imp.getTitle() + " - tile " + j,
                 (float)j / (float)generatedFiles.length,
                 (float)(j + 1) / (float)generatedFiles.length);
             String outFileName =
@@ -1696,19 +1722,32 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
                     generatedFiles[j], outFileName));
             _createdRemoteFiles.add(outFileName);
             validBlobFileNames.add(outFileName);
-            progressMonitor().pop();
+            progressMonitor().pop(); // Uploading image tile
+
             if (interrupted()) throw new InterruptedException();
           }
-          progressMonitor().pop();
+
+          progressMonitor().pop(); // Uploading image
+
         }
-        progressMonitor().pop();
+        progressMonitor().pop(); // Converting image
       }
-      progressMonitor().pop();
+
+      System.out.println(progressMonitor().taskString());
+      System.out.println();
+
+      progressMonitor().pop(); // Converting validation files
+      progressMonitor().pop(); // Data conversion (0.01 - 0.1)
+      progressMonitor().push("Creating prototxt files", 0.1f, 0.11f);
 
       prepareFinetuning(trainBlobFileNames, validBlobFileNames);
 
-      // Finetuning
+      progressMonitor().pop(); // Prototxt generation
       progressMonitor().push("U-Net finetuning", 0.1f, 1.0f);
+
+      System.out.println(progressMonitor().taskString());
+      System.out.println();
+
       runFinetuning();
       if (interrupted()) throw new InterruptedException();
 

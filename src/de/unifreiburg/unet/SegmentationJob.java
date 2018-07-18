@@ -248,8 +248,6 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
   @Override
   protected boolean checkParameters() throws InterruptedException {
 
-    progressMonitor().count("Checking parameters", 0);
-
     if (!super.checkParameters()) return false;
 
     int nChannels =
@@ -291,8 +289,10 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
               weightsFileName() + "\" -n_channels " + nChannels + " " +
               caffeGPUParameter();
           res = Tools.execute(cmd, sshSession(), progressMonitor());
-          if (weightsUploaded && res.exitStatus != 0) break;
-          if (!weightsUploaded && res.exitStatus != 0) {
+
+          if (res.exitStatus == 0 || weightsUploaded) break;
+
+          if (!weightsUploaded) {
             int selectedOption = JOptionPane.showConfirmDialog(
                 _imp.getWindow(), "No compatible weights found at the " +
                 "given location on the backend server.\nDo you want " +
@@ -310,9 +310,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
               f.setDialogTitle("Select trained U-Net weights");
               f.setFileFilter(
                   new FileNameExtensionFilter(
-                      "*.caffemodel.h5 or *.caffemodel",
-                      "caffemodel.h5", "CAFFEMODEL.H5",
-                      "caffemodel", "CAFFEMODEL"));
+                      "*.h5 or *.caffemodel",
+                      "h5", "H5", "caffemodel", "CAFFEMODEL"));
               f.setMultiSelectionEnabled(false);
               f.setFileSelectionMode(JFileChooser.FILES_ONLY);
               int res2 = f.showDialog(
@@ -398,7 +397,6 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       // User decided to change weight file, so don't bother him with
       // additional message boxes
       if (res.exitStatus == 2) return false;
-
       showError(
           "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
       return false;
@@ -422,8 +420,9 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       return false;
     }
 
+    progressMonitor().push("Waiting for user input", 0.0f, 0.0f);
+
     do {
-      progressMonitor().count("Waiting for user input", 0);
       _parametersDialog.setVisible(true);
 
       // Dialog was cancelled
@@ -435,6 +434,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     _parametersDialog.dispose();
 
     if (jobTable() != null) jobTable().fireTableDataChanged();
+
+    progressMonitor().pop();
 
     return true;
   }
@@ -540,8 +541,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         if (!channel.isClosed()) channel.sendSignal("KILL");
       }
       catch (Exception eInner) {
-        IJ.log(
-            "Process could not be terminated using SIGTERM: " + eInner);
+        IJ.log("Process could not be terminated using SIGTERM: " + eInner);
       }
       channel.disconnect();
       throw e;
@@ -797,6 +797,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     }
     setImagePlus(WindowManager.getCurrentImage());
     try {
+      progressMonitor().count("Segmentation", 0);
+
       prepareParametersDialog();
       if (isInteractive() && !getParameters()) return;
       if (sshSession() != null) {
