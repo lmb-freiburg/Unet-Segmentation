@@ -256,7 +256,8 @@ public class ProgressMonitor implements SftpProgressMonitor {
     _reportedTimeNano = System.nanoTime();
     _reportedMessage = message();
     _reportedCount = getCount();
-    if (_job != null && _job.jobTable() != null) {
+    if (_job != null && _job.jobTable() != null &&
+        JobManager.instance().isVisible()) {
       SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {

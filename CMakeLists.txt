@@ -36,6 +36,7 @@ set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROJECT_SOURCE_
 
 add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/JobManager.java
+  src/de/unifreiburg/unet/JobManagerPlugin.java
   src/de/unifreiburg/unet/JobTableModel.java
   src/de/unifreiburg/unet/HostConfigurationPanel.java
   src/de/unifreiburg/unet/SftpFileIO.java

@@ -34,7 +34,6 @@ package de.unifreiburg.unet;
 import ij.*;
 import ij.process.*;
 import ij.gui.*;
-import ij.plugin.PlugIn;
 
 // Java GUI stuff
 import java.awt.*;
@@ -44,169 +43,163 @@ import javax.swing.event.*;
 import javax.swing.table.*;
 import java.util.*;
 
-public class JobManager implements PlugIn {
+public class JobManager extends JFrame
+{
 
-  public static class JobManagerFrame extends JFrame
-  {
+  private static JobManager _manager = null;
 
-    private static JobManagerFrame _manager = null;
-
-    public static JobManagerFrame instance() {
-      if (_manager == null) _manager = new JobManagerFrame("U-Net Job Manager");
-      return _manager;
-    }
-
-    private JobTableModel _unetJobTableModel;
-    private static JDialog helpDialog = null;
-
-    private JobManagerFrame() {
-      super();
-      init();
-    }
-
-    private JobManagerFrame(GraphicsConfiguration gc) {
-      super(gc);
-      init();
-    }
-
-    private JobManagerFrame(String title) {
-      super(title);
-      init();
-    }
-
-    private JobManagerFrame(String title, GraphicsConfiguration gc) {
-      super(title, gc);
-      init();
-    }
-
-    private void init() {
-      setLayout(new GridBagLayout());
-
-      _unetJobTableModel = new JobTableModel();
-      JTable table = new JTable(_unetJobTableModel);
-
-      table.getColumn("Status").setCellRenderer(new ProgressCellRenderer());
-      table.getColumn("Progress").setCellRenderer(new ProgressCellRenderer());
-      table.getColumn("Show").setCellRenderer(new ComponentCellRenderer());
-      JButton terminatingButton = new JButton("Terminating...");
-      table.getColumn("Show").setMinWidth(
-          terminatingButton.getPreferredSize().width);
-      table.getColumn("Show").setMaxWidth(
-          terminatingButton.getPreferredSize().width);
-      table.getColumn("Show").setPreferredWidth(
-          terminatingButton.getPreferredSize().width);
-      table.addMouseListener(new JTableButtonMouseListener(table));
-      JScrollPane tableScroller = new JScrollPane(table);
-
-      JButton newSegmentationJobButton = new JButton("Segmentation");
-      newSegmentationJobButton.setToolTipText(
-          "Segment the current image (stack) using U-Net");
-      newSegmentationJobButton.addActionListener(
-          new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-              _unetJobTableModel.createSegmentationJob();
-            }});
-
-      JButton newDetectionJobButton = new JButton("Detection");
-      newDetectionJobButton.setToolTipText(
-          "Detect objects in the current image (stack) using U-Net");
-      newDetectionJobButton.addActionListener(
-          new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-              _unetJobTableModel.createDetectionJob();
-            }});
-
-      JButton newFinetuneJobButton = new JButton("Finetuning");
-      newFinetuneJobButton.setToolTipText(
-          "Finetune U-Net model to new data based on ImageJ ROI annotations");
-      newFinetuneJobButton.addActionListener(
-          new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-              _unetJobTableModel.createFinetuneJob();
-            }});
-
-      JButton helpButton = new JButton("Help");
-      helpButton.setToolTipText("Show README");
-      helpButton.addActionListener(
-          new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-              if (helpDialog == null) {
-                helpDialog = new JDialog(
-                    _manager, "U-Net Segmentation Help", false);
-                helpDialog.getContentPane().setLayout(
-                    new BorderLayout());
-                JEditorPane helpPanel;
-                try {
-                  helpPanel = new JEditorPane(
-                      getClass().getResource("/resources/README.html"));
-                }
-                catch (java.io.IOException e2) {
-                  helpPanel = new JEditorPane(
-                      "text/html", "404 - Internal Resource not found");
-                }
-                helpPanel.setEditable(false);
-                helpPanel.addHyperlinkListener(
-                    new HyperlinkListener() {
-                      public void hyperlinkUpdate(HyperlinkEvent e) {
-                        if (e.getEventType() ==
-                            HyperlinkEvent.EventType.ACTIVATED) {
-                          if (Desktop.isDesktopSupported()) {
-                            try {
-                              Desktop.getDesktop().browse(e.getURL().toURI());
-                            }
-                            catch (java.net.URISyntaxException e2) {}
-                            catch (java.io.IOException e2) {}
-                          }
-                        }
-                      }});
-                JScrollPane helpScroller = new JScrollPane(helpPanel);
-                helpDialog.add(helpScroller, BorderLayout.CENTER);
-                helpDialog.setMinimumSize(new Dimension(600, 400));
-              }
-              helpDialog.setVisible(true);
-            }});
-
-      GridBagConstraints c = new GridBagConstraints();
-
-      // First row: the table
-      c.gridy = 0;
-      c.weightx = 1;
-      c.weighty = 1;
-      c.fill = GridBagConstraints.BOTH;
-      c.anchor = GridBagConstraints.CENTER;
-      c.gridx = 0;
-      c.gridwidth = 5;
-      add(tableScroller, c);
-      c.weighty = 0;
-      c.fill = GridBagConstraints.NONE;
-
-      // Second row: the buttons
-      c.gridy = 1;
-      c.gridx = 0;
-      c.gridwidth = 1;
-      c.anchor = GridBagConstraints.LAST_LINE_START;
-      add(newSegmentationJobButton, c);
-      c.gridx = 1;
-      add(newDetectionJobButton, c);
-      c.gridx = 2;
-      add(newFinetuneJobButton, c);
-      c.gridx = 3;
-      c.anchor = GridBagConstraints.LAST_LINE_END;
-      add(helpButton, c);
-
-      setSize(getLayout().preferredLayoutSize(this));
-    }
-
+  public static JobManager instance() {
+    if (_manager == null) _manager = new JobManager("U-Net Job Manager");
+    return _manager;
   }
 
+  private JobTableModel _jobTableModel;
+  private static JDialog helpDialog = null;
 
-  @Override
-  public void run(String arg) {
-    JobManagerFrame.instance().setVisible(true);
+  private JobManager() {
+    super();
+    init();
+  }
+
+  private JobManager(GraphicsConfiguration gc) {
+    super(gc);
+    init();
+  }
+
+  private JobManager(String title) {
+    super(title);
+    init();
+  }
+
+  private JobManager(String title, GraphicsConfiguration gc) {
+    super(title, gc);
+    init();
+  }
+
+  private void init() {
+    setLayout(new GridBagLayout());
+
+    _jobTableModel = new JobTableModel();
+    JTable table = new JTable(_jobTableModel);
+
+    table.getColumn("Status").setCellRenderer(new ProgressCellRenderer());
+    table.getColumn("Progress").setCellRenderer(new ProgressCellRenderer());
+    table.getColumn("Show").setCellRenderer(new ComponentCellRenderer());
+    JButton terminatingButton = new JButton("Terminating...");
+    table.getColumn("Show").setMinWidth(
+        terminatingButton.getPreferredSize().width);
+    table.getColumn("Show").setMaxWidth(
+        terminatingButton.getPreferredSize().width);
+    table.getColumn("Show").setPreferredWidth(
+        terminatingButton.getPreferredSize().width);
+    table.addMouseListener(new JTableButtonMouseListener(table));
+    JScrollPane tableScroller = new JScrollPane(table);
+
+    JButton newSegmentationJobButton = new JButton("Segmentation");
+    newSegmentationJobButton.setToolTipText(
+        "Segment the current image (stack) using U-Net");
+    newSegmentationJobButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            _jobTableModel.createSegmentationJob();
+          }});
+
+    JButton newDetectionJobButton = new JButton("Detection");
+    newDetectionJobButton.setToolTipText(
+        "Detect objects in the current image (stack) using U-Net");
+    newDetectionJobButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            _jobTableModel.createDetectionJob();
+          }});
+
+    JButton newFinetuneJobButton = new JButton("Finetuning");
+    newFinetuneJobButton.setToolTipText(
+        "Finetune U-Net model to new data based on ImageJ ROI annotations");
+    newFinetuneJobButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            _jobTableModel.createFinetuneJob();
+          }});
+
+    JButton helpButton = new JButton("Help");
+    helpButton.setToolTipText("Show README");
+    helpButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            if (helpDialog == null) {
+              helpDialog = new JDialog(
+                  _manager, "U-Net Segmentation Help", false);
+              helpDialog.getContentPane().setLayout(
+                  new BorderLayout());
+              JEditorPane helpPanel;
+              try {
+                helpPanel = new JEditorPane(
+                    getClass().getResource("/resources/README.html"));
+              }
+              catch (java.io.IOException e2) {
+                helpPanel = new JEditorPane(
+                    "text/html", "404 - Internal Resource not found");
+              }
+              helpPanel.setEditable(false);
+              helpPanel.addHyperlinkListener(
+                  new HyperlinkListener() {
+                    public void hyperlinkUpdate(HyperlinkEvent e) {
+                      if (e.getEventType() ==
+                          HyperlinkEvent.EventType.ACTIVATED) {
+                        if (Desktop.isDesktopSupported()) {
+                          try {
+                            Desktop.getDesktop().browse(e.getURL().toURI());
+                          }
+                          catch (java.net.URISyntaxException e2) {}
+                          catch (java.io.IOException e2) {}
+                        }
+                      }
+                    }});
+              JScrollPane helpScroller = new JScrollPane(helpPanel);
+              helpDialog.add(helpScroller, BorderLayout.CENTER);
+              helpDialog.setMinimumSize(new Dimension(600, 400));
+            }
+            helpDialog.setVisible(true);
+          }});
+
+    GridBagConstraints c = new GridBagConstraints();
+
+    // First row: the table
+    c.gridy = 0;
+    c.weightx = 1;
+    c.weighty = 1;
+    c.fill = GridBagConstraints.BOTH;
+    c.anchor = GridBagConstraints.CENTER;
+    c.gridx = 0;
+    c.gridwidth = 5;
+    add(tableScroller, c);
+    c.weighty = 0;
+    c.fill = GridBagConstraints.NONE;
+
+    // Second row: the buttons
+    c.gridy = 1;
+    c.gridx = 0;
+    c.gridwidth = 1;
+    c.anchor = GridBagConstraints.LAST_LINE_START;
+    add(newSegmentationJobButton, c);
+    c.gridx = 1;
+    add(newDetectionJobButton, c);
+    c.gridx = 2;
+    add(newFinetuneJobButton, c);
+    c.gridx = 3;
+    c.anchor = GridBagConstraints.LAST_LINE_END;
+    add(helpButton, c);
+
+    setSize(getLayout().preferredLayoutSize(this));
+  }
+
+  public void addJob(Job job) {
+    _jobTableModel.add(job);
   }
 
 }

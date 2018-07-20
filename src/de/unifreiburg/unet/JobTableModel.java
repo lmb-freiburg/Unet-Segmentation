@@ -138,6 +138,21 @@ public class JobTableModel extends AbstractTableModel {
     fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
   }
 
+  public void add(Job job) {
+    if (getRow(job) >= 0) return;
+    _jobs.add(job);
+    job.setJobTableModel(this);
+    fireTableRowsInserted(_jobs.size() - 1, _jobs.size() - 1);
+  }
+
+  public void remove(Job job) {
+    int row = getRow(job);
+    if (row == -1) return;
+    _jobs.remove(row);
+    job.setJobTableModel(null);
+    fireTableRowsDeleted(row, row);
+  }
+
   public Job job(int row) {
     if (row >= _jobs.size()) return null;
     return _jobs.get(row);

@@ -74,7 +74,7 @@ public abstract class Job extends Thread {
   private final ProgressMonitor _progressMonitor;
 
   // JobTableModel related variables
-  private final JobTableModel _jobTableModel;
+  private JobTableModel _jobTableModel;
   private final JButton _readyCancelButton = new JButton("Cancel");
 
   // Parameters Dialog related variables
@@ -104,6 +104,16 @@ public abstract class Job extends Thread {
     _jobTableModel = model;
     _progressMonitor = new ProgressMonitor(this);
     wireReadyCancelButton();
+  }
+
+  public void setJobTableModel(JobTableModel model) {
+    if (_jobTableModel == model) return;
+    if (_jobTableModel != null) {
+      _jobTableModel = null;
+      _jobTableModel.remove(this);
+    }
+    _jobTableModel = model;
+    if (_jobTableModel != null) _jobTableModel.add(this);
   }
 
   private void wireReadyCancelButton() {

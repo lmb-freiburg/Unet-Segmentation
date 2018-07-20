@@ -1440,6 +1440,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
   @Override
   public void run(String arg) {
+    JobManager.instance().addJob(this);
     start();
   }
 

@@ -166,6 +166,7 @@ public class CreateBlobsJob extends Job implements PlugIn {
 
   @Override
   public void run(String arg) {
+    JobManager.instance().addJob(this);
     start();
   }
 

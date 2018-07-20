@@ -148,7 +148,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     if (ready() == ready) return;
     if (ready) {
       readyCancelButton().setText("Show");
-      if (jobTable() == null) finish();
+      if (jobTable() == null || !JobManager.instance().isVisible()) finish();
       else
           SwingUtilities.invokeLater(
               new Runnable() {
@@ -786,6 +786,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
   @Override
   public void run(String arg) {
+    JobManager.instance().addJob(this);
     start();
   }
 
