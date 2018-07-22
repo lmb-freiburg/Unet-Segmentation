@@ -59,6 +59,9 @@ import java.util.Vector;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
+import java.lang.reflect.Field;
+import java.lang.IllegalAccessException;
+import java.lang.NoSuchFieldException;
 
 // For remote SSH connections
 import com.jcraft.jsch.Session;
@@ -1356,6 +1359,24 @@ public class Tools {
     return outfiles;
   }
 
+  public static int getPID(Process p) {
+    if (p.getClass().getName().equals("java.lang.UNIXProcess")) {
+      try {
+        Field f = p.getClass().getDeclaredField("pid");
+        f.setAccessible(true);
+        return f.getInt(p);
+      }
+      catch (NoSuchFieldException e) {
+        System.out.println("Could not get Process ID: " + e);
+        return -1;
+      }
+      catch (IllegalAccessException e) {
+        System.out.println("Could not get Process ID: " + e);
+      }
+    }
+    return -1;
+  }
+  
   public static ProcessResult execute(
       Vector<String> command, ProgressMonitor pr)
       throws IOException, InterruptedException {
@@ -1367,7 +1388,6 @@ public class Tools {
     IJ.log("$ " + cmdString);
 
     Process p = new ProcessBuilder(command).start();
-
     BufferedReader stdOutput =
         new BufferedReader(new InputStreamReader(p.getInputStream()));
     BufferedReader stdError =

@@ -1268,6 +1268,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
     Channel channel = null;
     Process p = null;
+    int pid = -1;
     BufferedReader stdOutput = null;
     BufferedReader stdError = null;
     if (sshSession() == null)
@@ -1298,12 +1299,13 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
                 gpuAttribute, gpuValue);
       }
       p = pb.start();
+      pid = Tools.getPID(p);
       stdOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
       stdError = new BufferedReader(new InputStreamReader(p.getErrorStream()));
     }
     else {
       channel = sshSession().openChannel("exec");
-      ((ChannelExec)channel).setCommand(commandLineString);
+      ((ChannelExec)channel).setCommand("echo $$ && exec " + commandLineString);
       stdOutput =
           new BufferedReader(new InputStreamReader(channel.getInputStream()));
       stdError =
@@ -1316,6 +1318,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     String line = null;
     String errorMsg = new String();
 
+    boolean firstLine = true;
     try {
       while (true) {
 
@@ -1323,6 +1326,10 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         // all available lines from the buffer and update progress
         while (stdOutput.ready()) {
           line = stdOutput.readLine();
+          if (firstLine) {
+            pid = Integer.parseInt(line);
+            firstLine = false;
+          }
           parseCaffeOutputString(line);
         }
         // Also read error stream to avoid stream overflow that leads
@@ -1353,6 +1360,47 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       if (sshSession() != null) channel.disconnect();
     }
     catch (InterruptedException e) {
+      if (pid != -1) {
+        if (sshSession() != null)
+            Tools.execute(
+                "kill -2 " + pid, sshSession(), progressMonitor());
+        else {
+          Vector<String> command = new Vector<String>();
+          command.add("kill");
+          command.add("-2");
+          command.add(new Integer(pid).toString());
+          Tools.execute(command, progressMonitor());
+        }
+        try {
+          while (true) {
+            while (stdOutput.ready()) {
+              String l = stdOutput.readLine();
+              IJ.log(l);
+              String[] snapshot = l.split(
+                  id() + "-snapshot_iter_[0-9]+[.]caffemodel[.]h5");
+              if (snapshot.length > 1)
+                  IJ.log("Snapshot written to " + snapshot[1]);
+            }
+            while (stdError.ready()) IJ.log(stdError.readLine());
+            if (sshSession() != null) {
+              if (channel.isClosed()) {
+                if(stdOutput.ready() || stdError.ready()) continue;
+                exitStatus = channel.getExitStatus();
+                break;
+              }
+            }
+            else {
+              try {
+                exitStatus = p.exitValue();
+                break;
+              }
+              catch (IllegalThreadStateException eInner) {}
+            }
+            Thread.sleep(100);
+          }
+        }
+        catch (InterruptedException eInner) {}
+      }
       if (sshSession() != null) channel.disconnect();
       else p.destroy();
       throw e;
@@ -1734,9 +1782,6 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         progressMonitor().pop(); // Converting image
       }
 
-      System.out.println(progressMonitor().taskString());
-      System.out.println();
-
       progressMonitor().pop(); // Converting validation files
       progressMonitor().pop(); // Data conversion (0.01 - 0.1)
       progressMonitor().push("Creating prototxt files", 0.1f, 0.11f);
@@ -1745,9 +1790,6 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
       progressMonitor().pop(); // Prototxt generation
       progressMonitor().push("U-Net finetuning", 0.1f, 1.0f);
-
-      System.out.println(progressMonitor().taskString());
-      System.out.println();
 
       runFinetuning();
       if (interrupted()) throw new InterruptedException();
