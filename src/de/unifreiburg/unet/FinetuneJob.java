@@ -1360,6 +1360,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       if (sshSession() != null) channel.disconnect();
     }
     catch (InterruptedException e) {
+      String snapshot = null;
       if (pid != -1) {
         if (sshSession() != null)
             Tools.execute(
@@ -1375,13 +1376,14 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           while (true) {
             while (stdOutput.ready()) {
               String l = stdOutput.readLine();
-              IJ.log(l);
-              String[] snapshot = l.split(
-                  id() + "-snapshot_iter_[0-9]+[.]caffemodel[.]h5");
-              if (snapshot.length > 1)
-                  IJ.log("Snapshot written to " + snapshot[1]);
+              String l2 = l.replaceFirst("^.* Snapshotting to HDF5 file ", "");
+              if (!l.equals(l2)) snapshot = l2;
             }
-            while (stdError.ready()) IJ.log(stdError.readLine());
+            while (stdError.ready()) {
+              String l = stdError.readLine();
+              String l2 = l.replaceFirst("^.* Snapshotting to HDF5 file ", "");
+              if (!l.equals(l2)) snapshot = l2;
+            }
             if (sshSession() != null) {
               if (channel.isClosed()) {
                 if(stdOutput.ready() || stdError.ready()) continue;
@@ -1403,7 +1405,15 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       }
       if (sshSession() != null) channel.disconnect();
       else p.destroy();
-      throw e;
+      if (snapshot == null) throw e;
+      else {
+        nIter = Integer.parseInt(
+            snapshot.replaceFirst("^.*_iter_", "").replaceFirst(
+                ".caffemodel.h5$", ""));
+        IJ.log("Snapshot at iteration " + nIter + " written to " +
+               snapshot);
+        exitStatus = 0;
+      }
     }
 
     if (exitStatus != 0) {
