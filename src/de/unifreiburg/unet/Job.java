@@ -59,15 +59,18 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 
 import java.io.File;
 import java.io.FileFilter;
+
 import java.util.UUID;
+import java.util.Vector;
 
 import com.jcraft.jsch.Session;
+import com.jcraft.jsch.JSchException;
 
 import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
 
 public abstract class Job extends Thread {
 
-  private final String _jobId = "unet-" + UUID.randomUUID().toString();
+  private String _jobId = "unet-" + UUID.randomUUID().toString();
   private boolean _isInteractive = true;
 
   // Progress related variables
@@ -94,6 +97,9 @@ public abstract class Job extends Thread {
           (Icon)UIManager.get("FileView.directoryIcon")) : new JButton("...");
   private final JPanel _dialogPanel = new JPanel();
 
+  // Local files the job created. Remove them in reverse order in Job cleanup()
+  protected final Vector<File> _createdLocalFiles = new Vector<File>();
+
   public Job() {
     _jobTableModel = null;
     _progressMonitor = new ProgressMonitor(this);
@@ -104,6 +110,30 @@ public abstract class Job extends Thread {
     _jobTableModel = model;
     _progressMonitor = new ProgressMonitor(this);
     wireReadyCancelButton();
+  }
+
+  protected void setId(String id) {
+    _jobId = id;
+  }
+
+  public final String id() {
+    return _jobId;
+  }
+
+  public String imageName() {
+    return "N/A";
+  }
+
+  public String weightsFileName() {
+    return "N/A";
+  }
+
+  public String hostname() {
+    return "N/A";
+  }
+
+  public Session sshSession() throws JSchException, InterruptedException {
+    return null;
   }
 
   public void setJobTableModel(JobTableModel model) {
@@ -123,18 +153,6 @@ public abstract class Job extends Thread {
             if (ready()) finish();
             else if (isAlive()) interrupt();
           }});
-  }
-
-  public String weightsFileName() {
-    return "N/A";
-  }
-
-  public Session sshSession() {
-    return null;
-  }
-
-  public final String id() {
-    return _jobId;
   }
 
   protected final JobTableModel jobTable() {
@@ -208,10 +226,6 @@ public abstract class Job extends Thread {
     cleanUp();
     IJ.log("U-Net job finished");
     IJ.showProgress(1.0);
-  }
-
-  public String imageName() {
-    return "N/A";
   }
 
   private void searchModels(File folder) {
@@ -446,8 +460,25 @@ public abstract class Job extends Thread {
     return true;
   }
 
-  public void cleanUp() {
+  public void cleanUp(boolean keepFiles) {
+    boolean deleteFiles = !keepFiles;
+    try {
+      deleteFiles |= sshSession() != null;
+    }
+    catch (JSchException|InterruptedException e) {}
+
+    if (deleteFiles) {
+      for (int i = _createdLocalFiles.size() - 1; i >= 0; --i) {
+        IJ.log("Removing " + _createdLocalFiles.get(i).getAbsolutePath());
+        _createdLocalFiles.get(i).delete();
+      }
+    }
+
     if (_jobTableModel != null) _jobTableModel.deleteJob(this);
+  }
+
+  public final void cleanUp() {
+    cleanUp(false);
   }
 
   public final void showMessage(String msg) {

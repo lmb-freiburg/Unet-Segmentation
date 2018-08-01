@@ -228,13 +228,11 @@ public class SftpFileIO {
 
 /*======================================================================*/
 /*!
- *   Fetch the remote file with given path via sftp. The file will be marked
- *   for deletion (deleteOnExit()) on Java virtual machine shutdown. So if
- *   you want to keep it you have to explicitly remove this flag from the
- *   File after the copy process.
+ *   Fetch the remote file with given path via sftp.
  *
  *   \param inFileName The file to copy on the remote host
  *   \param outFile The File on the local host to create
+ *   \return A Vector containing all files and folders that were created
  *
  *   \exception JSchException if the SSH session is not open
  *   \exception IOException if the file could not be copied
@@ -242,26 +240,26 @@ public class SftpFileIO {
  *   \exception SftpException if the Sftp connection fails
  */
 /*======================================================================*/
-  public void get(
+  public Vector<File> get(
       String inFileName, File outFile)
       throws JSchException, IOException, InterruptedException, SftpException {
 
-    Vector<File> createdFolders = new Vector<File>();
+    Vector<File> createdFiles = new Vector<File>();
     File folder = outFile.getParentFile();
     while (folder != null && !folder.isDirectory()) {
-      createdFolders.add(folder);
+      createdFiles.add(folder);
       folder = folder.getParentFile();
     }
-    for (int i = createdFolders.size() - 1; i >= 0; --i) {
-      _pr.count("Creating folder '" + createdFolders.get(i) + "'", 0);
-      IJ.log("$ mkdir \"" + createdFolders.get(i) + "\"");
-      if (!createdFolders.get(i).mkdir())
+    for (int i = createdFiles.size() - 1; i >= 0; --i) {
+      _pr.count("Creating folder '" + createdFiles.get(i) + "'", 0);
+      IJ.log("$ mkdir \"" + createdFiles.get(i) + "\"");
+      if (!createdFiles.get(i).mkdir())
           throw new IOException(
               "Could not create folder '" +
-              createdFolders.get(i).getAbsolutePath() + "'");
-      createdFolders.get(i).deleteOnExit();
+              createdFiles.get(i).getAbsolutePath() + "'");
     }
-    outFile.deleteOnExit();
+    createdFiles.add(outFile);
+
     ChannelSftp channel = (ChannelSftp)_session.openChannel("sftp");
     channel.connect();
     channel.cd(channel.getHome());
@@ -276,6 +274,8 @@ public class SftpFileIO {
     channel.disconnect();
     if (_pr.canceled())
         throw new InterruptedException("Download canceled by user");
+
+    return createdFiles;
   }
 
 }

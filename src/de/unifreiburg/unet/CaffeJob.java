@@ -92,7 +92,6 @@ public abstract class CaffeJob extends Job {
   private final JPanel _tilingParametersPanel = new JPanel(new BorderLayout());
 
   private final JComboBox<String> _useGPUComboBox = new JComboBox<>(gpuList);
-  private Session _sshSession = null;
 
   protected final Vector<String> _createdRemoteFolders = new Vector<String>();
   protected final Vector<String> _createdRemoteFiles = new Vector<String>();
@@ -146,14 +145,13 @@ public abstract class CaffeJob extends Job {
   }
 
   @Override
-  public final Session sshSession() {
-    return _sshSession;
+  public String hostname() {
+    return _hostConfiguration.hostname();
   }
 
-  protected final void setSshSession(Session session) {
-    if (_sshSession == session) return;
-    if (_sshSession != null) _sshSession.disconnect();
-    _sshSession = session;
+  @Override
+  public final Session sshSession() throws JSchException, InterruptedException {
+    return _hostConfiguration.sshSession();
   }
 
   protected String selectedGPUString() {
@@ -388,183 +386,191 @@ public abstract class CaffeJob extends Job {
             "Please enter the server name for remote processing.");
         return false;
       }
-
-      try {
-        _sshSession = _hostConfiguration.sshSession();
-      }
-      catch (JSchException e) {
-        showError(
-            "Could not connect to remote host '" +
-            _hostConfiguration.hostname() +
-            "'\nPlease check your login credentials.", e);
-        return false;
-      }
     }
 
-    if (sshSession() != null) {
-      try {
-        File tmpFile = File.createTempFile(id(), null);
-        SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
-        _createdRemoteFolders.addAll(
-            sftp.put(tmpFile, processFolder() + tmpFile.getName()));
-        sftp.removeFile(processFolder() + tmpFile.getName());
-        tmpFile.delete();
-      }
-      catch (IOException e) {
-        showError(
-            "Cannot create files in the temporary folder of your " +
-            "local file system.\n" +
-            "Check write permissions and avaliable disk space.", e);
-        return false;
-      }
-      catch (JSchException e) {
-        showError(
-            "The SSH session has been prematurely disconnected.\n" +
-            "This should not happen and indicates general network " +
-            "problems.", e);
-        return false;
-      }
-      catch (SftpException e) {
-        showError("File upload to " + processFolder() + " failed.\n" +
-                  "Please select a folder with write permissions.", e);
-        return false;
-      }
+    try {
+      sshSession();
     }
-    else {
-      try {
-        File tmpFile = new File(processFolder() + id() + ".tmp");
-        tmpFile.createNewFile();
-        tmpFile.delete();
-      }
-      catch (IOException e) {
-        showError("Cannot write to " + processFolder() + ".\n" +
-                  "Check write permissions and avaliable disk space.", e);
-        return false;
-      }
+    catch (JSchException e) {
+      showError("Could not connect to " + _hostConfiguration.hostname() +
+                ".\nPlease check your login credentials.", e);
+      return false;
     }
 
-    // Check whether caffe binary exists and is executable
-    ProcessResult res = null;
-    String caffeBinaryPath = Prefs.get("unet.caffeBinary", "caffe");
-    String caffeBaseDir = caffeBinaryPath.replaceFirst("[^/]*$", "");
-    while (res == null)
+    try
     {
-      if (sshSession() == null) {
+      if (sshSession() != null) {
         try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(caffeBinaryPath);
-          res = Tools.execute(cmd, progressMonitor());
+          File tmpFile = File.createTempFile(id(), null);
+          SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
+          _createdRemoteFolders.addAll(
+              sftp.put(tmpFile, processFolder() + tmpFile.getName()));
+          sftp.removeFile(processFolder() + tmpFile.getName());
+          tmpFile.delete();
         }
         catch (IOException e) {
-          res = new ProcessResult();
-          res.exitStatus = 1;
-          res.cause = e;
+          showError(
+              "Cannot create files in the temporary folder of your " +
+              "local file system.\n" +
+              "Check write permissions and avaliable disk space.", e);
+          return false;
+        }
+        catch (SftpException e) {
+          showError("File upload to " + processFolder() + " failed.\n" +
+                    "Please select a folder with write permissions.", e);
+          return false;
         }
       }
       else {
         try {
-          String cmd = caffeBinaryPath;
-          res = Tools.execute(cmd, sshSession(), progressMonitor());
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-          res.cause = e;
+          File tmpFile = new File(processFolder() + id() + ".tmp");
+          tmpFile.createNewFile();
+          tmpFile.delete();
         }
         catch (IOException e) {
-          res.exitStatus = 1;
-          res.cause = e;
+          showError("Cannot write to " + processFolder() + ".\n" +
+                    "Check write permissions and avaliable disk space.", e);
+          return false;
         }
       }
-      if (res.exitStatus != 0) {
-        IJ.log("caffe not found");
-        if (res.cause != null) IJ.log("Error message: " + res.cause);
-        String caffePath = JOptionPane.showInputDialog(
-            WindowManager.getActiveWindow(), "caffe was not found.\n" +
-            "Please specify your caffe binary\n",
-            Prefs.get("unet.caffeBinary", caffeBaseDir + "caffe"));
-        if (caffePath == null)
-            throw new InterruptedException("Dialog canceled");
-        if (caffePath.equals(""))
-            Prefs.set("unet.caffeBinary", caffeBaseDir + "caffe");
-        else Prefs.set("unet.caffeBinary", caffePath);
-        res = null;
+
+      // Check whether caffe binary exists and is executable
+      ProcessResult res = null;
+      String caffeBinaryPath = Prefs.get("unet.caffeBinary", "caffe");
+      String caffeBaseDir = caffeBinaryPath.replaceFirst("[^/]*$", "");
+      while (res == null)
+      {
+        if (sshSession() == null) {
+          try {
+            Vector<String> cmd = new Vector<String>();
+            cmd.add(caffeBinaryPath);
+            res = Tools.execute(cmd, progressMonitor());
+          }
+          catch (IOException e) {
+            res = new ProcessResult();
+            res.exitStatus = 1;
+            res.cause = e;
+          }
+        }
+        else {
+          try {
+            String cmd = caffeBinaryPath;
+            res = Tools.execute(cmd, sshSession(), progressMonitor());
+          }
+          catch (JSchException e) {
+            res.exitStatus = 1;
+            res.cause = e;
+          }
+          catch (IOException e) {
+            res.exitStatus = 1;
+            res.cause = e;
+          }
+        }
+        if (res.exitStatus != 0) {
+          IJ.log("caffe not found");
+          if (res.cause != null) IJ.log("Error message: " + res.cause);
+          String caffePath = JOptionPane.showInputDialog(
+              WindowManager.getActiveWindow(), "caffe was not found.\n" +
+              "Please specify your caffe binary\n",
+              Prefs.get("unet.caffeBinary", caffeBaseDir + "caffe"));
+          if (caffePath == null)
+              throw new InterruptedException("Dialog canceled");
+          if (caffePath.equals(""))
+              Prefs.set("unet.caffeBinary", caffeBaseDir + "caffe");
+          else Prefs.set("unet.caffeBinary", caffePath);
+          res = null;
+        }
+      }
+
+      // Check whether caffe_unet binary exists and is executable
+      res = null;
+      while (res == null)
+      {
+        if (sshSession() == null) {
+          try {
+            Vector<String> cmd = new Vector<String>();
+            cmd.add(Prefs.get(
+                        "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
+            res = Tools.execute(cmd, progressMonitor());
+          }
+          catch (IOException e) {
+            res = new ProcessResult();
+            res.exitStatus = 1;
+            res.cause = e;
+          }
+        }
+        else {
+          try {
+            String cmd = Prefs.get(
+                "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
+            res = Tools.execute(cmd, sshSession(), progressMonitor());
+          }
+          catch (JSchException e) {
+            res.exitStatus = 1;
+            res.cause = e;
+          }
+          catch (IOException e) {
+            res.exitStatus = 1;
+            res.cause = e;
+          }
+        }
+        if (res.exitStatus != 0) {
+          IJ.log("caffe_unet not found");
+          if (res.cause != null) IJ.log("Error message: " + res.cause);
+          String caffePath = JOptionPane.showInputDialog(
+              WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
+              "Please specify your caffe_unet binary\n",
+              Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
+          if (caffePath == null)
+              throw new InterruptedException("Dialog canceled");
+          if (caffePath.equals(""))
+              Prefs.set("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
+          else Prefs.set("unet.caffe_unetBinary", caffePath);
+          res = null;
+        }
       }
     }
-
-    // Check whether caffe_unet binary exists and is executable
-    res = null;
-    while (res == null)
-    {
-      if (sshSession() == null) {
-        try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(Prefs.get(
-                      "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-          res = Tools.execute(cmd, progressMonitor());
-        }
-        catch (IOException e) {
-          res = new ProcessResult();
-          res.exitStatus = 1;
-          res.cause = e;
-        }
-      }
-      else {
-        try {
-          String cmd = Prefs.get(
-              "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
-          res = Tools.execute(cmd, sshSession(), progressMonitor());
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-          res.cause = e;
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-          res.cause = e;
-        }
-      }
-      if (res.exitStatus != 0) {
-        IJ.log("caffe_unet not found");
-        if (res.cause != null) IJ.log("Error message: " + res.cause);
-        String caffePath = JOptionPane.showInputDialog(
-            WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
-            "Please specify your caffe_unet binary\n",
-            Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-        if (caffePath == null)
-            throw new InterruptedException("Dialog canceled");
-        if (caffePath.equals(""))
-            Prefs.set("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
-        else Prefs.set("unet.caffe_unetBinary", caffePath);
-        res = null;
-      }
+    catch (JSchException e) {
+      showError("SSH connection failed", e);
+      return false;
     }
 
     return true;
   }
 
-  public void cleanUp() {
-    for (int i = 0; i < _createdRemoteFiles.size(); i++) {
-      try {
-        new SftpFileIO(_sshSession, progressMonitor()).removeFile(
-            _createdRemoteFiles.get(i));
+  @Override
+  public void cleanUp(boolean keepFiles) {
+    if (!keepFiles) {
+      for (int i = 0; i < _createdRemoteFiles.size(); i++) {
+        try {
+          new SftpFileIO(sshSession(), progressMonitor()).removeFile(
+              _createdRemoteFiles.get(i));
+        }
+        catch (Exception e) {
+          IJ.log("Could not remove temporary file " +
+                 _createdRemoteFiles.get(i) + ": " + e);
+        }
       }
-      catch (Exception e) {
-        IJ.log("Could not remove temporary file " +
-               _createdRemoteFiles.get(i) + ": " + e);
+      for (int i = 0; i < _createdRemoteFolders.size(); i++) {
+        try {
+          new SftpFileIO(sshSession(), progressMonitor()).removeFolder(
+              _createdRemoteFolders.get(i));
+        }
+        catch (Exception e) {
+          IJ.log("Could not remove temporary folder " +
+                 _createdRemoteFolders.get(i) + ": " + e);
+        }
       }
     }
-    for (int i = 0; i < _createdRemoteFolders.size(); i++) {
-      try {
-        new SftpFileIO(_sshSession, progressMonitor()).removeFolder(
-            _createdRemoteFolders.get(i));
-      }
-      catch (Exception e) {
-        IJ.log("Could not remove temporary folder " +
-               _createdRemoteFolders.get(i) + ": " + e);
-      }
+
+    // super.cleanUp checks SSH connection, so call it before disconnect!
+    super.cleanUp(keepFiles);
+
+    // Now we can safely disconnect
+    try {
+      if (sshSession() != null) sshSession().disconnect();
     }
-    if (_sshSession != null) _sshSession.disconnect();
-    super.cleanUp();
+    catch (JSchException|InterruptedException e) {}
   }
 
 };

@@ -38,6 +38,8 @@ import javax.swing.table.AbstractTableModel;
 import javax.swing.JOptionPane;
 import java.util.Vector;
 
+import com.jcraft.jsch.JSchException;
+
 public class JobTableModel extends AbstractTableModel {
 
   private String[] _columnNames = {
@@ -90,8 +92,7 @@ public class JobTableModel extends AbstractTableModel {
       return _jobs.get(row).weightsFileName();
     }
     case 4: {
-      return (_jobs.get(row).sshSession() != null) ?
-          _jobs.get(row).sshSession().getHost() : "localhost";
+      return _jobs.get(row).hostname();
     }
     case 5: {
       return _jobs.get(row).progressMonitor();
@@ -173,8 +174,8 @@ public class JobTableModel extends AbstractTableModel {
     if (row >= 0) fireTableCellUpdated(row, 6);
   }
 
-  public void updateJobDownloadEnabled(String jobId) {
-    int row = getRow(jobId);
+  public void updateJobDownloadEnabled(Job job) {
+    int row = getRow(job);
     if (row >= 0) fireTableCellUpdated(row, 7);
   }
 

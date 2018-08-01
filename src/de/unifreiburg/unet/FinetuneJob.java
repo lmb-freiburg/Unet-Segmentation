@@ -43,6 +43,7 @@ import ij.gui.PlotWindow;
 import ij.gui.Roi;
 import ij.gui.PointRoi;
 import ij.gui.ImageRoi;
+import ij.plugin.frame.Recorder;
 
 import java.awt.Dimension;
 import java.awt.BorderLayout;
@@ -96,6 +97,11 @@ import caffe.Caffe;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.TextFormat.Parser;
 import com.google.protobuf.TextFormat;
+
+import ch.systemsx.cisd.hdf5.HDF5Factory;
+import ch.systemsx.cisd.hdf5.IHDF5Reader;
+import ch.systemsx.cisd.hdf5.IHDF5Writer;
+import ch.systemsx.cisd.hdf5.IHDF5WriterConfigurator;
 
 public class FinetuneJob extends CaffeJob implements PlugIn {
 
@@ -172,6 +178,10 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
   private double[][] _f1Segmentation = null;
 
   private boolean _trainFromScratch = false;
+  private boolean _isResuming = false;
+  private String _solverstate = null;
+  private int _nIter = 0;
+  private Vector<String> _cmd = new Vector<String>();
 
   protected ModelDefinition _finetunedModel = null;
 
@@ -186,8 +196,71 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
   @Override
   public void finish() {
     if (progressMonitor().finished()) return;
+    try {
+      showMessage(
+          "Finetuned weights have been saved to " +
+          _finetunedModel.weightFile +
+          ((sshSession() != null) ? " on the remote host." : ""));
+    }
+    catch (JSchException|InterruptedException e) {}
     IJ.log("Finetuning finished");
     super.finish();
+  }
+
+  @Override
+  public void abort() {
+    readyCancelButton().setText("Terminating...");
+    readyCancelButton().setEnabled(false);
+    progressMonitor().setCanceled(true);
+    if (Recorder.record) Recorder.setCommand(null);
+    boolean keepFiles = false;
+    if (_solverstate != null) {
+      try {
+        String msg =
+            "Finetuned weights have been saved to " +
+            _solverstate.replaceFirst(".solverstate.h5$", ".caffemodel.h5") +
+            ((sshSession() != null) ? " on the remote host." : "") +
+            "\nDo you want to keep generated files to resume finetuning later?";
+        int res = JOptionPane.showConfirmDialog(
+            WindowManager.getActiveWindow(), msg, "Save snapshot?",
+            JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (res == JOptionPane.YES_OPTION) {
+          File startFile = (_finetunedModel != null &&
+                            _finetunedModel.file != null &&
+                            _finetunedModel.file.getParentFile() != null) ?
+              new File(_finetunedModel.file.getParentFile(), "snapshot.h5") :
+              new File("snapshot.h5");
+          JFileChooser dlg = new JFileChooser(startFile);
+          dlg.setDialogTitle("Save Snapshot to");
+          dlg.setFileFilter(new FileNameExtensionFilter("*.h5", "h5", "H5"));
+          dlg.setMultiSelectionEnabled(false);
+          dlg.setFileSelectionMode(JFileChooser.FILES_ONLY);
+          dlg.setSelectedFile(startFile);
+          int res2 = dlg.showSaveDialog(WindowManager.getActiveWindow());
+          if (res2 == JFileChooser.APPROVE_OPTION) {
+            File outfile = dlg.getSelectedFile();
+            if (!outfile.exists() ||
+                (outfile.exists() &&
+                 JOptionPane.showConfirmDialog(
+                     WindowManager.getActiveWindow(),
+                     "The selected file already exists.\nDo you want to " +
+                     "overwrite it?", "Overwrite existing file?",
+                     JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE) ==
+                 JOptionPane.YES_OPTION)) {
+              saveSnapshot(dlg.getSelectedFile());
+              keepFiles = true;
+            }
+          }
+        }
+      }
+      catch (JSchException e) {
+        showError("SSH connection failed", e);
+      }
+      catch (InterruptedException e) {}
+    }
+    cleanUp(keepFiles);
+    IJ.log("U-Net job aborted");
+    IJ.showProgress(1.0);
   }
 
   @Override
@@ -429,9 +502,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             if (model() == null) return;
             if (_trainFileList.getModel().getSize() == 0) return;
             ImagePlus imp = _trainFileList.getModel().getElementAt(0);
-            model().setElementSizeUm(
-                Tools.getElementSizeUmFromCalibration(
-                    imp.getCalibration(), model().nDims()));
+            model().setElementSizeUm(Tools.getElementSizeUm(imp));
           }});
 
     super.finalizeDialog();
@@ -511,189 +582,195 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
     ProcessResult res = null;
 
-    if (sshSession() != null) {
+    try
+    {
+      if (sshSession() != null) {
 
-      try {
-        model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
-        _createdRemoteFolders.addAll(
-            new SftpFileIO(sshSession(), progressMonitor()).put(
-                model().file, model().remoteAbsolutePath));
-        _createdRemoteFiles.add(model().remoteAbsolutePath);
-        Prefs.set("unet.processfolder", processFolder());
-      }
-      catch (SftpException|JSchException e) {
-        showError("Model upload failed.\nDo you have sufficient " +
-                  "permissions to create the processing folder on " +
-                  "the remote host?", e);
-        return false;
-      }
-      catch (IOException e) {
-        showError("Model upload failed. Could not read model file.", e);
-        return false;
-      }
+        try {
+          model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
+          _createdRemoteFolders.addAll(
+              new SftpFileIO(sshSession(), progressMonitor()).put(
+                  model().file, model().remoteAbsolutePath));
+          _createdRemoteFiles.add(model().remoteAbsolutePath);
+          Prefs.set("unet.processfolder", processFolder());
+        }
+        catch (SftpException|JSchException e) {
+          showError("Model upload failed.\nDo you have sufficient " +
+                    "permissions to create the processing folder on " +
+                    "the remote host?", e);
+          return false;
+        }
+        catch (IOException e) {
+          showError("Model upload failed. Could not read model file.", e);
+          return false;
+        }
 
-      try {
-        boolean weightsUploaded = false;
-        do {
-          String cmd =
-              caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
-              model().remoteAbsolutePath + "\" -weights \"" +
-              weightsFileName() + "\" -n_channels " + _nChannels + " " +
-              caffeGPUParameter();
-          res = Tools.execute(cmd, sshSession(), progressMonitor());
-          if (weightsUploaded && res.exitStatus != 0) break;
-          if (!weightsUploaded && res.exitStatus != 0) {
-            Object[] options = {
-                "Train from scratch", "Upload weights", "Cancel" };
-            int selectedOption = JOptionPane.showOptionDialog(
+        try {
+          boolean weightsUploaded = false;
+          do {
+            String cmd =
+                caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
+                model().remoteAbsolutePath + "\" -weights \"" +
+                weightsFileName() + "\" -n_channels " + _nChannels + " " +
+                caffeGPUParameter();
+            res = Tools.execute(cmd, sshSession(), progressMonitor());
+            if (weightsUploaded && res.exitStatus != 0) break;
+            if (!weightsUploaded && res.exitStatus != 0) {
+              Object[] options = {
+                  "Train from scratch", "Upload weights", "Cancel" };
+              int selectedOption = JOptionPane.showOptionDialog(
+                  WindowManager.getActiveWindow(),
+                  "No compatible pre-trained weights found at the given " +
+                  "location on the server.\n" +
+                  "Please select whether you want to train from scratch or " +
+                  "upload weights.", "No weights found",
+                  JOptionPane.YES_NO_CANCEL_OPTION,
+                  JOptionPane.QUESTION_MESSAGE,
+                  null, options, options[0]);
+              switch (selectedOption) {
+              case JOptionPane.YES_OPTION:
+                _trainFromScratch = true;
+                res.exitStatus = 0;
+                break;
+              case JOptionPane.NO_OPTION: {
+                File startFile =
+                    (model() == null ||
+                     model().file == null ||
+                     model().file.getParentFile() == null) ?
+                    new File(".") : model().file.getParentFile();
+                JFileChooser f = new JFileChooser(startFile);
+                f.setDialogTitle("Select trained U-Net weights");
+                f.setFileFilter(
+                    new FileNameExtensionFilter(
+                        "*.h5 or *.caffemodel",
+                        "h5", "H5", "caffemodel", "CAFFEMODEL"));
+                f.setMultiSelectionEnabled(false);
+                f.setFileSelectionMode(JFileChooser.FILES_ONLY);
+                int res2 = f.showDialog(
+                    WindowManager.getActiveWindow(), "Select");
+                if (res2 != JFileChooser.APPROVE_OPTION)
+                    throw new InterruptedException("Aborted by user");
+                try {
+                  new SftpFileIO(sshSession(), progressMonitor()).put(
+                      f.getSelectedFile(), weightsFileName());
+                  weightsUploaded = true;
+                }
+                catch (SftpException e) {
+                  res.exitStatus = 3;
+                  res.shortErrorString =
+                      "Upload failed.\nDo you have sufficient " +
+                      "permissions to create a file at the given " +
+                      "backend server path?";
+                  res.cerr = e.getMessage();
+                  res.cause = e;
+                  break;
+                }
+                break;
+              }
+              case JOptionPane.CANCEL_OPTION:
+              case JOptionPane.CLOSED_OPTION:
+                throw new InterruptedException("Aborted by user");
+              }
+            }
+          }
+          while (res.exitStatus != 0);
+        }
+        catch (JSchException e) {
+          res.exitStatus = 1;
+          res.shortErrorString = "SSH connection error";
+          res.cerr = e.getMessage();
+          res.cause = e;
+        }
+        catch (IOException e) {
+          res.exitStatus = 1;
+          res.shortErrorString = "Input/Output error";
+          res.cerr = e.getMessage();
+          res.cause = e;
+        }
+      }
+      else {
+        try {
+          Vector<String> cmd = new Vector<String>();
+          cmd.add(caffe_unetBinary);
+          cmd.add("check_model_and_weights_h5");
+          cmd.add("-model");
+          cmd.add(model().file.getAbsolutePath());
+          cmd.add("-weights");
+          cmd.add(weightsFileName());
+          cmd.add("-n_channels");
+          cmd.add(new Integer(_nChannels).toString());
+          if (!caffeGPUParameter().equals("")) {
+            cmd.add(caffeGPUParameter().split(" ")[0]);
+            cmd.add(caffeGPUParameter().split(" ")[1]);
+          }
+          res = Tools.execute(cmd, progressMonitor());
+          if (res.exitStatus != 0) {
+            int selectedOption = JOptionPane.showConfirmDialog(
                 WindowManager.getActiveWindow(),
                 "No compatible pre-trained weights found at the given " +
-                "location on the server.\n" +
-                "Please select whether you want to train from scratch or " +
-                "upload weights.", "No weights found",
+                "location.\n" +
+                "Do you want to train from scratch?", "Start new Training?",
                 JOptionPane.YES_NO_CANCEL_OPTION,
-                JOptionPane.QUESTION_MESSAGE,
-                null, options, options[0]);
+                JOptionPane.QUESTION_MESSAGE);
             switch (selectedOption) {
             case JOptionPane.YES_OPTION:
               _trainFromScratch = true;
               res.exitStatus = 0;
               break;
-            case JOptionPane.NO_OPTION: {
-              File startFile =
-                  (model() == null ||
-                   model().file == null ||
-                   model().file.getParentFile() == null) ?
-                  new File(".") : model().file.getParentFile();
-              JFileChooser f = new JFileChooser(startFile);
-              f.setDialogTitle("Select trained U-Net weights");
-              f.setFileFilter(
-                  new FileNameExtensionFilter(
-                      "*.h5 or *.caffemodel",
-                      "h5", "H5", "caffemodel", "CAFFEMODEL"));
-              f.setMultiSelectionEnabled(false);
-              f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-              int res2 = f.showDialog(
-                  WindowManager.getActiveWindow(), "Select");
-              if (res2 != JFileChooser.APPROVE_OPTION)
-                  throw new InterruptedException("Aborted by user");
-              try {
-                new SftpFileIO(sshSession(), progressMonitor()).put(
-                    f.getSelectedFile(), weightsFileName());
-                weightsUploaded = true;
-              }
-              catch (SftpException e) {
-                res.exitStatus = 3;
-                res.shortErrorString =
-                    "Upload failed.\nDo you have sufficient " +
-                    "permissions to create a file at the given " +
-                    "backend server path?";
-                res.cerr = e.getMessage();
-                res.cause = e;
-                break;
-              }
+            case JOptionPane.NO_OPTION:
+              res.exitStatus = 2;
+              res.shortErrorString = "Weight file selection required";
+              res.cerr = "Weight file " + weightsFileName() + " not found";
               break;
-            }
             case JOptionPane.CANCEL_OPTION:
             case JOptionPane.CLOSED_OPTION:
               throw new InterruptedException("Aborted by user");
             }
           }
         }
-        while (res.exitStatus != 0);
-      }
-      catch (JSchException e) {
-        res.exitStatus = 1;
-        res.shortErrorString = "SSH connection error";
-        res.cerr = e.getMessage();
-        res.cause = e;
-      }
-      catch (IOException e) {
-        res.exitStatus = 1;
-        res.shortErrorString = "Input/Output error";
-        res.cerr = e.getMessage();
-        res.cause = e;
-      }
-    }
-    else {
-      try {
-        Vector<String> cmd = new Vector<String>();
-        cmd.add(caffe_unetBinary);
-        cmd.add("check_model_and_weights_h5");
-        cmd.add("-model");
-        cmd.add(model().file.getAbsolutePath());
-        cmd.add("-weights");
-        cmd.add(weightsFileName());
-        cmd.add("-n_channels");
-        cmd.add(new Integer(_nChannels).toString());
-        if (!caffeGPUParameter().equals("")) {
-          cmd.add(caffeGPUParameter().split(" ")[0]);
-          cmd.add(caffeGPUParameter().split(" ")[1]);
-        }
-        res = Tools.execute(cmd, progressMonitor());
-        if (res.exitStatus != 0) {
-          int selectedOption = JOptionPane.showConfirmDialog(
-              WindowManager.getActiveWindow(),
-              "No compatible pre-trained weights found at the given " +
-              "location.\n" +
-              "Do you want to train from scratch?", "Start new Training?",
-              JOptionPane.YES_NO_CANCEL_OPTION,
-              JOptionPane.QUESTION_MESSAGE);
-          switch (selectedOption) {
-          case JOptionPane.YES_OPTION:
-            _trainFromScratch = true;
-            res.exitStatus = 0;
-            break;
-          case JOptionPane.NO_OPTION: {
-            res.exitStatus = 2;
-            res.shortErrorString = "Weight file selection required";
-            res.cerr = "Weight file " + weightsFileName() + " not found";
-            break;
-          }
-          case JOptionPane.CANCEL_OPTION:
-          case JOptionPane.CLOSED_OPTION:
-            throw new InterruptedException("Aborted by user");
-          }
+        catch (IOException e) {
+          res.exitStatus = 1;
+          res.shortErrorString = "Input/Output error";
+          res.cerr = e.getMessage();
+          res.cause = e;
         }
       }
-      catch (IOException e) {
-        res.exitStatus = 1;
-        res.shortErrorString = "Input/Output error";
-        res.cerr = e.getMessage();
-        res.cause = e;
+      if (res.exitStatus != 0) {
+        // User decided to change weight file, so don't bother him with
+        // additional message boxes
+        if (res.exitStatus == 2) return false;
+        showError(
+            "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
+        return false;
       }
+
+      Prefs.set("unet.finetuning.base_learning_rate",
+                (Double)_learningRateTextField.getValue());
+      Prefs.set("unet.finetuning.iterations",
+                (Integer)_iterationsSpinner.getValue());
+      Prefs.set("unet.finetuning.validation_step",
+                (Integer)_validationStepSpinner.getValue());
+      Prefs.set("unet.finetuning.downloadWeights",
+                _downloadWeightsCheckBox.isSelected());
+      Prefs.set("unet.finetuning." + model().id + ".modelName",
+                _modelNameTextField.getText());
+      Prefs.set("unet.finetuning." + model().id + ".outweights",
+                _outweightsTextField.getText());
+      Prefs.set("unet.finetuning." + model().id + ".modeldef",
+                _outModeldefTextField.getText());
+      Prefs.set("unet.finetuning.labelsAreClasses",
+                _labelsAreClassesCheckBox.isSelected());
+
+      _finetunedModel = model().duplicate();
+      _finetunedModel.id += "-" + id();
+      _finetunedModel.file = new File(_outModeldefTextField.getText());
+      _finetunedModel.name = _modelNameTextField.getText();
+      _finetunedModel.weightFile = _outweightsTextField.getText();
     }
-    if (res.exitStatus != 0) {
-      // User decided to change weight file, so don't bother him with
-      // additional message boxes
-      if (res.exitStatus == 2) return false;
-      showError(
-          "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
+    catch (JSchException e) {
+      showError("SSH connection failed", e);
       return false;
     }
-
-    Prefs.set("unet.finetuning.base_learning_rate",
-              (Double)_learningRateTextField.getValue());
-    Prefs.set("unet.finetuning.iterations",
-              (Integer)_iterationsSpinner.getValue());
-    Prefs.set("unet.finetuning.validation_step",
-              (Integer)_validationStepSpinner.getValue());
-    Prefs.set("unet.finetuning.downloadWeights",
-              _downloadWeightsCheckBox.isSelected());
-    Prefs.set("unet.finetuning." + model().id + ".modelName",
-              _modelNameTextField.getText());
-    Prefs.set("unet.finetuning." + model().id + ".outweights",
-              _outweightsTextField.getText());
-    Prefs.set("unet.finetuning." + model().id + ".modeldef",
-              _outModeldefTextField.getText());
-    Prefs.set("unet.finetuning.labelsAreClasses",
-              _labelsAreClassesCheckBox.isSelected());
-
-    _finetunedModel = model().duplicate();
-    _finetunedModel.id += "-" + id();
-    _finetunedModel.file = new File(_outModeldefTextField.getText());
-    _finetunedModel.name = _modelNameTextField.getText();
-    _finetunedModel.weightFile = _outweightsTextField.getText();
 
     return true;
   }
@@ -983,7 +1060,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       _createdRemoteFiles.add(trainFileListAbsolutePath);
       outfile.delete();
     }
-    else outfile.deleteOnExit();
+    else _createdLocalFiles.add(outfile);
 
     progressMonitor().pop();
     progressMonitor().push("Creating validation file list", 0.2f, 0.4f);
@@ -1005,7 +1082,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         _createdRemoteFiles.add(validFileListAbsolutePath);
         outfile.delete();
       }
-      else outfile.deleteOnExit();
+      else _createdLocalFiles.add(outfile);
     }
 
     progressMonitor().pop();
@@ -1141,7 +1218,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       File modelFile = new File(_finetunedModel.modelPrototxtAbsolutePath);
       modelFile.createNewFile();
       _finetunedModel.saveModelPrototxt(modelFile);
-      modelFile.deleteOnExit();
+      _createdLocalFiles.add(modelFile);
     }
 
     progressMonitor().pop();
@@ -1182,56 +1259,46 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           new File(_finetunedModel.solverPrototxtAbsolutePath);
       solverFile.createNewFile();
       _finetunedModel.saveSolverPrototxt(solverFile);
-      solverFile.deleteOnExit();
+      _createdLocalFiles.add(solverFile);
     }
 
     progressMonitor().pop();
   }
 
-  protected final void runFinetuning()
+  protected final void startFinetuning()
       throws JSchException, IOException, InterruptedException {
-
-    progressMonitor().count("Initializing U-Net", 0);
-
-    // Prepare caffe call
-    String gpuAttribute = new String();
-    String gpuValue = new String();
-    String selectedGPU = selectedGPUString();
-    if (selectedGPU.contains("GPU ")) {
-      gpuAttribute = "-gpu";
-      gpuValue = selectedGPU.substring(selectedGPU.length() - 1);
-    }
-    else if (selectedGPU.contains("all")) {
-      gpuAttribute = "-gpu";
-      gpuValue = "all";
-    }
-    String weightsAttribute = "";
-    String weightsValue = "";
+    _cmd.add(Prefs.get("unet.caffeBinary", "caffe"));
+    _cmd.add("train");
+    _cmd.add("-solver");
+    _cmd.add(_finetunedModel.solverPrototxtAbsolutePath);
     if (!_trainFromScratch) {
-      weightsAttribute = "-weights";
-      weightsValue = weightsFileName();
+      _cmd.add("-weights");
+      _cmd.add(weightsFileName());
     }
-    String commandString = Prefs.get("unet.caffeBinary", "caffe");
-    String commandLineString =
-        commandString + " train -solver " +
-        _finetunedModel.solverPrototxtAbsolutePath + " " +
-        weightsAttribute + " " + weightsValue + " " + gpuAttribute + " " +
-        gpuValue + " -sigint_effect stop";
-    IJ.log(commandLineString);
+    if (selectedGPUString().contains("GPU ")) {
+      _cmd.add("-gpu");
+      _cmd.add(selectedGPUString().substring(selectedGPUString().length() - 1));
+    }
+    else if (selectedGPUString().contains("all")) {
+      _cmd.add("-gpu");
+      _cmd.add("all");
+    }
+    _cmd.add("-sigint_effect");
+    _cmd.add("stop");
 
-    int nIter = (Integer)_iterationsSpinner.getValue();
-    int nValidations = nIter / (Integer)_validationStepSpinner.getValue();
+    _nIter = (Integer)_iterationsSpinner.getValue();
+    int nValidations = _nIter / (Integer)_validationStepSpinner.getValue();
+    int nClasses = _finetunedModel.classNames.length - 1;
 
     progressMonitor().push(
         "Finetuning", 0.0f,
         _downloadWeightsCheckBox.isSelected() ? 0.95f : 1.0f);
-    progressMonitor().init(nIter);
+    progressMonitor().init(_nIter);
 
     // Set up ImagePlus for plotting the loss curves
-    int nClasses = _finetunedModel.classNames.length - 1;
-    _xTrain = new double[nIter + 1];
+    _xTrain = new double[_nIter + 1];
     _xValid = new double[nValidations + 1];
-    _lossTrain = new double[nIter + 1];
+    _lossTrain = new double[_nIter + 1];
     _lossValid = new double[nValidations + 1];
     _intersection = new double[nClasses][nValidations + 1];
     _union = new double[nClasses][nValidations + 1];
@@ -1244,7 +1311,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     _nPredSegmentation = new double[nClasses][nValidations + 1];
     _nObjSegmentation = new double[nClasses][nValidations + 1];
     _f1Segmentation = new double[nClasses][nValidations + 1];
-    for (int i = 0; i <= nIter; i++) {
+    for (int i = 0; i <= _nIter; i++) {
       _xTrain[i] = i + 1;
       _lossTrain[i] = Double.NaN;
     }
@@ -1266,6 +1333,92 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       }
     }
 
+    runFinetuning();
+  }
+
+  public void resumeFinetuning(File snapshotFile) {
+
+    // ToDo: Load _createdLocalFiles, _createdRemoteFolders and
+    // _createdRemoteFiles to remove them upon end of finetuning
+
+    _finetunedModel = new ModelDefinition(this);
+    _finetunedModel.loadSnapshot(snapshotFile);
+    setModel(_finetunedModel);
+
+    IHDF5Reader snapshotReader = HDF5Factory.openForReading(snapshotFile);
+
+    // Setup parameters
+    String[] cmdArray = snapshotReader.string().readArray("/commandLine");
+    for (String cmd : cmdArray) _cmd.add(cmd);
+
+    // Set required parameters
+    setId(snapshotReader.string().getAttr("/", "id"));
+    setProcessFolder(snapshotReader.string().getAttr("/", "processFolder"));
+    setWeightsFileName(snapshotReader.string().getAttr("/", "weightsFileName"));
+    _outweightsTextField.setText(
+        snapshotReader.string().getAttr("/", "outputWeightsFile"));
+    _downloadWeightsCheckBox.setSelected(
+        snapshotReader.int8().getAttr("/", "downloadWeights") == 1);
+
+    // Load current fintuning state
+    int currentIter = snapshotReader.int32().getAttr("/", "currentIteration");
+    _xTrain = snapshotReader.float64().readArray("/xTrain");
+    _xValid = snapshotReader.float64().readArray("/xValid");
+    _lossTrain = snapshotReader.float64().readArray("/lossTrain");
+    _lossValid = snapshotReader.float64().readArray("/lossValid");
+    _intersection = snapshotReader.float64().readMatrix("/intersection");
+    _union = snapshotReader.float64().readMatrix("/union");
+    _iou = snapshotReader.float64().readMatrix("/IoU");
+    _nTPDetection = snapshotReader.float64().readMatrix("/nTPDetection");
+    _nPredDetection =
+        snapshotReader.float64().readMatrix("/nPredDetection");
+    _nObjDetection = snapshotReader.float64().readMatrix("/nObjDetection");
+    _f1Detection = snapshotReader.float64().readMatrix("/f1Detection");
+    _nTPSegmentation =
+        snapshotReader.float64().readMatrix("/nTPSegmentation");
+    _nPredSegmentation =
+        snapshotReader.float64().readMatrix("/nPredSegmentation");
+    _nObjSegmentation =
+        snapshotReader.float64().readMatrix("/nObjSegmentation");
+    _f1Segmentation = snapshotReader.float64().readMatrix("/f1Segmentation");
+
+    progressMonitor().push(
+        "Finetuning", 0.0f,
+        _downloadWeightsCheckBox.isSelected() ? 0.95f : 1.0f);
+    progressMonitor().init(_xTrain.length - 1);
+    progressMonitor().count(currentIter);
+
+    // Remote connection
+    try {
+      hostConfiguration().connectFromSnapshot(snapshotReader);
+      JobManager.instance().addJob(this);
+      _isResuming = true;
+      start();
+    }
+    catch (JSchException e) {
+      showError("SSH connection for " + hostConfiguration().username() + "@" +
+                hostConfiguration().hostname() + ":" +
+                hostConfiguration().port() + " failed", e);
+      abort();
+    }
+    catch (InterruptedException e) {
+      abort();
+    }
+  }
+
+  protected final void runFinetuning()
+      throws JSchException, IOException, InterruptedException {
+
+    progressMonitor().count("Initializing U-Net", 0);
+
+    // Prepare caffe call
+    String commandLineString = "";
+    for (String cmdItem : _cmd) commandLineString += cmdItem + " ";
+    IJ.log(commandLineString);
+
+    _nIter = _xTrain.length - 1;
+    int nValidations = _xValid.length - 1;
+
     Channel channel = null;
     Process p = null;
     int pid = -1;
@@ -1273,31 +1426,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     BufferedReader stdError = null;
     if (sshSession() == null)
     {
-      ProcessBuilder pb = null;
-      if (gpuAttribute.equals("")) {
-        if (weightsAttribute.equals(""))
-            pb = new ProcessBuilder(
-                commandString, "train",
-                "-solver", _finetunedModel.solverPrototxtAbsolutePath);
-        else
-            pb = new ProcessBuilder(
-                commandString, "train",
-                "-solver", _finetunedModel.solverPrototxtAbsolutePath,
-                weightsAttribute, weightsValue);
-      }
-      else {
-        if (weightsAttribute.equals(""))
-            pb = new ProcessBuilder(
-                commandString, "train",
-                "-solver", _finetunedModel.solverPrototxtAbsolutePath,
-                gpuAttribute, gpuValue);
-        else
-            pb = new ProcessBuilder(
-                commandString, "train",
-                "-solver", _finetunedModel.solverPrototxtAbsolutePath,
-                weightsAttribute, weightsValue,
-                gpuAttribute, gpuValue);
-      }
+      ProcessBuilder pb = new ProcessBuilder(_cmd);
       p = pb.start();
       pid = Tools.getPID(p);
       stdOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
@@ -1366,11 +1495,11 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             Tools.execute(
                 "kill -2 " + pid, sshSession(), progressMonitor());
         else {
-          Vector<String> command = new Vector<String>();
-          command.add("kill");
-          command.add("-2");
-          command.add(new Integer(pid).toString());
-          Tools.execute(command, progressMonitor());
+          Vector<String> cmd = new Vector<String>();
+          cmd.add("kill");
+          cmd.add("-2");
+          cmd.add(new Integer(pid).toString());
+          Tools.execute(cmd, progressMonitor());
         }
         try {
           while (true) {
@@ -1405,15 +1534,21 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       }
       if (sshSession() != null) channel.disconnect();
       else p.destroy();
+
       if (snapshot == null) throw e;
-      else {
-        nIter = Integer.parseInt(
-            snapshot.replaceFirst("^.*_iter_", "").replaceFirst(
-                ".caffemodel.h5$", ""));
-        IJ.log("Snapshot at iteration " + nIter + " written to " +
-               snapshot);
-        exitStatus = 0;
-      }
+
+      _nIter = Integer.parseInt(
+          snapshot.replaceFirst("^.*_iter_", "").replaceFirst(
+              ".caffemodel.h5$", ""));
+      IJ.log("Snapshot at iteration " + _nIter + " written to " +
+             snapshot);
+
+      _solverstate = snapshot.replaceFirst("caffemodel.h5$", "solverstate.h5");
+
+      if (sshSession() != null) _createdRemoteFiles.add(_solverstate);
+      else _createdLocalFiles.add(new File(_solverstate));
+
+      throw e;
     }
 
     if (exitStatus != 0) {
@@ -1438,62 +1573,106 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           progressMonitor().pop();
           progressMonitor().push("Downloading weights", 0.95f, 1.0f);
           // Download weights file
-          sftp.get(processFolder() + id() + "-snapshot_iter_" + nIter +
+          sftp.get(processFolder() + id() + "-snapshot_iter_" + _nIter +
                    ".caffemodel.h5", outfile);
         }
         catch (SftpException e) {
           showError("Could not download weights " + processFolder() + id() +
-                    "-snapshot_iter_" + nIter + ".caffemodel.h5", e);
+                    "-snapshot_iter_" + _nIter + ".caffemodel.h5", e);
         }
       }
 
       try {
-        // Rename output file name and remove solverstate file
         sftp.renameFile(
-            processFolder() + id() + "-snapshot_iter_" + nIter +
+            processFolder() + id() + "-snapshot_iter_" + _nIter +
             ".caffemodel.h5", _finetunedModel.weightFile);
-        showMessage("Finetuned weights have been saved to " +
-                    _finetunedModel.weightFile + " on the remote host");
       }
       catch (SftpException e) {
-        showError("Could not rename weightsfile to " +
-                  _finetunedModel.weightFile + "\n" +
-                  "The trained model can be found at " + processFolder() +
-                  id() + "-snapshot_iter_" + nIter + ".caffemodel.h5", e);
-      }
-
-      try {
-        sftp.removeFile(
-            processFolder() + id() + "-snapshot_iter_" + nIter +
-            ".solverstate.h5");
-      }
-      catch (SftpException e) {
-        showError("Could not delete solverstate " + processFolder() + id() +
-                  "-snapshot_iter_" + nIter + ".solverstate.h5", e);
+        IJ.log("Could not rename weightsfile to " +
+               _finetunedModel.weightFile + "\n" +
+               "The trained model can be found at " + processFolder() +
+               id() + "-snapshot_iter_" + _nIter + ".caffemodel.h5\n" + e);
+        _finetunedModel.weightFile = processFolder() +
+            id() + "-snapshot_iter_" + _nIter + ".caffemodel.h5";
       }
     }
     else {
-      // Rename output file and remove solverstate
       File outfile = new File(_finetunedModel.weightFile);
       File infile = new File(
-          processFolder() + id() + "-snapshot_iter_" + nIter +
+          processFolder() + id() + "-snapshot_iter_" + _nIter +
           ".caffemodel.h5");
-      File solverstatefile = new File(
-          processFolder() + id() + "-snapshot_iter_" + nIter +
-          ".solverstate.h5");
       if (!infile.renameTo(outfile)) {
-        showMessage("Could not rename weightsfile to " +
-                    outfile.getAbsolutePath() + "\n" +
-                    "The trained model can be found at " +
-                    infile.getAbsolutePath());
+        IJ.log("Could not rename weightsfile to " +
+               outfile.getAbsolutePath() + "\n" +
+               "The trained model can be found at " +
+               infile.getAbsolutePath());
+        _finetunedModel.weightFile = infile.getAbsolutePath();
       }
-      else showMessage("Finetuned weights have been saved to " +
-                       outfile.getAbsolutePath());
-      if (!solverstatefile.delete())
-          showMessage("Could not delete solverstate " +
-                      solverstatefile.getAbsolutePath());
     }
     progressMonitor().pop();
+  }
+
+  public void saveSnapshot(File snapshotFile) {
+
+    // ToDo: store _createdLocalFiles, _createdRemoteFolders and
+    // _createdRemoteFiles to remove them upon end of finetuning
+
+    _finetunedModel.saveSnapshot(snapshotFile);
+
+    IHDF5Writer snapshotWriter =
+        HDF5Factory.configure(snapshotFile.getAbsolutePath()).syncMode(
+            IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
+        .useSimpleDataSpaceForAttributes().writer();
+    String[] cmd = new String[_cmd.size()];
+    boolean snapshotParameterSet = false;
+    for (int i = 0; i < _cmd.size(); ++i) {
+      if (_cmd.get(i).equals("-weights")) {
+        cmd[i++] = "-snapshot";
+        cmd[i] = _solverstate;
+        snapshotParameterSet = true;
+      }
+      else cmd[i] = _cmd.get(i);
+    }
+    if (!snapshotParameterSet) {
+      String[] cmdNew = new String[cmd.length + 2];
+      for (int i = 0; i < cmd.length; ++i) cmdNew[i] = cmd[i];
+      cmdNew[cmd.length] = "-snapshot";
+      cmdNew[cmd.length + 1] = _solverstate;
+      cmd = cmdNew;
+    }
+    snapshotWriter.string().setAttr("/", "id", id());
+    snapshotWriter.string().writeArrayVL("/commandLine", cmd);
+    snapshotWriter.string().setAttr("/", "processFolder", processFolder());
+    snapshotWriter.string().setAttr("/", "weightsFileName", weightsFileName());
+    snapshotWriter.string().setAttr(
+        "/", "outputWeightsFile", _outweightsTextField.getText());
+    snapshotWriter.int8().setAttr(
+        "/", "downloadWeights",
+        _downloadWeightsCheckBox.isSelected() ? (byte)1 : (byte)0);
+
+    // Save current finetuning state
+    snapshotWriter.int32().setAttr("/", "currentIteration", _nIter);
+    snapshotWriter.float64().writeArray("/xTrain", _xTrain);
+    snapshotWriter.float64().writeArray("/xValid", _xValid);
+    snapshotWriter.float64().writeArray("/lossTrain", _lossTrain);
+    snapshotWriter.float64().writeArray("/lossValid", _lossValid);
+    snapshotWriter.float64().writeMatrix("/intersection", _intersection);
+    snapshotWriter.float64().writeMatrix("/union", _union);
+    snapshotWriter.float64().writeMatrix("/IoU", _iou);
+    snapshotWriter.float64().writeMatrix("/nTPDetection", _nTPDetection);
+    snapshotWriter.float64().writeMatrix("/nPredDetection", _nPredDetection);
+    snapshotWriter.float64().writeMatrix("/nObjDetection", _nObjDetection);
+    snapshotWriter.float64().writeMatrix("/f1Detection", _f1Detection);
+    snapshotWriter.float64().writeMatrix("/nTPSegmentation", _nTPSegmentation);
+    snapshotWriter.float64().writeMatrix(
+        "/nPredSegmentation", _nPredSegmentation);
+    snapshotWriter.float64().writeMatrix(
+        "/nObjSegmentation", _nObjSegmentation);
+    snapshotWriter.float64().writeMatrix("/f1Segmentation", _f1Segmentation);
+
+    hostConfiguration().save(snapshotWriter);
+
+    snapshotWriter.close();
   }
 
   @Override
@@ -1505,331 +1684,328 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
   @Override
   public void run() {
 
-    boolean trainImageFound = false;
-    if (WindowManager.getIDList() != null) {
-      for (int id: WindowManager.getIDList()) {
-        if (WindowManager.getImage(id).getOverlay() != null) {
-          trainImageFound = true;
-          break;
-        }
-      }
-    }
-    if (!trainImageFound) {
-      IJ.error("U-Net Finetuning", "No image with annotations found for " +
-               "finetuning.\nThis Plugin requires at least one image with " +
-               "overlay containing annotations.");
-      abort();
-      return;
-    }
     try
     {
-      progressMonitor().count("Fintuning", 0);
-
-      prepareParametersDialog();
-      if (isInteractive() && !getParameters()) return;
-
-      int nTrainImages = _trainFileList.getModel().getSize();
-      int nValidImages = _validFileList.getModel().getSize();
-      int nImages = nTrainImages + nValidImages;
-
-      String[] trainBlobFileNames = new String[nTrainImages];
-      Vector<String> validBlobFileNames = new Vector<String>();
-
-      // Get class label information from annotations
-      progressMonitor().push("Searching class labels", 0.0f, 0.01f);
-
-      boolean labelsAreClasses = _labelsAreClassesCheckBox.isSelected();
-
-      int maxClassLabel = 0;
-      Vector<String> classNames = new Vector<String>();
-      classNames.add("Background");
-      for (Object o : ((DefaultListModel<ImagePlus>)
-                       _trainFileList.getModel()).toArray()) {
-        ImagePlus imp = (ImagePlus)o;
-        for (Roi roi: imp.getOverlay().toArray()) {
-          if (roi instanceof ImageRoi) {
-            ImageProcessor ip = ((ImageRoi)roi).getProcessor();
-            if (ip instanceof ByteProcessor) {
-              byte[] data = (byte[])ip.getPixels();
-              for (int i = 0; i < data.length; ++i)
-                  if (data[i] > maxClassLabel) maxClassLabel = data[i];
+      if (!_isResuming) {
+        boolean trainImageFound = false;
+        if (WindowManager.getIDList() != null) {
+          for (int id: WindowManager.getIDList()) {
+            if (WindowManager.getImage(id).getOverlay() != null) {
+              trainImageFound = true;
+              break;
             }
-            else if (ip instanceof ShortProcessor)
-            {
-              short[] data = (short[])ip.getPixels();
-              for (int i = 0; i < data.length; ++i)
-                  if (data[i] > maxClassLabel) maxClassLabel = data[i];
-            }
-          }
-          else {
-            String roiName = roi.getName();
-            if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
-                continue;
-            String className = roiName.replaceFirst(
-                "(#[0-9]+)?(-[0-9]+)*$", "");
-            if (classNames.contains(className)) continue;
-            classNames.add(className);
-            if (labelsAreClasses) IJ.log("  Adding class " + className);
           }
         }
-      }
+        if (!trainImageFound) {
+          IJ.error(
+              "U-Net Finetuning", "No image with annotations found for " +
+              "finetuning.\nThis Plugin requires at least one image with " +
+              "overlay containing annotations.");
+          abort();
+          return;
+        }
+        progressMonitor().count("Fintuning", 0);
 
-      int oldMax = maxClassLabel;
-      for (Object o : ((DefaultListModel<ImagePlus>)
-                       _validFileList.getModel()).toArray()) {
-        ImagePlus imp = (ImagePlus)o;
-        for (Roi roi: imp.getOverlay().toArray()) {
-          if (roi instanceof ImageRoi) {
-            ImageProcessor ip = ((ImageRoi)roi).getProcessor();
-            if (ip instanceof ByteProcessor) {
-              byte[] data = (byte[])ip.getPixels();
-              for (int i = 0; i < data.length; ++i) {
-                if (data[i] > maxClassLabel) {
-                  maxClassLabel = data[i];
-                  if (labelsAreClasses)
-                      showMessage(
-                          "WARNING: Training set does not contain " +
-                          "instances with label " + maxClassLabel +
-                          ". This class will not be learnt!");
+        prepareParametersDialog();
+        if (isInteractive() && !getParameters()) return;
+
+        int nTrainImages = _trainFileList.getModel().getSize();
+        int nValidImages = _validFileList.getModel().getSize();
+        int nImages = nTrainImages + nValidImages;
+
+        String[] trainBlobFileNames = new String[nTrainImages];
+        Vector<String> validBlobFileNames = new Vector<String>();
+
+        // Get class label information from annotations
+        progressMonitor().push("Searching class labels", 0.0f, 0.01f);
+
+        boolean labelsAreClasses = _labelsAreClassesCheckBox.isSelected();
+
+        int maxClassLabel = 0;
+        Vector<String> classNames = new Vector<String>();
+        classNames.add("Background");
+        for (Object o : ((DefaultListModel<ImagePlus>)
+                         _trainFileList.getModel()).toArray()) {
+          ImagePlus imp = (ImagePlus)o;
+          for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi instanceof ImageRoi) {
+              ImageProcessor ip = ((ImageRoi)roi).getProcessor();
+              if (ip instanceof ByteProcessor) {
+                byte[] data = (byte[])ip.getPixels();
+                for (int i = 0; i < data.length; ++i)
+                    if (data[i] > maxClassLabel) maxClassLabel = data[i];
+              }
+              else if (ip instanceof ShortProcessor)
+              {
+                short[] data = (short[])ip.getPixels();
+                for (int i = 0; i < data.length; ++i)
+                    if (data[i] > maxClassLabel) maxClassLabel = data[i];
+              }
+            }
+            else {
+              String roiName = roi.getName();
+              if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
+                  continue;
+              String className = roiName.replaceFirst(
+                  "(#[0-9]+)?(-[0-9]+)*$", "");
+              if (classNames.contains(className)) continue;
+              classNames.add(className);
+              if (labelsAreClasses) IJ.log("  Adding class " + className);
+            }
+          }
+        }
+
+        int oldMax = maxClassLabel;
+        for (Object o : ((DefaultListModel<ImagePlus>)
+                         _validFileList.getModel()).toArray()) {
+          ImagePlus imp = (ImagePlus)o;
+          for (Roi roi: imp.getOverlay().toArray()) {
+            if (roi instanceof ImageRoi) {
+              ImageProcessor ip = ((ImageRoi)roi).getProcessor();
+              if (ip instanceof ByteProcessor) {
+                byte[] data = (byte[])ip.getPixels();
+                for (int i = 0; i < data.length; ++i) {
+                  if (data[i] > maxClassLabel) {
+                    maxClassLabel = data[i];
+                    if (labelsAreClasses)
+                        showMessage(
+                            "WARNING: Training set does not contain " +
+                            "instances with label " + maxClassLabel +
+                            ". This class will not be learnt!");
+                  }
+                }
+              }
+              else if (ip instanceof ShortProcessor)
+              {
+                short[] data = (short[])ip.getPixels();
+                for (int i = 0; i < data.length; ++i) {
+                  if (data[i] > maxClassLabel) {
+                    maxClassLabel = data[i];
+                    if (labelsAreClasses)
+                        showMessage(
+                            "WARNING: Training set does not contain " +
+                            "instances with label " + maxClassLabel +
+                            ". This class will not be learnt!");
+                  }
                 }
               }
             }
-            else if (ip instanceof ShortProcessor)
-            {
-              short[] data = (short[])ip.getPixels();
-              for (int i = 0; i < data.length; ++i) {
-                if (data[i] > maxClassLabel) {
-                  maxClassLabel = data[i];
-                  if (labelsAreClasses)
-                      showMessage(
-                          "WARNING: Training set does not contain " +
-                          "instances with label " + maxClassLabel +
-                          ". This class will not be learnt!");
-                }
+            else {
+              String roiName = roi.getName();
+              if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
+                  continue;
+              String className = roiName.replaceFirst(
+                  "(#[0-9]+)?(-[0-9]+)*$", "");
+              if (classNames.contains(className)) continue;
+              classNames.add(className);
+              if (labelsAreClasses) {
+                IJ.log("  Adding class " + className);
+                showMessage(
+                    "WARNING: Training set does not contain instances of" +
+                    "class " + className + ". This class will not be learnt!");
               }
             }
           }
+        }
+
+        boolean imagesContainMaskAnnotations = (maxClassLabel > 0);
+        boolean imagesContainRoiAnnotations = (classNames.size() > 1);
+
+        // If we have no valid annotations of any type, give up
+        if (!imagesContainMaskAnnotations && !imagesContainRoiAnnotations) {
+          showMessage(
+              "Training images do not contain valid annotations.\n" +
+              "Please make sure that your ROI annotations are named " +
+              "<classname>[#<instance>] or \n" +
+              "that segmentation masks are embedded as Overlay");
+          throw new InterruptedException();
+        }
+
+        // If we have a mix of annotation types, give up
+        if (imagesContainMaskAnnotations && imagesContainRoiAnnotations) {
+          showMessage(
+              "Training images contain a mix of ROI and mask annotations.\n" +
+              "This is currently not supported, please convert either all " +
+              "ROIs to masks or vice-versa.");
+          throw new InterruptedException();
+        }
+
+        if (!labelsAreClasses) {
+          if (imagesContainRoiAnnotations) {
+            _finetunedModel.classNames = new String[classNames.size()];
+            for (int i = 0; i < classNames.size(); ++i)
+                _finetunedModel.classNames[i] = classNames.get(i);
+          }
           else {
-            String roiName = roi.getName();
-            if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
-                continue;
-            String className = roiName.replaceFirst(
-                "(#[0-9]+)?(-[0-9]+)*$", "");
-            if (classNames.contains(className)) continue;
-            classNames.add(className);
-            if (labelsAreClasses) {
-              IJ.log("  Adding class " + className);
-              showMessage(
-                  "WARNING: Training set does not contain instances " +
-                  "of class " + className + ". This class will not be learnt!");
-            }
+            _finetunedModel.classNames = new String[maxClassLabel + 1];
+            _finetunedModel.classNames[0] = "Background";
+            for (int i = 2; i <= maxClassLabel; ++i)
+                _finetunedModel.classNames[i] = "Class " + (i - 1);
           }
         }
-      }
+        else _finetunedModel.classNames = new String[] {
+                "Background", "Foreground" };
 
-      boolean imagesContainMaskAnnotations = (maxClassLabel > 0);
-      boolean imagesContainRoiAnnotations = (classNames.size() > 1);
+        progressMonitor().pop(); // Searching class labels (0.0 - 0.01)
+        progressMonitor().push("Data conversion", 0.01f, 0.1f);
 
-      // If we have no valid annotations of any type, give up
-      if (!imagesContainMaskAnnotations && !imagesContainRoiAnnotations) {
-        showMessage(
-            "Training images do not contain valid annotations.\n" +
-            "Please make sure that your ROI annotations are named " +
-            "<classname>[#<instance>] or \n" +
-            "that segmentation masks are embedded as Overlay");
-        throw new InterruptedException();
-      }
-
-      // If we have a mix of annotation types, give up
-      if (imagesContainMaskAnnotations && imagesContainRoiAnnotations) {
-        showMessage(
-            "Training images contain a mix of ROI and mask annotations.\n" +
-            "This is currently not supported, please convert either all " +
-            "ROIs to masks or vice-versa.");
-        throw new InterruptedException();
-      }
-
-      if (!labelsAreClasses) {
-        if (imagesContainRoiAnnotations) {
-          _finetunedModel.classNames = new String[classNames.size()];
-          for (int i = 0; i < classNames.size(); ++i)
-              _finetunedModel.classNames[i] = classNames.get(i);
-        }
-        else {
-          _finetunedModel.classNames = new String[maxClassLabel + 1];
-          _finetunedModel.classNames[0] = "Background";
-          for (int i = 2; i <= maxClassLabel; ++i)
-              _finetunedModel.classNames[i] = "Class " + (i - 1);
-        }
-      }
-      else _finetunedModel.classNames = new String[] {
-              "Background", "Foreground" };
-
-      // Convert and upload caffe blobs
-      File outfile = null;
-      if (sshSession() != null) {
-        outfile = File.createTempFile(id(), ".h5");
-        outfile.delete();
-      }
-
-      progressMonitor().pop(); // Searching class labels (0.0 - 0.01)
-      progressMonitor().push("Data conversion", 0.01f, 0.1f);
-
-      // Process train files
-      progressMonitor().push(
-          "Converting train files", 0.0f,
-          (float)nTrainImages / (float)(nTrainImages + nValidImages));
-
-      for (int i = 0; i < nTrainImages; ++i) {
-        ImagePlus imp =
-            ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i);
-
-        progressMonitor().push(
-            "Converting " + imp.getTitle(),
-            (float)i / (float)nTrainImages, (float)(i + 1) /
-            (float)nTrainImages);
-
-        trainBlobFileNames[i] = processFolder() + id() + "_train_" + i + ".h5";
-        if (sshSession() == null) {
-          outfile = new File(trainBlobFileNames[i]);
-          progressMonitor().push("Converting " + imp.getTitle(), 0.0f, 1.0f);
-        }
-        else progressMonitor().push("Converting " + imp.getTitle(), 0.0f, 0.5f);
-
-        if (imagesContainRoiAnnotations)
-            Tools.saveHDF5Blob(
-                imp, outfile, _finetunedModel, progressMonitor(), true, true,
-                false);
-        else {
-          TrainImagePair t =
-              new TrainImagePair(imp, MaskExtractor.extract(imp));
-          t.saveHDF5Blob(
-              labelsAreClasses ? _finetunedModel.classNames : null, outfile,
-              _finetunedModel, progressMonitor());
-        }
-
-        progressMonitor().pop(); // Converting image (real)
-
-        if (interrupted()) throw new InterruptedException();
+        // Convert and upload caffe blobs
+        File outfile = null;
         if (sshSession() != null) {
-          progressMonitor().push(
-              "Uploading " + trainBlobFileNames[i], 0.5f, 1.0f);
-          _createdRemoteFolders.addAll(
-              new SftpFileIO(sshSession(), progressMonitor()).put(
-                  outfile, trainBlobFileNames[i]));
-          _createdRemoteFiles.add(trainBlobFileNames[i]);
+          outfile = File.createTempFile(id(), ".h5");
           outfile.delete();
-          progressMonitor().pop(); // Uploading image
-          if (interrupted()) throw new InterruptedException();
         }
 
-        progressMonitor().pop(); // Converting image
-
-      }
-
-      progressMonitor().pop(); // Converting train files
-      progressMonitor().push(
-          "Converting validation files",
-          (float)nTrainImages / (float)(nTrainImages + nValidImages), 1.0f);
-
-      for (int i = 0; i < nValidImages; i++) {
-        ImagePlus imp =
-            ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i);
-
+        // Process train files
         progressMonitor().push(
-            "Converting " + imp.getTitle(),
-            (float)i / (float)nValidImages, (float)(i + 1) /
-            (float)nValidImages);
+            "Converting train files", 0.0f,
+            (float)nTrainImages / (float)(nTrainImages + nValidImages));
 
-        String fileNameStub = (sshSession() == null) ?
-            processFolder() + id() + "_valid_" + i : null;
-        File[] generatedFiles = null;
-        if (sshSession() != null)
+        for (int i = 0; i < nTrainImages; ++i) {
+          ImagePlus imp =
+              ((DefaultListModel<ImagePlus>)_trainFileList.getModel()).get(i);
+
+          progressMonitor().push(
+              "Converting " + imp.getTitle(),
+              (float)i / (float)nTrainImages, (float)(i + 1) /
+              (float)nTrainImages);
+
+          trainBlobFileNames[i] =
+              processFolder() + id() + "_train_" + i + ".h5";
+          if (sshSession() == null) {
+            outfile = new File(trainBlobFileNames[i]);
+            progressMonitor().push("Converting " + imp.getTitle(), 0.0f, 1.0f);
+          }
+          else progressMonitor().push(
+              "Converting " + imp.getTitle(), 0.0f, 0.5f);
+
+          TrainingSample t = new TrainingSample(imp);
+          t.createDataBlob(_finetunedModel, progressMonitor());
+          t.createLabelsAndWeightsBlobs(
+              _finetunedModel, labelsAreClasses, progressMonitor());
+          Vector<File> createdFiles =
+              t.saveBlobs(outfile, _finetunedModel, progressMonitor());
+
+          progressMonitor().pop(); // Converting image (real)
+
+          if (interrupted()) throw new InterruptedException();
+          if (sshSession() != null) {
             progressMonitor().push(
-                "Converting " + imp.getTitle(), 0.0f, 0.5f);
-        else progressMonitor().push(
-                "Converting " + imp.getTitle(), 0.0f, 1.0f);
-        if (imagesContainRoiAnnotations)
-            generatedFiles = Tools.saveHDF5TiledBlob(
-                imp, fileNameStub, _finetunedModel, progressMonitor());
-        else {
-          TrainImagePair t =
-              new TrainImagePair(imp, MaskExtractor.extract(imp));
-          t.saveHDF5TiledBlob(
-              labelsAreClasses ? _finetunedModel.classNames : null,
-              fileNameStub, _finetunedModel, progressMonitor());
-        }
-        progressMonitor().pop(); // Converting image (real)
+                "Uploading " + trainBlobFileNames[i], 0.5f, 1.0f);
+            _createdRemoteFolders.addAll(
+                new SftpFileIO(sshSession(), progressMonitor()).put(
+                    outfile, trainBlobFileNames[i]));
+            _createdRemoteFiles.add(trainBlobFileNames[i]);
+            for (int c = createdFiles.size() - 1; c >= 0; --c)
+                createdFiles.get(i).delete();
+            progressMonitor().pop(); // Uploading image
+            if (interrupted()) throw new InterruptedException();
+          }
+          else _createdLocalFiles.addAll(createdFiles);
 
-        if (sshSession() == null)
+          progressMonitor().pop(); // Converting image
+        }
+
+        progressMonitor().pop(); // Converting train files
+        progressMonitor().push(
+            "Converting validation files",
+            (float)nTrainImages / (float)(nTrainImages + nValidImages), 1.0f);
+
+        for (int i = 0; i < nValidImages; i++) {
+          ImagePlus imp =
+              ((DefaultListModel<ImagePlus>)_validFileList.getModel()).get(i);
+
+          progressMonitor().push(
+              "Converting " + imp.getTitle(),
+              (float)i / (float)nValidImages, (float)(i + 1) /
+              (float)nValidImages);
+
+          String fileNameStub = (sshSession() == null) ?
+              processFolder() + id() + "_valid_" + i : null;
+          if (sshSession() != null)
+              progressMonitor().push(
+                  "Converting " + imp.getTitle(), 0.0f, 0.5f);
+          else progressMonitor().push(
+              "Converting " + imp.getTitle(), 0.0f, 1.0f);
+
+          TrainingSample t = new TrainingSample(imp);
+          t.createDataBlob(_finetunedModel, progressMonitor());
+          t.createLabelsAndWeightsBlobs(
+              _finetunedModel, labelsAreClasses, progressMonitor());
+          Vector<File> files = t.saveTiledBlobs(
+              fileNameStub, _finetunedModel, labelsAreClasses,
+              progressMonitor());
+          Vector<File> generatedFiles = new Vector<File>();
+          for (File f : files) if (f.isFile()) generatedFiles.add(f);
+
+          progressMonitor().pop(); // Converting image (real)
+
+          if (sshSession() == null)
+          {
             for (File f : generatedFiles)
                 validBlobFileNames.add(f.getAbsolutePath());
-        else {
+            _createdLocalFiles.addAll(files);
+          }
+          else {
 
             progressMonitor().push(
                 "Uploading " + imp.getTitle(), 0.5f, 1.0f);
 
-          for (int j = 0; j < generatedFiles.length; j++) {
-            progressMonitor().push(
-                "Uploading " + imp.getTitle() + " - tile " + j,
-                (float)j / (float)generatedFiles.length,
-                (float)(j + 1) / (float)generatedFiles.length);
-            String outFileName =
-                processFolder() + id() + "_valid_" + i + "_" + j + ".h5";
-            _createdRemoteFolders.addAll(
-                new SftpFileIO(sshSession(), progressMonitor()).put(
-                    generatedFiles[j], outFileName));
-            _createdRemoteFiles.add(outFileName);
-            validBlobFileNames.add(outFileName);
-            progressMonitor().pop(); // Uploading image tile
+            for (int j = 0; j < generatedFiles.size(); j++) {
+              progressMonitor().push(
+                  "Uploading " + imp.getTitle() + " - tile " + j,
+                  (float)j / (float)generatedFiles.size(),
+                  (float)(j + 1) / (float)generatedFiles.size());
+              String outFileName =
+                  processFolder() + id() + "_valid_" + i + "_" + j + ".h5";
+              _createdRemoteFolders.addAll(
+                  new SftpFileIO(sshSession(), progressMonitor()).put(
+                      generatedFiles.get(j), outFileName));
+              _createdRemoteFiles.add(outFileName);
+              validBlobFileNames.add(outFileName);
+              progressMonitor().pop(); // Uploading image tile
 
-            if (interrupted()) throw new InterruptedException();
+              if (interrupted()) throw new InterruptedException();
+            }
+            for (int c = files.size() - 1; c >= 0; --c) files.get(c).delete();
+
+            progressMonitor().pop(); // Uploading image
+
           }
-
-          progressMonitor().pop(); // Uploading image
-
+          progressMonitor().pop(); // Converting image
         }
-        progressMonitor().pop(); // Converting image
+
+        progressMonitor().pop(); // Converting validation files
+        progressMonitor().pop(); // Data conversion (0.01 - 0.1)
+        progressMonitor().push("Creating prototxt files", 0.1f, 0.11f);
+
+        prepareFinetuning(trainBlobFileNames, validBlobFileNames);
+
+        progressMonitor().pop(); // Prototxt generation
+        progressMonitor().push("U-Net finetuning", 0.11f, 1.0f);
+
+        startFinetuning();
+        if (interrupted()) throw new InterruptedException();
       }
-
-      progressMonitor().pop(); // Converting validation files
-      progressMonitor().pop(); // Data conversion (0.01 - 0.1)
-      progressMonitor().push("Creating prototxt files", 0.1f, 0.11f);
-
-      prepareFinetuning(trainBlobFileNames, validBlobFileNames);
-
-      progressMonitor().pop(); // Prototxt generation
-      progressMonitor().push("U-Net finetuning", 0.1f, 1.0f);
-
-      runFinetuning();
-      if (interrupted()) throw new InterruptedException();
+      else runFinetuning();
 
       setReady(true);
     }
-    catch (TrainImagePairException e) {
-      IJ.error(id(), "Invalid Image Pair:\n" + e);
+    catch (TrainingSampleException e) {
+      showError("Invalid Training Sample", e);
       abort();
-      return;
     }
     catch (IOException e) {
       IJ.error(id(), "Input/Output error:\n" + e);
       abort();
-      return;
-    }
-    catch (NotImplementedException e) {
-      IJ.error(id(), "Sorry, requested feature not implemented:\n" + e);
-      abort();
-      return;
     }
     catch (JSchException e) {
       IJ.error(id(), "SSH connection failed:\n" + e);
       abort();
-      return;
     }
     catch (SftpException e) {
       IJ.error(id(), "SFTP file transfer failed:\n" + e);
       abort();
-      return;
     }
     catch (InterruptedException e) {
       abort();

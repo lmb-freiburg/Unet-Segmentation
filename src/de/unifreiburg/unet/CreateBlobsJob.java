@@ -124,11 +124,8 @@ public class CreateBlobsJob extends Job implements PlugIn {
           @Override
           public void actionPerformed(ActionEvent e) {
             if (model() == null) return;
-            model().setElementSizeUm(
-                Tools.getElementSizeUmFromCalibration(
-                    _imp.getCalibration(), model().nDims()));
+            model().setElementSizeUm(Tools.getElementSizeUm(_imp));
           }});
-
     super.finalizeDialog();
   }
 
@@ -257,68 +254,36 @@ public class CreateBlobsJob extends Job implements PlugIn {
 
       progressMonitor().pop();
 
-      if (imagesContainRoiAnnotations) {
-        progressMonitor().push("Converting data", 0.1f, 0.2f);
-        ImagePlus dataBlob =
-            Tools.convertToUnetFormat(
-                _imp, model(), progressMonitor(), true, false);
-        progressMonitor().pop();
-        progressMonitor().push("Converting labels", 0.2f, 1.0f);
-        ImagePlus[] blobs = Tools.convertAnnotationsToLabelsAndWeights(
-            _imp, model(), progressMonitor());
-        dataBlob.show();
-        dataBlob.updateAndDraw();
-        blobs[0].show();
-        blobs[0].updateAndDraw();
-        blobs[1].show();
-        blobs[1].updateAndDraw();
-        blobs[2].show();
-        blobs[2].updateAndDraw();
-      }
-      else {
-        progressMonitor().push("Extracting labels", 0.1f, 0.15f);
-        ImagePlus labels = MaskExtractor.extract(_imp);
-        TrainImagePair t = new TrainImagePair(_imp, labels);
-        progressMonitor().pop();
-        progressMonitor().push("Converting data and labels", 0.15f, 1.0f);
-        t.createCaffeBlobs(
-            labelsAreClasses ? model().classNames : null, model(),
-            progressMonitor());
-        t.data().show();
-        t.data().updateAndDraw();
-        t.labels().show();
-        t.labels().updateAndDraw();
-        t.weights().show();
-        t.weights().updateAndDraw();
-        t.samplePdf().show();
-        t.samplePdf().updateAndDraw();
-      }
+      TrainingSample t = new TrainingSample(_imp);
+      progressMonitor().push("Converting data", 0.1f, 0.2f);
+      t.createDataBlob(model(), progressMonitor());
+      if (interrupted()) throw new InterruptedException();
+      progressMonitor().pop();
+      progressMonitor().push("Converting labels", 0.2f, 1.0f);
+      t.createLabelsAndWeightsBlobs(
+          model(), labelsAreClasses, progressMonitor());
+      t.dataBlob().show();
+      t.dataBlob().updateAndDraw();
+      t.labelBlob().show();
+      t.labelBlob().updateAndDraw();
+      t.weightBlob().show();
+      t.weightBlob().updateAndDraw();
+      t.samplePdfBlob().show();
+      t.samplePdfBlob().updateAndDraw();
 
       if (interrupted()) throw new InterruptedException();
-
       progressMonitor().end();
       setReady(true);
     }
-    catch (TrainImagePairException e) {
-      IJ.error(id(), "Invalid Image Pair:\n" + e);
-      abort();
-      return;
-    }
-    catch (IOException e) {
-      IJ.error(id(), "Input/Output error:\n" + e);
-      abort();
-      return;
-    }
-    catch (NotImplementedException e) {
-      IJ.error(id(), "Sorry, requested feature not implemented:\n" + e);
-      abort();
-      return;
-    }
-    catch (InterruptedException e) {
+    catch (TrainingSampleException e) {
+      showError("Invalid Training Sample", e);
       abort();
     }
     catch (BlobException e) {
-      IJ.error(id(), "Blob conversion failed:\n" + e);
+      showError("Blob conversion failed", e);
+      abort();
+    }
+    catch (InterruptedException e) {
       abort();
     }
   }

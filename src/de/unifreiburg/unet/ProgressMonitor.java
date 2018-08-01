@@ -99,6 +99,7 @@ public class ProgressMonitor implements SftpProgressMonitor {
     @Override
     public boolean count(long count) {
       _count += count;
+      if (_count > _max) _count = _max;
       update();
       return !_job.interrupted();
     }

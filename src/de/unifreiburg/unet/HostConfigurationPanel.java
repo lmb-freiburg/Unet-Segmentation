@@ -40,11 +40,15 @@ import javax.swing.event.*;
 
 import java.io.*;
 import java.util.Arrays;
+import java.util.Map;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 
 import com.jcraft.jsch.*;
+
+import ch.systemsx.cisd.hdf5.IHDF5Writer;
+import ch.systemsx.cisd.hdf5.IHDF5Reader;
 
 public class HostConfigurationPanel extends JPanel {
 
@@ -256,39 +260,80 @@ public class HostConfigurationPanel extends JPanel {
         (boolean)Prefs.get("unet.useRemoteHost", false));
   }
 
-  boolean useRemoteHost() {
+  public boolean useRemoteHost() {
     return _useRemoteHostCheckBox.isSelected();
   }
 
-  String hostname() {
+  public void setUseRemoteHost(boolean select) {
+    if (useRemoteHost() == select) return;
+    _useRemoteHostCheckBox.setSelected(select);
+  }
+
+  public String hostname() {
     return (String)_hostComboBox.getSelectedItem();
   }
 
-  int port() {
+  public void setHostname(String hostname) {
+    if (hostname().equals(hostname)) return;
+    int idx = 0;
+    for (; !_hostComboBox.getSelectedItem().equals(hostname) &&
+             idx < _hostComboBox.getItemCount(); ++idx);
+    if (idx < _hostComboBox.getItemCount()) _hostComboBox.setSelectedIndex(idx);
+    else {
+      _hostComboBox.addItem(hostname);
+      _hostComboBox.setSelectedIndex(_hostComboBox.getItemCount() - 1);
+    }
+  }
+
+  public int port() {
     return (Integer) _portSpinner.getValue();
   }
 
-  String username() {
+  public void setPort(int port) {
+    if (port() == port || port < 0 || port > 65535) return;
+    _portSpinner.setValue(port);
+  }
+
+  public String username() {
     return _userTextField.getText();
   }
 
-  String authMethod() {
+  public void setUsername(String username) {
+    if (username().equals(username)) return;
+    _userTextField.setText(username);
+  }
+
+  public String authMethod() {
     return (String)_authMethodComboBox.getSelectedItem();
   }
 
-  boolean authPassword() {
+  public void setAuthMethod(String method) {
+    if (authMethod().equals(method)) return;
+    int idx = 0;
+    for (; !_authMethodComboBox.getSelectedItem().equals(method) &&
+             idx < _authMethodComboBox.getItemCount(); ++idx);
+    if (idx < _authMethodComboBox.getItemCount())
+        _authMethodComboBox.setSelectedIndex(idx);
+  }
+
+  public boolean authPassword() {
     return _authMethodComboBox.getSelectedItem().equals("Password:");
   }
 
-  boolean authRSAKey() {
+  public boolean authRSAKey() {
     return _authMethodComboBox.getSelectedItem().equals("RSA key:");
   }
 
-  String rsaKeyFile() {
+  public String rsaKeyFile() {
     return _rsaKeyTextField.getText();
   }
 
-  JButton weightsFileChooseButton() {
+  public void setRsaKeyFile(String rsaKeyFile) {
+    if (rsaKeyFile().equals(rsaKeyFile)) return;
+    _rsaKeyTextField.setText(rsaKeyFile);
+  }
+
+  public JButton weightsFileChooseButton() {
     if (_weightsFileChooseButton == null) {
       if (UIManager.get("FileView.directoryIcon") instanceof Icon)
           _weightsFileChooseButton = new JButton(
@@ -305,7 +350,7 @@ public class HostConfigurationPanel extends JPanel {
     return _weightsFileChooseButton;
   }
 
-  JButton processFolderChooseButton() {
+  public JButton processFolderChooseButton() {
     if (_processFolderChooseButton == null) {
       if (UIManager.get("FileView.directoryIcon") instanceof Icon)
           _processFolderChooseButton = new JButton(
@@ -322,7 +367,7 @@ public class HostConfigurationPanel extends JPanel {
     return _processFolderChooseButton;
   }
 
-  JButton finetunedFileChooseButton() {
+  public JButton finetunedFileChooseButton() {
     if (_finetunedFileChooseButton == null) {
       if (UIManager.get("FileView.directoryIcon") instanceof Icon)
           _finetunedFileChooseButton = new JButton(
@@ -339,29 +384,34 @@ public class HostConfigurationPanel extends JPanel {
     return _finetunedFileChooseButton;
   }
 
-  Session sshSession() throws JSchException {
+  public Session sshSession() throws JSchException, InterruptedException {
+    return sshSession(_passwordField);
+  }
+
+  public Session sshSession(JPasswordField passwordField)
+      throws JSchException, InterruptedException {
 
     if (_sshSession != null) {
 
       // Return existing SSH Session if host, port and user match
       if (useRemoteHost() && _sshSession.isConnected() &&
-          _sshSession.getHost() == hostname() &&
+          _sshSession.getHost().equals(hostname()) &&
           _sshSession.getPort() == port() &&
-          _sshSession.getUserName() == username()) return _sshSession;
+          _sshSession.getUserName().equals(username())) return _sshSession;
 
       // Otherwise disconnect
       if (_sshSession.isConnected()) {
         IJ.log("Disconnecting from " + _sshSession.getHost());
         _sshSession.disconnect();
       }
-
       _sshSession = null;
     }
 
     if (useRemoteHost()) {
 
       // Open new SSH Session
-      IJ.log("Connecting to '" + hostname() + "'");
+      IJ.log("Establishing SSH connection for '" + username() + "@" +
+             hostname() + ":" + port() + "'");
       JSch jsch = new JSch();
       jsch.setKnownHosts(new File(System.getProperty("user.home") +
                                   "/.ssh/known_hosts").getAbsolutePath());
@@ -369,14 +419,22 @@ public class HostConfigurationPanel extends JPanel {
       _sshSession = jsch.getSession(username(), hostname(), port());
       _sshSession.setUserInfo(new MyUserInfo());
       if (authPassword()) {
-        char[] password = _passwordField.getPassword();
+        if (passwordField == null) {
+          passwordField = new JPasswordField();
+          int okCxl = JOptionPane.showConfirmDialog(
+              null, passwordField, "Enter Password for " + username() + "@" +
+              hostname(), JOptionPane.OK_CANCEL_OPTION,
+              JOptionPane.PLAIN_MESSAGE);
+          if (okCxl != JOptionPane.OK_OPTION) throw new InterruptedException();
+        }
+        char[] password = passwordField.getPassword();
         byte[] passwordAsBytes = toBytes(password);
         _sshSession.setPassword(passwordAsBytes);
 
         // Overwrite password and clear password field
         Arrays.fill(passwordAsBytes, (byte) 0);
         Arrays.fill(password, '\u0000');
-        _passwordField.setText("");
+        passwordField.setText("");
       }
       _sshSession.connect();
 
@@ -405,14 +463,83 @@ public class HostConfigurationPanel extends JPanel {
     return _sshSession;
   }
 
-  public static byte[] toBytes(char[] chars)
-        {
-          CharBuffer charBuffer = CharBuffer.wrap(chars);
-          ByteBuffer byteBuffer = Charset.forName("UTF-8").encode(charBuffer);
-          byte[] bytes = Arrays.copyOfRange(
-              byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
-          Arrays.fill(charBuffer.array(), '\u0000');
-          Arrays.fill(byteBuffer.array(), (byte) 0);
-          return bytes;
-        }
+  public Session connectFromParameterMap(Map<String,String> parameters)
+      throws JSchException, InterruptedException {
+    setUseRemoteHost(
+        parameters.containsKey("useRemoteHost") ?
+        Boolean.valueOf(parameters.get("useRemoteHost")) : false);
+    if (useRemoteHost()) {
+      setHostname(
+          parameters.containsKey("hostname") ? parameters.get("hostname") :
+          Prefs.get("unet.hostname", ""));
+      setPort(parameters.containsKey("port") ?
+              Integer.valueOf(parameters.get("port")) :
+              (int)Prefs.get("unet.port", 22));
+      setUsername(parameters.containsKey("username") ?
+                  parameters.get("username") :
+                  Prefs.get("unet.username", System.getProperty("user.name")));
+      if (parameters.containsKey("RSAKeyfile")) {
+        setAuthMethod("RSA key:");
+        setRsaKeyFile(parameters.get("RSAKeyfile"));
+      }
+      else setAuthMethod("Password:");
+    }
+    return sshSession(null);
+  }
+
+  public Session connectFromSnapshot(
+      IHDF5Reader snapshotReader) throws JSchException, InterruptedException {
+
+    setUseRemoteHost(snapshotReader.int8().getAttr(
+                         "/HostConfiguration", "useRemoteHost") == 1);
+    if (useRemoteHost()) {
+      setHostname(
+          snapshotReader.string().getAttr("/HostConfiguration", "hostname"));
+      setPort(snapshotReader.int32().getAttr("/HostConfiguration", "port"));
+      setUsername(
+          snapshotReader.string().getAttr("/HostConfiguration", "username"));
+      setAuthMethod(
+          snapshotReader.string().getAttr("/HostConfiguration", "authMethod"));
+      if (authRSAKey()) setRsaKeyFile(
+          snapshotReader.string().getAttr("/HostConfiguration", "rsaKeyFile"));
+    }
+    return sshSession(null);
+  }
+
+  public static byte[] toBytes(char[] chars) {
+    CharBuffer charBuffer = CharBuffer.wrap(chars);
+    ByteBuffer byteBuffer = Charset.forName("UTF-8").encode(charBuffer);
+    byte[] bytes = Arrays.copyOfRange(
+        byteBuffer.array(), byteBuffer.position(), byteBuffer.limit());
+    Arrays.fill(charBuffer.array(), '\u0000');
+    Arrays.fill(byteBuffer.array(), (byte) 0);
+    return bytes;
+  }
+
+  public String getMacroParameterString() {
+    String res = "useRemoteHost=" + String.valueOf(_sshSession != null);
+    if (_sshSession != null) {
+      res += ",hostname=" + hostname() + ",port=" + String.valueOf(port()) +
+          ",username=" + username();
+      if (authRSAKey()) res += ",RSAKeyfile=" + rsaKeyFile();
+    }
+    return res;
+  }
+
+  public void save(IHDF5Writer writer) {
+    writer.object().createGroup("/HostConfiguration");
+    writer.int8().setAttr("/HostConfiguration", "useRemoteHost",
+                          useRemoteHost() ? (byte)1 : (byte)0);
+    if (!useRemoteHost()) return;
+    writer.string().setAttr("/HostConfiguration", "hostname", hostname());
+    writer.int32().setAttr(
+        "/HostConfiguration", "port", port());
+    writer.string().setAttr(
+        "/HostConfiguration", "username", username());
+    writer.string().setAttr(
+        "/HostConfiguration", "authMethod", authMethod());
+    if (authRSAKey()) writer.string().setAttr(
+        "/HostConfiguration", "rsaKeyFile", rsaKeyFile());
+  }
+
 }

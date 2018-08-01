@@ -91,9 +91,6 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
   protected File _localTmpFile = null;
 
   protected ImagePlus _imp = null;
-  protected String _impName = null;
-  protected int[] _impShape = {0, 0, 0, 0, 0};
-  protected Calibration _impCalibration = null;
 
   protected final String[] _averagingModes = { "none", "mirror", "rotate" };
   protected JComboBox<String> _averagingComboBox =
@@ -118,24 +115,11 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
   public void setImagePlus(ImagePlus imp) {
     _imp = imp;
-    if (_imp != null) {
-      _impName = _imp.getTitle();
-      _impShape = _imp.getDimensions();
-      _impCalibration = _imp.getCalibration().copy();
-    }
   }
 
   @Override
   public String imageName() {
-    return _impName;
-  }
-
-  public int[] imageShape() {
-    return _impShape;
-  }
-
-  public Calibration imageCalibration() {
-    return _impCalibration;
+    return (_imp != null) ? _imp.getTitle() : "N/A";
   }
 
   @Override
@@ -154,7 +138,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
               new Runnable() {
                 @Override
                 public void run() {
-                  jobTable().updateJobDownloadEnabled(id());
+                  jobTable().updateJobDownloadEnabled(SegmentationJob.this);
                 }
               });
     }
@@ -181,17 +165,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
                   ",weightsFilename=" + weightsFileName() +
                   "," + model().getTilingParameterString() +
                   ",gpuId=" + selectedGPUString() +
-                  ",useRemoteHost=" + String.valueOf(sshSession() != null);
-              if (sshSession() != null) {
-                command +=
-                    ",hostname=" + sshSession().getHost() +
-                    ",port=" + String.valueOf(sshSession().getPort()) +
-                    ",username=" + sshSession().getUserName();
-                if (hostConfiguration().authRSAKey())
-                    command += ",RSAKeyfile=" +
-                        hostConfiguration().rsaKeyFile();
-              }
-              command +=
+                  "," + hostConfiguration().getMacroParameterString() +
                   ",processFolder=" + processFolder() +
                   ",average=" + (String)_averagingComboBox.getSelectedItem() +
                   ",keepOriginal=" + String.valueOf(
@@ -204,7 +178,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
             }
           }
           catch (IOException e) {
-            IJ.error("U-Net Segmentation", e.toString());
+            showError("Could not load segmentation result", e);
           }
           finishJob();
         }
@@ -259,155 +233,161 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
     ProcessResult res = null;
 
-    if (sshSession() != null) {
+    try {
+      if (sshSession() != null) {
 
-      try {
-        model().remoteAbsolutePath = processFolder() + id() + "_model.h5";
-        _createdRemoteFolders.addAll(
-            new SftpFileIO(sshSession(), progressMonitor()).put(
-                model().file, model().remoteAbsolutePath));
-        _createdRemoteFiles.add(model().remoteAbsolutePath);
-        Prefs.set("unet.processfolder", processFolder());
-      }
-      catch (SftpException|JSchException e) {
-        showError("Model upload failed.\nDo you have sufficient " +
-            "permissions to create the processing folder on " +
-                  "the remote host?", e);
-        return false;
-      }
-      catch (IOException e) {
-        showError("Model upload failed. Could not read model file.", e);
-        return false;
-      }
+        try {
+          model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
+          _createdRemoteFolders.addAll(
+              new SftpFileIO(sshSession(), progressMonitor()).put(
+                  model().file, model().remoteAbsolutePath));
+          _createdRemoteFiles.add(model().remoteAbsolutePath);
+          Prefs.set("unet.processfolder", processFolder());
+        }
+        catch (SftpException|JSchException e) {
+          showError("Model upload failed.\nDo you have sufficient " +
+                    "permissions to create the processing folder on " +
+                    "the remote host?", e);
+          return false;
+        }
+        catch (IOException e) {
+          showError("Model upload failed. Could not read model file.", e);
+          return false;
+        }
 
-      try {
-        boolean weightsUploaded = false;
-        do {
-          String cmd =
-              caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
-              model().remoteAbsolutePath + "\" -weights \"" +
-              weightsFileName() + "\" -n_channels " + nChannels + " " +
-              caffeGPUParameter();
-          res = Tools.execute(cmd, sshSession(), progressMonitor());
+        try {
+          boolean weightsUploaded = false;
+          do {
+            String cmd =
+                caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
+                model().remoteAbsolutePath + "\" -weights \"" +
+                weightsFileName() + "\" -n_channels " + nChannels + " " +
+                caffeGPUParameter();
+            res = Tools.execute(cmd, sshSession(), progressMonitor());
 
-          if (res.exitStatus == 0 || weightsUploaded) break;
+            if (res.exitStatus == 0 || weightsUploaded) break;
 
-          if (!weightsUploaded) {
-            int selectedOption = JOptionPane.showConfirmDialog(
-                _imp.getWindow(), "No compatible weights found at the " +
-                "given location on the backend server.\nDo you want " +
-                "to upload weights from the local machine now?",
-                "Upload weights?", JOptionPane.YES_NO_CANCEL_OPTION,
-                JOptionPane.QUESTION_MESSAGE);
-            switch (selectedOption) {
-            case JOptionPane.YES_OPTION: {
-              File startFile =
-                  (model() == null ||
-                   model().file == null ||
-                   model().file.getParentFile() == null) ?
-                  new File(".") : model().file.getParentFile();
-              JFileChooser f = new JFileChooser(startFile);
-              f.setDialogTitle("Select trained U-Net weights");
-              f.setFileFilter(
-                  new FileNameExtensionFilter(
-                      "*.h5 or *.caffemodel",
-                      "h5", "H5", "caffemodel", "CAFFEMODEL"));
-              f.setMultiSelectionEnabled(false);
-              f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-              int res2 = f.showDialog(
-                  WindowManager.getActiveWindow(), "Select");
-              if (res2 != JFileChooser.APPROVE_OPTION)
-                  throw new InterruptedException("Aborted by user");
-              try {
-                new SftpFileIO(sshSession(), progressMonitor()).put(
-                    f.getSelectedFile(), weightsFileName());
-                weightsUploaded = true;
-              }
-              catch (SftpException e) {
-                res.exitStatus = 3;
-                res.shortErrorString =
-                    "Upload failed.\nDo you have sufficient " +
-                    "permissions to create a file at the given " +
-                    "backend server path?";
-                res.cerr = e.getMessage();
-                res.cause = e;
+            if (!weightsUploaded) {
+              int selectedOption = JOptionPane.showConfirmDialog(
+                  _imp.getWindow(), "No compatible weights found at the " +
+                  "given location on the backend server.\nDo you want " +
+                  "to upload weights from the local machine now?",
+                  "Upload weights?", JOptionPane.YES_NO_CANCEL_OPTION,
+                  JOptionPane.QUESTION_MESSAGE);
+              switch (selectedOption) {
+              case JOptionPane.YES_OPTION: {
+                File startFile =
+                    (model() == null ||
+                     model().file == null ||
+                     model().file.getParentFile() == null) ?
+                    new File(".") : model().file.getParentFile();
+                JFileChooser f = new JFileChooser(startFile);
+                f.setDialogTitle("Select trained U-Net weights");
+                f.setFileFilter(
+                    new FileNameExtensionFilter(
+                        "*.h5 or *.caffemodel",
+                        "h5", "H5", "caffemodel", "CAFFEMODEL"));
+                f.setMultiSelectionEnabled(false);
+                f.setFileSelectionMode(JFileChooser.FILES_ONLY);
+                int res2 = f.showDialog(
+                    WindowManager.getActiveWindow(), "Select");
+                if (res2 != JFileChooser.APPROVE_OPTION)
+                    throw new InterruptedException("Aborted by user");
+                try {
+                  new SftpFileIO(sshSession(), progressMonitor()).put(
+                      f.getSelectedFile(), weightsFileName());
+                  weightsUploaded = true;
+                }
+                catch (SftpException e) {
+                  res.exitStatus = 3;
+                  res.shortErrorString =
+                      "Upload failed.\nDo you have sufficient " +
+                      "permissions to create a file at the given " +
+                      "backend server path?";
+                  res.cerr = e.getMessage();
+                  res.cause = e;
+                  break;
+                }
                 break;
               }
+              case JOptionPane.NO_OPTION: {
+                res.exitStatus = 2;
+                res.shortErrorString = "Weight file selection required";
+                res.cerr = "Weight file " + weightsFileName() + " not found";
+                break;
+              }
+              case JOptionPane.CANCEL_OPTION:
+              case JOptionPane.CLOSED_OPTION:
+                throw new InterruptedException("Aborted by user");
+              }
+              if (res.exitStatus > 1) break;
+            }
+            else {
+              IJ.log(res.cerr);
+              res.shortErrorString = "Model/Weights check failed.";
+              res.cerr = "See log for further details";
               break;
             }
-            case JOptionPane.NO_OPTION: {
-              res.exitStatus = 2;
-              res.shortErrorString = "Weight file selection required";
-              res.cerr = "Weight file " + weightsFileName() + " not found";
-              break;
-            }
-            case JOptionPane.CANCEL_OPTION:
-            case JOptionPane.CLOSED_OPTION:
-              throw new InterruptedException("Aborted by user");
-            }
-            if (res.exitStatus > 1) break;
           }
-          else {
-            IJ.log(res.cerr);
-            res.shortErrorString = "Model/Weights check failed.";
-            res.cerr = "See log for further details";
-            break;
+          while (res.exitStatus != 0);
+        }
+        catch (JSchException e) {
+          res.exitStatus = 1;
+          res.shortErrorString = "SSH connection error";
+          res.cerr = e.getMessage();
+          res.cause = e;
+        }
+        catch (IOException e) {
+          res.exitStatus = 1;
+          res.shortErrorString = "Input/Output error";
+          res.cerr = e.getMessage();
+          res.cause = e;
+        }
+      }
+      else {
+        try {
+          Vector<String> cmd = new Vector<String>();
+          cmd.add(caffe_unetBinary);
+          cmd.add("check_model_and_weights_h5");
+          cmd.add("-model");
+          cmd.add(model().file.getAbsolutePath());
+          cmd.add("-weights");
+          cmd.add(weightsFileName());
+          cmd.add("-n_channels");
+          cmd.add(new Integer(nChannels).toString());
+          if (!caffeGPUParameter().equals("")) {
+            cmd.add(caffeGPUParameter().split(" ")[0]);
+            cmd.add(caffeGPUParameter().split(" ")[1]);
           }
+          res = Tools.execute(cmd, progressMonitor());
         }
-        while (res.exitStatus != 0);
-      }
-      catch (JSchException e) {
-        res.exitStatus = 1;
-        res.shortErrorString = "SSH connection error";
-        res.cerr = e.getMessage();
-        res.cause = e;
-      }
-      catch (IOException e) {
-        res.exitStatus = 1;
-        res.shortErrorString = "Input/Output error";
-        res.cerr = e.getMessage();
-        res.cause = e;
-      }
-    }
-    else {
-      try {
-        Vector<String> cmd = new Vector<String>();
-        cmd.add(caffe_unetBinary);
-        cmd.add("check_model_and_weights_h5");
-        cmd.add("-model");
-        cmd.add(model().file.getAbsolutePath());
-        cmd.add("-weights");
-        cmd.add(weightsFileName());
-        cmd.add("-n_channels");
-        cmd.add(new Integer(nChannels).toString());
-        if (!caffeGPUParameter().equals("")) {
-          cmd.add(caffeGPUParameter().split(" ")[0]);
-          cmd.add(caffeGPUParameter().split(" ")[1]);
+        catch (IOException e) {
+          res.exitStatus = 1;
+          res.shortErrorString = "Input/Output error";
+          res.cerr = e.getMessage();
+          res.cause = e;
         }
-        res = Tools.execute(cmd, progressMonitor());
       }
-      catch (IOException e) {
-        res.exitStatus = 1;
-        res.shortErrorString = "Input/Output error";
-        res.cerr = e.getMessage();
-        res.cause = e;
+      if (res.exitStatus != 0) {
+        // User decided to change weight file, so don't bother him with
+        // additional message boxes
+        if (res.exitStatus == 2) return false;
+        showError(
+            "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
+        return false;
       }
+
+      Prefs.set("unet.segmentation.keepOriginal",
+                _keepOriginalCheckBox.isSelected());
+      Prefs.set("unet.segmentation.outputScores",
+                _outputScoresCheckBox.isSelected());
+      Prefs.set("unet.segmentation.outputSoftmaxScores",
+                _outputSoftmaxScoresCheckBox.isSelected());
     }
-    if (res.exitStatus != 0) {
-      // User decided to change weight file, so don't bother him with
-      // additional message boxes
-      if (res.exitStatus == 2) return false;
-      showError(
-          "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
+    catch (JSchException e) {
+      showError("SSH connection failed", e);
       return false;
     }
-
-    Prefs.set("unet.segmentation.keepOriginal",
-              _keepOriginalCheckBox.isSelected());
-    Prefs.set("unet.segmentation.outputScores",
-              _outputScoresCheckBox.isSelected());
-    Prefs.set("unet.segmentation.outputSoftmaxScores",
-              _outputSoftmaxScoresCheckBox.isSelected());
 
     return true;
   }
@@ -718,59 +698,15 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     job.setWeightsFileName(parameters.get("weightsFilename"));
     job.model().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
-    if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
-      try {
-        String hostname = parameters.get("hostname");
-        int port = Integer.valueOf(parameters.get("port"));
-        String username = parameters.get("username");
-        JSch jsch = new JSch();
-        jsch.setKnownHosts(
-            new File(System.getProperty("user.home") +
-                     "/.ssh/known_hosts").getAbsolutePath());
-        if (parameters.containsKey("RSAKeyfile"))
-            jsch.addIdentity(parameters.get("RSAKeyfile"));
-        job.setSshSession(jsch.getSession(username, hostname, port));
-        job.sshSession().setUserInfo(new MyUserInfo());
-
-        if (!parameters.containsKey("RSAKeyfile")) {
-          final JDialog passwordDialog = new JDialog(
-              job._imp.getWindow(), "U-Net Segmentation", true);
-          JPanel mainPanel = new JPanel();
-          mainPanel.add(new JLabel("Password:"));
-          final JPasswordField passwordField = new JPasswordField(15);
-          mainPanel.add(passwordField);
-          passwordDialog.add(mainPanel, BorderLayout.CENTER);
-          JButton okButton = new JButton("OK");
-          okButton.addActionListener(
-              new ActionListener() {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                  char[] password = passwordField.getPassword();
-                  byte[] passwordAsBytes =
-                      HostConfigurationPanel.toBytes(password);
-                  job.sshSession().setPassword(passwordAsBytes);
-                  Arrays.fill(passwordAsBytes, (byte) 0);
-                  Arrays.fill(password, '\u0000');
-                  passwordField.setText("");
-                  passwordDialog.dispose();
-                }});
-          passwordDialog.add(okButton, BorderLayout.SOUTH);
-          passwordDialog.getRootPane().setDefaultButton(okButton);
-          passwordDialog.pack();
-          passwordDialog.setMinimumSize(passwordDialog.getPreferredSize());
-          passwordDialog.setMaximumSize(passwordDialog.getPreferredSize());
-          passwordDialog.setLocationRelativeTo(job._imp.getWindow());
-          passwordDialog.setVisible(true);
-        }
-
-        job.sshSession().connect();
-      }
-      catch (JSchException e) {
-        IJ.log("Macro call to SegmentationJob.processHyperStack aborted. " +
-               "Could not establish SSH connection.");
-        IJ.error("U-Net Segmentation", "Could not establish SSH connection.");
-        return;
-      }
+    try
+    {
+      job.hostConfiguration().connectFromParameterMap(parameters);
+    }
+    catch (JSchException e) {
+      IJ.log("Macro call to SegmentationJob.processHyperStack aborted. " +
+             "Could not establish SSH connection.");
+      IJ.error("U-Net Segmentation", "Could not establish SSH connection.");
+      return;
     }
     job.setProcessFolder(parameters.get("processFolder"));
     job._keepOriginalCheckBox.setSelected(
@@ -802,39 +738,66 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
       prepareParametersDialog();
       if (isInteractive() && !getParameters()) return;
-      if (sshSession() != null) {
 
-        progressMonitor().push("Uploading Model", 0.0f, 0.01f);
+      progressMonitor().push(
+          "Creating Caffe blobs", 0.0f, (sshSession() != null) ? 0.03f : 0.09f);
+
+      TrainingSample t = new TrainingSample(_imp);
+      t.createDataBlob(model(), progressMonitor());
+      if (t.dataBlob() != _imp) {
+        if (!_keepOriginalCheckBox.isSelected()) {
+          _imp.changes = false;
+          _imp.close();
+        }
+        setImagePlus(t.dataBlob());
+        _imp.show();
+        _imp.setDisplayRange(0, 1);
+        _imp.updateAndDraw();
+      }
+
+      String remoteFileName = null;
+      if (sshSession() == null)
+          _localTmpFile = new File(processFolder() + id() + ".h5");
+      else {
+        _localTmpFile = File.createTempFile(id(), ".h5");
+        _localTmpFile.delete();
+        remoteFileName = processFolder() + id() + ".h5";
+      }
+
+      if (interrupted()) throw new InterruptedException();
+      progressMonitor().pop();
+      progressMonitor().push(
+          "Saving Caffe blobs", (sshSession() != null) ? 0.03f : 0.09f,
+          (sshSession() != null) ? 0.04f : 0.1f);
+
+      _createdLocalFiles.addAll(
+          t.saveBlobs(_localTmpFile, model(), progressMonitor()));
+
+      if (interrupted()) throw new InterruptedException();
+      progressMonitor().pop();
+
+      if (sshSession() != null) {
+        progressMonitor().push("Uploading Caffe blobs", 0.04f, 0.09f);
+
+        _createdRemoteFolders.addAll(
+            new SftpFileIO(sshSession(), progressMonitor()).put(
+                _localTmpFile, remoteFileName));
+        _createdRemoteFiles.add(remoteFileName);
+
+        if (interrupted()) throw new InterruptedException();
+        progressMonitor().pop();
+        progressMonitor().push("Uploading Model", 0.09f, 0.1f);
 
         SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
         if (!isInteractive()) {
           model().remoteAbsolutePath =
-              processFolder() + id() + "_model.h5";
+              processFolder() + id() + ".modeldef.h5";
           _createdRemoteFolders.addAll(
-              sftp.put(model().file,
-                       model().remoteAbsolutePath));
+              new SftpFileIO(sshSession(), progressMonitor()).put(
+                  model().file, model().remoteAbsolutePath));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
         }
-        _localTmpFile = File.createTempFile(id(), ".h5");
-        _localTmpFile.delete();
-        String remoteFileName = processFolder() + id() + ".h5";
 
-        progressMonitor().pop();
-        progressMonitor().push("Creating HDF5 blobs", 0.01f, 0.05f);
-
-        setImagePlus(
-            Tools.saveHDF5Blob(
-                _imp, _localTmpFile, model(), progressMonitor(), false,
-                _keepOriginalCheckBox.isSelected(), true));
-
-        if (interrupted()) throw new InterruptedException();
-        progressMonitor().pop();
-        progressMonitor().push("Uploading HDF5 blobs", 0.05f, 0.1f);
-
-        _createdRemoteFolders.addAll(sftp.put(_localTmpFile, remoteFileName));
-        _createdRemoteFiles.add(remoteFileName);
-
-        if (interrupted()) throw new InterruptedException();
         progressMonitor().pop();
         progressMonitor().push("U-Net segmentation", 0.1f, 0.9f);
 
@@ -844,28 +807,23 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         progressMonitor().pop();
         progressMonitor().push("Downloading segmentation", 0.9f, 1.0f);
 
-        sftp.get(remoteFileName, _localTmpFile);
+        new SftpFileIO(sshSession(), progressMonitor()).get(
+            remoteFileName, _localTmpFile);
       }
       else {
-        progressMonitor().push("Creating HDF5 blobs", 0.0f, 0.1f);
-
-        _localTmpFile = new File(processFolder() + id() + ".h5");
-        setImagePlus(
-            Tools.saveHDF5Blob(
-                _imp, _localTmpFile, model(), progressMonitor(), false,
-                _keepOriginalCheckBox.isSelected(), true));
-
-        if (interrupted()) throw new InterruptedException();
-        progressMonitor().pop();
         progressMonitor().push("U-Net segmentation", 0.1f, 1.0f);
-
         runSegmentation(_localTmpFile);
-     }
+      }
+
       if (interrupted()) throw new InterruptedException();
-       progressMonitor().end();
+      progressMonitor().end();
       setReady(true);
     }
     catch (InterruptedException e) {
+      abort();
+    }
+    catch (TrainingSampleException e) {
+      showError("Invalid Training Sample", e);
       abort();
     }
     catch (JSchException e) {
@@ -880,15 +838,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       IJ.error(id(), "Input/Output error:\n" + e);
       abort();
     }
-    catch (NotImplementedException e) {
-      IJ.error(id(), "Sorry, the requested feature is not implemented:\n" + e);
-      abort();
-    }
-    catch (BlobException e) {
-      IJ.error(id(), "Blob conversion failed:\n" + e);
-      abort();
-    }
- }
+  }
 
   protected void loadSegmentationToImagePlus()
       throws HDF5Exception, IOException {
@@ -930,7 +880,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         impScores = IJ.createHyperStack(
             title, nCols, nRows, nClasses, nLevs, nFrames, 32);
         impScores.setDisplayMode(IJ.GRAYSCALE);
-        impScores.setCalibration(imageCalibration().copy());
+        impScores.setCalibration(_imp.getCalibration().copy());
       }
 
       ImagePlus impSoftmaxScores = null;
@@ -938,13 +888,13 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         impSoftmaxScores = IJ.createHyperStack(
             title + " (softmax)", nCols, nRows, nClasses, nLevs, nFrames, 32);
         impSoftmaxScores.setDisplayMode(IJ.GRAYSCALE);
-        impSoftmaxScores.setCalibration(imageCalibration().copy());
+        impSoftmaxScores.setCalibration(_imp.getCalibration().copy());
       }
 
       ImagePlus impClassification = IJ.createHyperStack(
           title + " (segmentation)", nCols, nRows, 1, nLevs, nFrames, 16);
       impClassification.setDisplayMode(IJ.GRAYSCALE);
-      impClassification.setCalibration(imageCalibration().copy());
+      impClassification.setCalibration(_imp.getCalibration().copy());
 
       int[] blockDims = (nDims == 2) ?
           (new int[] { 1, 1, nRows, nCols }) :
@@ -1070,7 +1020,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         ImagePlus impMCClassification = IJ.createHyperStack(
             title + " (classes)", nCols, nRows, nClasses - 1,
             nLevs, nFrames, 8);
-        impMCClassification.setCalibration(imageCalibration().copy());
+        impMCClassification.setCalibration(_imp.getCalibration().copy());
 
         for (int t = 0; t < nFrames; ++t) {
           for (int z = 0; z < nLevs; ++z) {

@@ -572,6 +572,75 @@ public class ModelDefinition {
     save(file);
   }
 
+  // This saves the complete model plus the object state for
+  // re-initialization
+  public void saveSnapshot(File outputFile) throws HDF5Exception {
+    IHDF5Writer writer =
+        HDF5Factory.configure(outputFile).
+        syncMode(IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
+        .useSimpleDataSpaceForAttributes()
+        .useUTF8CharacterEncoding().overwrite().writer();
+
+    writer.object().createGroup("/modeldef");
+    if (_minOutTileShape != null) writer.int32().setArrayAttr(
+        "/modeldef", "minOutTileShape", _minOutTileShape);
+    writer.int32().setAttr("/modeldef", "nDims", _nDims);
+    if (file != null)
+        writer.string().setAttr("/modeldef", "file", file.getAbsolutePath());
+    if (remoteAbsolutePath != null)
+        writer.string().setAttr(
+            "/modeldef", "remoteAbsolutePath", remoteAbsolutePath);
+    if (modelPrototxtAbsolutePath != null)
+        writer.string().setAttr(
+            "/modeldef", "modelPrototxtAbsolutePath",
+            modelPrototxtAbsolutePath);
+    if (solverPrototxtAbsolutePath != null)
+        writer.string().setAttr(
+            "/modeldef", "solverPrototxtAbsolutePath",
+            solverPrototxtAbsolutePath);
+    if (weightFile != null)
+        writer.string().setAttr("/modeldef", "weightFile", weightFile);
+    writer.close();
+
+    save(outputFile);
+  }
+
+  public void loadSnapshot(File inputFile) throws HDF5Exception {
+    _load(inputFile);
+    IHDF5Reader reader = HDF5Factory.configureForReading(inputFile).reader();
+    try {
+      _minOutTileShape =
+          reader.int32().getArrayAttr("/modeldef", "minOutTileShape");
+    }
+    catch (HDF5Exception e) {}
+    try {
+      file = new File(reader.string().getAttr("/modeldef", "file"));
+    }
+    catch (HDF5Exception e) {}
+    try {
+      remoteAbsolutePath =
+          reader.string().getAttr("/modeldef", "remoteAbsolutePath");
+    }
+    catch (HDF5Exception e) {}
+    try {
+      modelPrototxtAbsolutePath =
+          reader.string().getAttr("/modeldef", "modelPrototxtAbsolutePath");
+    }
+    catch (HDF5Exception e) {}
+    try {
+      solverPrototxtAbsolutePath =
+          reader.string().getAttr("/modeldef", "solverPrototxtAbsolutePath");
+    }
+    catch (HDF5Exception e) {}
+    try {
+      weightFile =
+          reader.string().getAttr("/modeldef", "weightFile");
+    }
+    catch (HDF5Exception e) {}
+    reader.close();
+    _initGUIElements();
+  }
+
   public void setFromTilingParameterString(String tilingParameter) {
     String[] arg = tilingParameter.split("=");
     if (arg[0].equals(NTILES)) {

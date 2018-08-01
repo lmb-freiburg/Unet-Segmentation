@@ -45,10 +45,14 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/CaffeJob.java
   src/de/unifreiburg/unet/SegmentationJob.java
   src/de/unifreiburg/unet/DetectionJob.java
+  src/de/unifreiburg/unet/FinetuneJobException.java
   src/de/unifreiburg/unet/FinetuneJob.java
+  src/de/unifreiburg/unet/ResumeFinetuning.java
   src/de/unifreiburg/unet/TrainImagePair.java
   src/de/unifreiburg/unet/TrainImagePairListView.java
   src/de/unifreiburg/unet/TrainImagePairException.java
+  src/de/unifreiburg/unet/TrainingSample.java
+  src/de/unifreiburg/unet/TrainingSampleException.java
   src/de/unifreiburg/unet/Tools.java
   src/de/unifreiburg/unet/MyUserInfo.java
   src/de/unifreiburg/unet/ProgressMonitor.java

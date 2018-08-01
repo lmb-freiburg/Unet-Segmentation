@@ -83,17 +83,7 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
                   ",weightsFilename=" + weightsFileName() +
                   "," + model().getTilingParameterString() +
                   ",gpuId=" + selectedGPUString() +
-                  ",useRemoteHost=" + String.valueOf(sshSession() != null);
-              if (sshSession() != null) {
-                command +=
-                    ",hostname=" + sshSession().getHost() +
-                    ",port=" + String.valueOf(sshSession().getPort()) +
-                    ",username=" + sshSession().getUserName();
-                if (hostConfiguration().authRSAKey())
-                    command += ",RSAKeyfile=" +
-                        hostConfiguration().rsaKeyFile();
-              }
-              command +=
+                  "," + hostConfiguration().getMacroParameterString() +
                   ",processFolder=" + processFolder() +
                   ",average=" + (String)_averagingComboBox.getSelectedItem() +
                   ",keepOriginal=" + String.valueOf(
@@ -106,7 +96,7 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
             }
           }
           catch (IOException e) {
-            IJ.error("U-Net Detection", e.toString());
+            showError("Could not load detection result", e);
           }
           finishJob();
         }
@@ -136,59 +126,15 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
     job.setWeightsFileName(parameters.get("weightsFilename"));
     job.model().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
-    if (Boolean.valueOf(parameters.get("useRemoteHost"))) {
-      try {
-        String hostname = parameters.get("hostname");
-        int port = Integer.valueOf(parameters.get("port"));
-        String username = parameters.get("username");
-        JSch jsch = new JSch();
-        jsch.setKnownHosts(
-            new File(System.getProperty("user.home") +
-                     "/.ssh/known_hosts").getAbsolutePath());
-        if (parameters.containsKey("RSAKeyfile"))
-            jsch.addIdentity(parameters.get("RSAKeyfile"));
-        job.setSshSession(jsch.getSession(username, hostname, port));
-        job.sshSession().setUserInfo(new MyUserInfo());
-
-        if (!parameters.containsKey("RSAKeyfile")) {
-          final JDialog passwordDialog = new JDialog(
-              job._imp.getWindow(), "U-Net Segmentation", true);
-          JPanel mainPanel = new JPanel();
-          mainPanel.add(new JLabel("Password:"));
-          final JPasswordField passwordField = new JPasswordField(15);
-          mainPanel.add(passwordField);
-          passwordDialog.add(mainPanel, BorderLayout.CENTER);
-          JButton okButton = new JButton("OK");
-          okButton.addActionListener(
-              new ActionListener() {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                  char[] password = passwordField.getPassword();
-                  byte[] passwordAsBytes =
-                      HostConfigurationPanel.toBytes(password);
-                  job.sshSession().setPassword(passwordAsBytes);
-                  Arrays.fill(passwordAsBytes, (byte) 0);
-                  Arrays.fill(password, '\u0000');
-                  passwordField.setText("");
-                  passwordDialog.dispose();
-                }});
-          passwordDialog.add(okButton, BorderLayout.SOUTH);
-          passwordDialog.getRootPane().setDefaultButton(okButton);
-          passwordDialog.pack();
-          passwordDialog.setMinimumSize(passwordDialog.getPreferredSize());
-          passwordDialog.setMaximumSize(passwordDialog.getPreferredSize());
-          passwordDialog.setLocationRelativeTo(job._imp.getWindow());
-          passwordDialog.setVisible(true);
-        }
-
-        job.sshSession().connect();
-      }
-      catch (JSchException e) {
-        IJ.log("Macro call to DetectionJob.processHyperStack aborted. " +
-               "Could not establish SSH connection.");
-        IJ.error("U-Net Detection", "Could not establish SSH connection.");
-        return;
-      }
+    try
+    {
+      job.hostConfiguration().connectFromParameterMap(parameters);
+    }
+    catch (JSchException e) {
+      IJ.log("Macro call to SegmentationJob.processHyperStack aborted. " +
+             "Could not establish SSH connection.");
+      IJ.error("U-Net Segmentation", "Could not establish SSH connection.");
+      return;
     }
     job.setProcessFolder(parameters.get("processFolder"));
     job._keepOriginalCheckBox.setSelected(
