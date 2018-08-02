@@ -529,7 +529,8 @@ public class ModelDefinition {
     writer.flush();
   }
 
-  public void save(File outputFile) throws HDF5Exception {
+  public void save(File outputFile) throws HDF5Exception, IOException {
+    Tools.createFolder(outputFile.getParentFile());
     IHDF5Writer writer =
         HDF5Factory.configure(outputFile).
         syncMode(IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
@@ -568,13 +569,13 @@ public class ModelDefinition {
     writer.close();
   }
 
-  public void save() throws HDF5Exception {
+  public void save() throws HDF5Exception, IOException {
     save(file);
   }
 
   // This saves the complete model plus the object state for
   // re-initialization
-  public void saveSnapshot(File outputFile) throws HDF5Exception {
+  public void saveSnapshot(File outputFile) throws HDF5Exception, IOException {
     IHDF5Writer writer =
         HDF5Factory.configure(outputFile).
         syncMode(IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)

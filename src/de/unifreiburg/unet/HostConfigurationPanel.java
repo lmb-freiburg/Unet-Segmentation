@@ -420,10 +420,14 @@ public class HostConfigurationPanel extends JPanel {
       _sshSession.setUserInfo(new MyUserInfo());
       if (authPassword()) {
         if (passwordField == null) {
+
+          JPanel panel = new JPanel(new GridLayout(2, 1));
+          panel.add(new JLabel("Enter Password for " + username() + "@" +
+                               hostname()));
           passwordField = new JPasswordField();
+          panel.add(passwordField);
           int okCxl = JOptionPane.showConfirmDialog(
-              null, passwordField, "Enter Password for " + username() + "@" +
-              hostname(), JOptionPane.OK_CANCEL_OPTION,
+              null, panel, "Enter Password", JOptionPane.OK_CANCEL_OPTION,
               JOptionPane.PLAIN_MESSAGE);
           if (okCxl != JOptionPane.OK_OPTION) throw new InterruptedException();
         }

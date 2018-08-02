@@ -1338,9 +1338,6 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
   public void resumeFinetuning(File snapshotFile) {
 
-    // ToDo: Load _createdLocalFiles, _createdRemoteFolders and
-    // _createdRemoteFiles to remove them upon end of finetuning
-
     _finetunedModel = new ModelDefinition(this);
     _finetunedModel.loadSnapshot(snapshotFile);
     setModel(_finetunedModel);
@@ -1381,6 +1378,22 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     _nObjSegmentation =
         snapshotReader.float64().readMatrix("/nObjSegmentation");
     _f1Segmentation = snapshotReader.float64().readMatrix("/f1Segmentation");
+
+    if (snapshotReader.object().isDataSet("/localFiles")) {
+      String[] localFiles = snapshotReader.string().readArray("/localFiles");
+      for (String f : localFiles) _createdLocalFiles.add(new File(f));
+    }
+
+    if (snapshotReader.object().isDataSet("/remoteFolders")) {
+      String[] remoteFolders =
+          snapshotReader.string().readArray("/remoteFolders");
+      for (String f : remoteFolders) _createdRemoteFolders.add(f);
+    }
+
+    if (snapshotReader.object().isDataSet("/remoteFiles")) {
+      String[] remoteFiles = snapshotReader.string().readArray("/remoteFiles");
+      for (String f : remoteFiles) _createdRemoteFiles.add(f);
+    }
 
     progressMonitor().push(
         "Finetuning", 0.0f,
@@ -1614,65 +1627,94 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
   public void saveSnapshot(File snapshotFile) {
 
-    // ToDo: store _createdLocalFiles, _createdRemoteFolders and
-    // _createdRemoteFiles to remove them upon end of finetuning
+    try {
+      _finetunedModel.saveSnapshot(snapshotFile);
 
-    _finetunedModel.saveSnapshot(snapshotFile);
-
-    IHDF5Writer snapshotWriter =
-        HDF5Factory.configure(snapshotFile.getAbsolutePath()).syncMode(
-            IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
-        .useSimpleDataSpaceForAttributes().writer();
-    String[] cmd = new String[_cmd.size()];
-    boolean snapshotParameterSet = false;
-    for (int i = 0; i < _cmd.size(); ++i) {
-      if (_cmd.get(i).equals("-weights")) {
-        cmd[i++] = "-snapshot";
-        cmd[i] = _solverstate;
-        snapshotParameterSet = true;
+      IHDF5Writer snapshotWriter =
+          HDF5Factory.configure(snapshotFile.getAbsolutePath()).syncMode(
+              IHDF5WriterConfigurator.SyncMode.SYNC_BLOCK)
+          .useSimpleDataSpaceForAttributes().writer();
+      String[] cmd = new String[_cmd.size()];
+      boolean snapshotParameterSet = false;
+      for (int i = 0; i < _cmd.size(); ++i) {
+        if (_cmd.get(i).equals("-weights")) {
+          cmd[i++] = "-snapshot";
+          cmd[i] = _solverstate;
+          snapshotParameterSet = true;
+        }
+        else cmd[i] = _cmd.get(i);
       }
-      else cmd[i] = _cmd.get(i);
+      if (!snapshotParameterSet) {
+        String[] cmdNew = new String[cmd.length + 2];
+        for (int i = 0; i < cmd.length; ++i) cmdNew[i] = cmd[i];
+        cmdNew[cmd.length] = "-snapshot";
+        cmdNew[cmd.length + 1] = _solverstate;
+        cmd = cmdNew;
+      }
+      snapshotWriter.string().setAttr("/", "id", id());
+      snapshotWriter.string().writeArrayVL("/commandLine", cmd);
+      snapshotWriter.string().setAttr("/", "processFolder", processFolder());
+      snapshotWriter.string().setAttr(
+          "/", "weightsFileName", weightsFileName());
+      snapshotWriter.string().setAttr(
+          "/", "outputWeightsFile", _outweightsTextField.getText());
+      snapshotWriter.int8().setAttr(
+          "/", "downloadWeights",
+          _downloadWeightsCheckBox.isSelected() ? (byte)1 : (byte)0);
+
+      // Save current finetuning state
+      snapshotWriter.int32().setAttr("/", "currentIteration", _nIter);
+      snapshotWriter.float64().writeArray("/xTrain", _xTrain);
+      snapshotWriter.float64().writeArray("/xValid", _xValid);
+      snapshotWriter.float64().writeArray("/lossTrain", _lossTrain);
+      snapshotWriter.float64().writeArray("/lossValid", _lossValid);
+      snapshotWriter.float64().writeMatrix("/intersection", _intersection);
+      snapshotWriter.float64().writeMatrix("/union", _union);
+      snapshotWriter.float64().writeMatrix("/IoU", _iou);
+      snapshotWriter.float64().writeMatrix("/nTPDetection", _nTPDetection);
+      snapshotWriter.float64().writeMatrix("/nPredDetection", _nPredDetection);
+      snapshotWriter.float64().writeMatrix("/nObjDetection", _nObjDetection);
+      snapshotWriter.float64().writeMatrix("/f1Detection", _f1Detection);
+      snapshotWriter.float64().writeMatrix(
+          "/nTPSegmentation", _nTPSegmentation);
+      snapshotWriter.float64().writeMatrix(
+          "/nPredSegmentation", _nPredSegmentation);
+      snapshotWriter.float64().writeMatrix(
+          "/nObjSegmentation", _nObjSegmentation);
+      snapshotWriter.float64().writeMatrix("/f1Segmentation", _f1Segmentation);
+
+      hostConfiguration().save(snapshotWriter);
+
+      try {
+        if (_createdLocalFiles.size() > 0 && sshSession() == null) {
+          String[] localFiles = new String[_createdLocalFiles.size()];
+          for (int i = 0; i < localFiles.length; ++i)
+              localFiles[i] = _createdLocalFiles.get(i).getAbsolutePath();
+          snapshotWriter.string().writeArrayVL("/localFiles", localFiles);
+        }
+      }
+      catch (JSchException|InterruptedException e) {}
+
+      if (_createdRemoteFolders.size() > 0) {
+        String[] remoteFolders = new String[_createdRemoteFolders.size()];
+        for (int i = 0; i < remoteFolders.length; ++i)
+            remoteFolders[i] = _createdRemoteFolders.get(i);
+        snapshotWriter.string().writeArrayVL("/remoteFolders", remoteFolders);
+      }
+
+      if (_createdRemoteFiles.size() > 0) {
+        String[] remoteFiles = new String[_createdRemoteFiles.size()];
+        for (int i = 0; i < remoteFiles.length; ++i)
+            remoteFiles[i] = _createdRemoteFiles.get(i);
+        snapshotWriter.string().writeArrayVL("/remoteFiles", remoteFiles);
+      }
+
+      snapshotWriter.close();
     }
-    if (!snapshotParameterSet) {
-      String[] cmdNew = new String[cmd.length + 2];
-      for (int i = 0; i < cmd.length; ++i) cmdNew[i] = cmd[i];
-      cmdNew[cmd.length] = "-snapshot";
-      cmdNew[cmd.length + 1] = _solverstate;
-      cmd = cmdNew;
+    catch (IOException e) {
+      showError(
+          "Could not save snapshot to " + snapshotFile.getAbsolutePath(), e);
     }
-    snapshotWriter.string().setAttr("/", "id", id());
-    snapshotWriter.string().writeArrayVL("/commandLine", cmd);
-    snapshotWriter.string().setAttr("/", "processFolder", processFolder());
-    snapshotWriter.string().setAttr("/", "weightsFileName", weightsFileName());
-    snapshotWriter.string().setAttr(
-        "/", "outputWeightsFile", _outweightsTextField.getText());
-    snapshotWriter.int8().setAttr(
-        "/", "downloadWeights",
-        _downloadWeightsCheckBox.isSelected() ? (byte)1 : (byte)0);
-
-    // Save current finetuning state
-    snapshotWriter.int32().setAttr("/", "currentIteration", _nIter);
-    snapshotWriter.float64().writeArray("/xTrain", _xTrain);
-    snapshotWriter.float64().writeArray("/xValid", _xValid);
-    snapshotWriter.float64().writeArray("/lossTrain", _lossTrain);
-    snapshotWriter.float64().writeArray("/lossValid", _lossValid);
-    snapshotWriter.float64().writeMatrix("/intersection", _intersection);
-    snapshotWriter.float64().writeMatrix("/union", _union);
-    snapshotWriter.float64().writeMatrix("/IoU", _iou);
-    snapshotWriter.float64().writeMatrix("/nTPDetection", _nTPDetection);
-    snapshotWriter.float64().writeMatrix("/nPredDetection", _nPredDetection);
-    snapshotWriter.float64().writeMatrix("/nObjDetection", _nObjDetection);
-    snapshotWriter.float64().writeMatrix("/f1Detection", _f1Detection);
-    snapshotWriter.float64().writeMatrix("/nTPSegmentation", _nTPSegmentation);
-    snapshotWriter.float64().writeMatrix(
-        "/nPredSegmentation", _nPredSegmentation);
-    snapshotWriter.float64().writeMatrix(
-        "/nObjSegmentation", _nObjSegmentation);
-    snapshotWriter.float64().writeMatrix("/f1Segmentation", _f1Segmentation);
-
-    hostConfiguration().save(snapshotWriter);
-
-    snapshotWriter.close();
   }
 
   @Override
