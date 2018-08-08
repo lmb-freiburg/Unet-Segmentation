@@ -33,9 +33,15 @@ package de.unifreiburg.unet;
 public class CaffeBlob {
 
   public CaffeBlob(String name, int[] shape, NetworkLayer layer) {
+    this(name, shape, layer, false);
+  }
+
+  public CaffeBlob(
+      String name, int[] shape, NetworkLayer layer, boolean onGPU) {
     _name = name;
     _shape = shape;
     _layer = layer;
+    _onGPU = onGPU;
   }
 
   public String name() {
@@ -72,8 +78,17 @@ public class CaffeBlob {
     return res;
   }
 
+  void setOnGPU(boolean onGPU) {
+    _onGPU = onGPU;
+  }
+
+  boolean onGPU() {
+    return _onGPU;
+  }
+
   private final String _name;
   private final int[] _shape;
   private final NetworkLayer _layer;
+  private boolean _onGPU;
 
 }

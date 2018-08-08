@@ -32,41 +32,40 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
-public class ReLULayer extends NetworkLayer {
+public class ApplyDeformationLayer extends NetworkLayer {
 
-  public ReLULayer(
-      String name, Net net, CaffeBlob[] in, String[] topNames) {
-    super(name, net, in, new CaffeBlob[in.length]);
-    long mem = 0;
-    for (int i = 0; i < in.length; ++i) {
-      if (topNames[i].equals(in[i].name())) {
-        _out[i] = in[i];
-        // In training phase the inputs must be kept, leading to
-        // a memory overhead equal to the memory required to store all blobs
-        if (net.phase().equals(Caffe.Phase.TRAIN))
-            mem += 4 * in[i].count();
-      }
-      else _out[i] = new CaffeBlob(topNames[i], in[i].shape(), this, true);
-    }
-    for (CaffeBlob blob : in) blob.setOnGPU(true);
-
-    _memOverhead = mem;
+  public ApplyDeformationLayer(
+      String name, Net net, CaffeBlob[] in, String topName, int[] topShape) {
+    super(name, net, in, new CaffeBlob[1]);
+    _out[0] = new CaffeBlob(topName, topShape, this);
   }
 
   public static NetworkLayer createFromProto(
-      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
-    return new ReLULayer(
-        layerParam.getName(), net, in, layerParam.getTopList().toArray(
-            new String[layerParam.getTopCount()]));
+      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
+      throws BlobException {
+    Caffe.ApplyDeformationParameter cp = layerParam.getApplyDeformationParam();
+    String shapeFrom = cp.getOutputShapeFrom();
+    System.out.println("Using shape from blob " + shapeFrom);
+    int[] outShape = new int[in[0].shape().length];
+    outShape[0] = in[0].nSamples();
+    outShape[1] = in[0].nChannels();
+    if (shapeFrom.equals("")) {
+      for (int d = 2; d < outShape.length; ++d)
+          outShape[d] = in[1].shape()[d - 1];
+    }
+    else {
+      CaffeBlob fromBlob = net.findBlob(shapeFrom);
+      if (fromBlob == null) throw new BlobException(
+          "No input blob named " + shapeFrom +
+          " to copy the shape from in ApplyDeformationLayer");
+      for (int d = 2; d < outShape.length; ++d)
+          outShape[d] = fromBlob.shape()[d];
+    }
+    return new ApplyDeformationLayer(
+        layerParam.getName(), net, in, layerParam.getTop(0), outShape);
   }
 
   @Override
-  public String layerTypeString() { return "ReLULayer"; }
+  public String layerTypeString() { return "ApplyDeformationLayer"; }
 
-  @Override
-  public long memoryOverhead(boolean cuDNN) {
-    return _memOverhead;
-  }
-
-  private final long _memOverhead;
 }

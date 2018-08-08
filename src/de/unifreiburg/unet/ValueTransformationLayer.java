@@ -42,7 +42,9 @@ public class ValueTransformationLayer extends NetworkLayer {
     if (net.findBlob(topName) != null) throw new BlobException(
         "In-place value transformation not implemented");
 
-    _out[0] = new CaffeBlob(topName, in[0].shape(), this);
+    _out[0] = new CaffeBlob(topName, in[0].shape(), this, true);
+
+    for (CaffeBlob blob : in) blob.setOnGPU(true);
 
     _memPara = 4 * 2 * in[0].nChannels();
   }

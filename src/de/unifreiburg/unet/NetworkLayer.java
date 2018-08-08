@@ -46,6 +46,12 @@ public abstract class NetworkLayer {
   public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
       throws NotImplementedException, BlobException {
+    if (layerParam.getType().equals("CreateDeformation"))
+        return CreateDeformationLayer.createFromProto(layerParam, net, in);
+    if (layerParam.getType().equals("ApplyDeformation"))
+        return ApplyDeformationLayer.createFromProto(layerParam, net, in);
+    if (layerParam.getType().equals("ValueAugmentation"))
+        return ValueAugmentationLayer.createFromProto(layerParam, net, in);
     if (layerParam.getType().equals("ValueTransformation"))
         return ValueTransformationLayer.createFromProto(layerParam, net, in);
     if (layerParam.getType().equals("Convolution"))
@@ -58,6 +64,10 @@ public abstract class NetworkLayer {
         return UpConvolutionLayer.createFromProto(layerParam, net, in);
     else if (layerParam.getType().equals("Concat"))
         return ConcatAndCropLayer.createFromProto(layerParam, net, in);
+    else if (layerParam.getType().equals("Dropout"))
+        return DropoutLayer.createFromProto(layerParam, net, in);
+    else if (layerParam.getType().equals("SoftmaxWithLoss"))
+        return SoftmaxWithLossLayer.createFromProto(layerParam, net, in);
     else throw new NotImplementedException(
         "Layer type " + layerParam.getType() + " not implemented");
   }
@@ -95,19 +105,19 @@ public abstract class NetworkLayer {
   public String toString() {
     String res = layerTypeString() + " " + _name + " {";
     if (_in != null) {
-      res += " in: ";
+      res += " in:";
       for (CaffeBlob blob : _in) {
-        res += blob.name() + " [ ";
+        res += " " + blob.name() + " [ ";
         for (int extent: blob.shape()) res += extent + " ";
-        res += "]";
+        res += "]" + (blob.onGPU() ? "*" : "");
       }
     }
     if (_out != null) {
-      res += " out: ";
+      res += " out:";
       for (CaffeBlob blob : _out) {
-        res += blob.name() + " [ ";
+        res += " " + blob.name() + " [ ";
         for (int extent: blob.shape()) res += extent + " ";
-        res += "]";
+        res += "]" + (blob.onGPU() ? "*" : "");
       }
     }
     res += " " + paramString() + " }";

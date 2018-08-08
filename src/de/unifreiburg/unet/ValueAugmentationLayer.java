@@ -32,41 +32,21 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
-public class ReLULayer extends NetworkLayer {
+public class ValueAugmentationLayer extends NetworkLayer {
 
-  public ReLULayer(
-      String name, Net net, CaffeBlob[] in, String[] topNames) {
-    super(name, net, in, new CaffeBlob[in.length]);
-    long mem = 0;
-    for (int i = 0; i < in.length; ++i) {
-      if (topNames[i].equals(in[i].name())) {
-        _out[i] = in[i];
-        // In training phase the inputs must be kept, leading to
-        // a memory overhead equal to the memory required to store all blobs
-        if (net.phase().equals(Caffe.Phase.TRAIN))
-            mem += 4 * in[i].count();
-      }
-      else _out[i] = new CaffeBlob(topNames[i], in[i].shape(), this, true);
-    }
-    for (CaffeBlob blob : in) blob.setOnGPU(true);
-
-    _memOverhead = mem;
+  public ValueAugmentationLayer(
+      String name, Net net, CaffeBlob[] in, String topName) {
+    super(name, net, in, new CaffeBlob[1]);
+    _out[0] = new CaffeBlob(topName, in[0].shape(), this);
   }
 
   public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
-    return new ReLULayer(
-        layerParam.getName(), net, in, layerParam.getTopList().toArray(
-            new String[layerParam.getTopCount()]));
+    return new ValueAugmentationLayer(
+        layerParam.getName(), net, in, layerParam.getTop(0));
   }
 
   @Override
-  public String layerTypeString() { return "ReLULayer"; }
+  public String layerTypeString() { return "ValueAugmentationLayer"; }
 
-  @Override
-  public long memoryOverhead(boolean cuDNN) {
-    return _memOverhead;
-  }
-
-  private final long _memOverhead;
 }

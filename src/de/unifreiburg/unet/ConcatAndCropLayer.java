@@ -53,7 +53,9 @@ public class ConcatAndCropLayer extends NetworkLayer {
           if (blob.shape()[d] < outputShape[d])
               outputShape[d] = blob.shape()[d];
     }
-    _out[0] = new CaffeBlob(topName, outputShape, this);
+    _out[0] = new CaffeBlob(topName, outputShape, this, true);
+
+    for (CaffeBlob blob : in) blob.setOnGPU(true);
   }
 
   public static NetworkLayer createFromProto(

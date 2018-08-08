@@ -46,14 +46,18 @@ public class TestNetworkAnalyzer {
     {
       ModelDefinition model = new ModelDefinition();
       model.load(
-          new File("/home/falk/data/caffe_models/2d_cell_net_v0-modeldef.h5"));
+          new File("/home/falk/tmp/test.modeldef.h5"));
       Caffe.NetParameter.Builder netParamBuilder =
           Caffe.NetParameter.newBuilder();
       TextFormat.getParser().merge(model.modelPrototxt, netParamBuilder);
 
+      // Net net = Net.createFromProto(
+      //     netParamBuilder.build(), new String[] { "data3" },
+      //     new int[][] { new int[] { 1, 1, 1740, 1740 } }, Caffe.Phase.TEST);
+
       Net net = Net.createFromProto(
-          netParamBuilder.build(), new String[] { "data3" },
-          new int[][] { new int[] { 1, 1, 1740, 1740 } }, Caffe.Phase.TEST);
+          netParamBuilder.build(), null,
+          new int[][] { new int[] { 1, 1, 188, 188 } }, Caffe.Phase.TRAIN);
 
       System.out.println(net);
       System.out.println(

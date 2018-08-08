@@ -77,12 +77,17 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/Net.java
   src/de/unifreiburg/unet/NetworkLayer.java
   src/de/unifreiburg/unet/DataLayer.java
+  src/de/unifreiburg/unet/CreateDeformationLayer.java
+  src/de/unifreiburg/unet/ApplyDeformationLayer.java
+  src/de/unifreiburg/unet/ValueAugmentationLayer.java
   src/de/unifreiburg/unet/ValueTransformationLayer.java
   src/de/unifreiburg/unet/ConvolutionLayer.java
   src/de/unifreiburg/unet/ReLULayer.java
   src/de/unifreiburg/unet/PoolingLayer.java
   src/de/unifreiburg/unet/UpConvolutionLayer.java
   src/de/unifreiburg/unet/ConcatAndCropLayer.java
+  src/de/unifreiburg/unet/DropoutLayer.java
+  src/de/unifreiburg/unet/SoftmaxWithLossLayer.java
   caffe/Caffe.java
   caffe/caffe.proto COPYING.txt plugins.config
   test/TestNetworkAnalyzer.java

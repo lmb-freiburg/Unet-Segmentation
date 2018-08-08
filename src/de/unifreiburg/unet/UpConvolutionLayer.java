@@ -56,7 +56,9 @@ public class UpConvolutionLayer extends NetworkLayer {
       if (outputShape[d + 2] <= 0) throw new BlobException(
           "UpConvolution would reduce output blob size to zero");
     }
-    _out[0] = new CaffeBlob(topName, outputShape, this);
+    _out[0] = new CaffeBlob(topName, outputShape, this, true);
+
+    for (CaffeBlob blob : in) blob.setOnGPU(true);
 
     long kernelSize = 1;
     for (int extent: kernelShape) kernelSize *= extent;

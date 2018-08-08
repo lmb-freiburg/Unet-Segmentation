@@ -64,7 +64,9 @@ public class PoolingLayer extends NetworkLayer {
             throw new BlobException("Invalid pooling parameters given");
       }
     }
-    _out[0] = new CaffeBlob(topName, outShape, this);
+    _out[0] = new CaffeBlob(topName, outShape, this, true);
+
+    for (CaffeBlob blob : in) blob.setOnGPU(true);
   }
 
   public static NetworkLayer createFromProto(

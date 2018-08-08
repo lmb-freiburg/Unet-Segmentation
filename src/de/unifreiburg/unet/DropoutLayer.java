@@ -32,36 +32,39 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
-public class ReLULayer extends NetworkLayer {
+public class DropoutLayer extends NetworkLayer {
 
-  public ReLULayer(
+  public DropoutLayer(
       String name, Net net, CaffeBlob[] in, String[] topNames) {
     super(name, net, in, new CaffeBlob[in.length]);
     long mem = 0;
     for (int i = 0; i < in.length; ++i) {
       if (topNames[i].equals(in[i].name())) {
         _out[i] = in[i];
-        // In training phase the inputs must be kept, leading to
-        // a memory overhead equal to the memory required to store all blobs
-        if (net.phase().equals(Caffe.Phase.TRAIN))
-            mem += 4 * in[i].count();
+        // Even if the blobs have the same name, the operation is not in-place!
+        // Since the blobs are not counted, add their required memory to the
+        // layer's overhead
+        mem += 4 * in[i].count();
       }
       else _out[i] = new CaffeBlob(topNames[i], in[i].shape(), this, true);
     }
     for (CaffeBlob blob : in) blob.setOnGPU(true);
+
+    // Random masks are unsigned int and the same size as the blobs
+    for (CaffeBlob blob : in) mem += 4 * blob.count();
 
     _memOverhead = mem;
   }
 
   public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
-    return new ReLULayer(
+    return new DropoutLayer(
         layerParam.getName(), net, in, layerParam.getTopList().toArray(
             new String[layerParam.getTopCount()]));
   }
 
   @Override
-  public String layerTypeString() { return "ReLULayer"; }
+  public String layerTypeString() { return "DropoutLayer"; }
 
   @Override
   public long memoryOverhead(boolean cuDNN) {

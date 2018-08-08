@@ -32,41 +32,31 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
-public class ReLULayer extends NetworkLayer {
+public class CreateDeformationLayer extends NetworkLayer {
 
-  public ReLULayer(
-      String name, Net net, CaffeBlob[] in, String[] topNames) {
-    super(name, net, in, new CaffeBlob[in.length]);
-    long mem = 0;
-    for (int i = 0; i < in.length; ++i) {
-      if (topNames[i].equals(in[i].name())) {
-        _out[i] = in[i];
-        // In training phase the inputs must be kept, leading to
-        // a memory overhead equal to the memory required to store all blobs
-        if (net.phase().equals(Caffe.Phase.TRAIN))
-            mem += 4 * in[i].count();
-      }
-      else _out[i] = new CaffeBlob(topNames[i], in[i].shape(), this, true);
-    }
-    for (CaffeBlob blob : in) blob.setOnGPU(true);
-
-    _memOverhead = mem;
+  public CreateDeformationLayer(
+      String name, Net net, CaffeBlob[] in, String topName, int[] topShape) {
+    super(name, net, in, new CaffeBlob[1]);
+    _out[0] = new CaffeBlob(topName, topShape, this);
   }
 
   public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
-    return new ReLULayer(
-        layerParam.getName(), net, in, layerParam.getTopList().toArray(
-            new String[layerParam.getTopCount()]));
+    Caffe.CreateDeformationParameter cp =
+        layerParam.getCreateDeformationParam();
+    int nDims = (cp.hasNz() && cp.getNz() > 0) ? 3 : 2;
+    int[] topShape = new int[nDims + 2];
+    topShape[0] = (in != null && in.length > 0) ? in[0].nSamples() :
+        cp.getBatchSize();
+    topShape[1] = (nDims == 3) ? cp.getNz() : cp.getNy();
+    topShape[2] = (nDims == 3) ? cp.getNy() : cp.getNx();
+    topShape[3] = (nDims == 3) ? cp.getNx() : cp.getNcomponents();
+    if (nDims == 3) topShape[4] = cp.getNcomponents();
+    return new CreateDeformationLayer(
+        layerParam.getName(), net, in, layerParam.getTop(0), topShape);
   }
 
   @Override
-  public String layerTypeString() { return "ReLULayer"; }
+  public String layerTypeString() { return "CreateDeformationLayer"; }
 
-  @Override
-  public long memoryOverhead(boolean cuDNN) {
-    return _memOverhead;
-  }
-
-  private final long _memOverhead;
 }

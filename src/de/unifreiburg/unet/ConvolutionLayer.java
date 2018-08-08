@@ -35,36 +35,41 @@ import caffe.Caffe;
 public class ConvolutionLayer extends NetworkLayer {
 
   public ConvolutionLayer(
-      String name, Net net, CaffeBlob[] in, String topName, int[] kernelShape,
-      int[] pad, int[] stride, int[] dilation, int nChannels)
+      String name, Net net, CaffeBlob[] in, String[] topNames,
+      int[] kernelShape, int[] pad, int[] stride, int[] dilation, int nChannels)
       throws BlobException {
-    super(name, net, in, new CaffeBlob[1]);
+    super(name, net, in, new CaffeBlob[topNames.length]);
     _kernelShape = kernelShape;
     _pad = pad;
     _stride = stride;
     _dilation = dilation;
 
-    if (net.findBlob(topName) != null) throw new BlobException(
-        "In-place convolution not implemented");
+    for (int i = 0; i < topNames.length; ++i)
+    {
+      if (net.findBlob(topNames[i]) != null) throw new BlobException(
+          "In-place convolution not implemented");
 
-    int[] outputShape = new int[in[0].shape().length];
-    outputShape[0] = in[0].nSamples();
-    outputShape[1] = nChannels;
-    for (int d = 0; d < kernelShape.length; ++d) {
-      int numerator = in[0].shape()[d + 2] + 2 * pad[d] -
-          (dilation[d] * (kernelShape[d] - 1) + 1);
-      if (numerator <= 0) throw new BlobException(
-          "Convolution would reduce output blob size to zero");
-      if (numerator % stride[d] != 0) throw new BlobException(
-          "Invalid stride for convolution");
-      outputShape[d + 2] = numerator / stride[d] + 1;
+      int[] outputShape = new int[in[i].shape().length];
+      outputShape[0] = in[i].nSamples();
+      outputShape[1] = nChannels;
+      for (int d = 0; d < kernelShape.length; ++d) {
+        int numerator = in[i].shape()[d + 2] + 2 * pad[d] -
+            (dilation[d] * (kernelShape[d] - 1) + 1);
+        if (numerator <= 0) throw new BlobException(
+            "Convolution would reduce output blob size to zero");
+        if (numerator % stride[d] != 0) throw new BlobException(
+            "Invalid stride for convolution");
+        outputShape[d + 2] = numerator / stride[d] + 1;
+      }
+      _out[i] = new CaffeBlob(topNames[i], outputShape, this, true);
     }
-    _out[0] = new CaffeBlob(topName, outputShape, this);
+
+    for (CaffeBlob blob : in) blob.setOnGPU(true);
 
     long kernelSize = 1;
     for (int extent: kernelShape) kernelSize *= extent;
     _memPara = 4 * nChannels * (in[0].nChannels() * kernelSize + 1);
-    _memOverheadCuDNN = 8 * 1024 * 1024;
+    _memOverheadCuDNN = 3 * 8 * 1024 * 1024;
     _memOverheadNoCuDNN = (kernelSize > 0) ?
         4 * _out[0].count(2) * in[0].nChannels() * kernelSize : 0;
   }
@@ -104,7 +109,8 @@ public class ConvolutionLayer extends NetworkLayer {
     else for (int d = 0; d < dilation.length; ++d) dilation[d] = 1;
     int nChannels = cp.getNumOutput();
     return new ConvolutionLayer(
-        layerParam.getName(), net, in, layerParam.getTop(0),
+        layerParam.getName(), net, in,
+        layerParam.getTopList().toArray(new String[layerParam.getTopCount()]),
         kernelShape, pad, stride, dilation, nChannels);
   }
 
