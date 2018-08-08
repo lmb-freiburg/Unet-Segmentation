@@ -117,6 +117,10 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     _imp = imp;
   }
 
+  public ImagePlus image() {
+    return _imp;
+  }
+
   @Override
   public String imageName() {
     return (_imp != null) ? _imp.getTitle() : "N/A";
@@ -345,6 +349,13 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         }
       }
       else {
+        if (!new File(weightsFileName()).exists())
+        {
+          showMessage(
+              "The selected weight file does not exist.\n" +
+              "Please select a .caffemodel.h5 file matching your model.");
+          return false;
+        }
         try {
           Vector<String> cmd = new Vector<String>();
           cmd.add(caffe_unetBinary);
@@ -372,6 +383,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         // User decided to change weight file, so don't bother him with
         // additional message boxes
         if (res.exitStatus == 2) return false;
+        IJ.log(res.cerr);
         showError(
             "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
         return false;

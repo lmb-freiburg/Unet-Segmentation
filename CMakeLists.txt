@@ -73,8 +73,19 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/IntBlob.java
   src/de/unifreiburg/unet/FloatBlob.java
   src/de/unifreiburg/unet/GenericBlob.java
+  src/de/unifreiburg/unet/CaffeBlob.java
+  src/de/unifreiburg/unet/Net.java
+  src/de/unifreiburg/unet/NetworkLayer.java
+  src/de/unifreiburg/unet/DataLayer.java
+  src/de/unifreiburg/unet/ValueTransformationLayer.java
+  src/de/unifreiburg/unet/ConvolutionLayer.java
+  src/de/unifreiburg/unet/ReLULayer.java
+  src/de/unifreiburg/unet/PoolingLayer.java
+  src/de/unifreiburg/unet/UpConvolutionLayer.java
+  src/de/unifreiburg/unet/ConcatAndCropLayer.java
   caffe/Caffe.java
   caffe/caffe.proto COPYING.txt plugins.config
+  test/TestNetworkAnalyzer.java
   resources/README.html INCLUDE_JARS protobuf-java-3.3.1.jar)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)

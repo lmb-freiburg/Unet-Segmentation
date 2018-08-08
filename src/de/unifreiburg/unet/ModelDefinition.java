@@ -30,6 +30,7 @@
 
 package de.unifreiburg.unet;
 
+import ij.IJ;
 import ij.Prefs;
 
 import java.io.File;
@@ -38,6 +39,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Arrays;
 
+import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.FlowLayout;
 import java.awt.event.ItemListener;
@@ -58,6 +60,10 @@ import ch.systemsx.cisd.hdf5.HDF5Factory;
 import ch.systemsx.cisd.hdf5.IHDF5Writer;
 import ch.systemsx.cisd.hdf5.IHDF5WriterConfigurator;
 import ch.systemsx.cisd.hdf5.IHDF5Reader;
+
+import caffe.Caffe;
+import com.google.protobuf.TextFormat;
+import com.google.protobuf.TextFormat.ParseException;
 
 public class ModelDefinition {
 
@@ -102,6 +108,7 @@ public class ModelDefinition {
   private JSpinner _shapeXSpinner = null;
   private JSpinner _shapeYSpinner = null;
   private JSpinner _shapeZSpinner = null;
+  private JLabel _memoryRequiredLabel = null;
   private JSpinner _gridXSpinner = null;
   private JSpinner _gridYSpinner = null;
   private JSpinner _gridZSpinner = null;
@@ -458,6 +465,56 @@ public class ModelDefinition {
               prefsPrefix + id + ".tileShapeZ", minValue + 10 * dsFactor));
       panel.add(_shapeZSpinner);
     }
+
+    _memoryRequiredLabel = new JLabel();
+    panel.add(_memoryRequiredLabel);
+
+    long mem = computeMemoryConsumptionInTestPhase(false);
+    if (mem != -1) {
+      long memCuDNN = computeMemoryConsumptionInTestPhase(true);
+      _memoryRequiredLabel.setText(
+          " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 + ") MB");
+    }
+    _shapeXSpinner.addChangeListener(new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            long mem = computeMemoryConsumptionInTestPhase(false);
+            if (mem != -1) {
+              long memCuDNN = computeMemoryConsumptionInTestPhase(true);
+              _memoryRequiredLabel.setText(
+                  " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 +
+                  ") MB");
+            }
+          }
+        });
+    _shapeYSpinner.addChangeListener(new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            long mem = computeMemoryConsumptionInTestPhase(false);
+            if (mem != -1) {
+              long memCuDNN = computeMemoryConsumptionInTestPhase(true);
+              _memoryRequiredLabel.setText(
+                  " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 +
+                  ") MB");
+            }
+          }
+        });
+    if (_nDims == 3)
+    {
+      _shapeZSpinner.addChangeListener(new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+              long mem = computeMemoryConsumptionInTestPhase(false);
+              if (mem != -1) {
+                long memCuDNN = computeMemoryConsumptionInTestPhase(true);
+                _memoryRequiredLabel.setText(
+                    " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 +
+                    ") MB");
+              }
+            }
+          });
+    }
+
     _tileModePanel.add(panel, SHAPE);
     _tileModeSelector.addItem(SHAPE);
   }
@@ -797,6 +854,29 @@ public class ModelDefinition {
     throw new UnsupportedOperationException(
         "Cannot handle unknown tiling mode '" +
         (String)_tileModeSelector.getSelectedItem() + "'");
+  }
+
+  public long computeMemoryConsumptionInTestPhase(boolean cuDNN) {
+    if (_job == null || !(_job instanceof SegmentationJob ||
+                          _job instanceof DetectionJob)) return -1;
+    try {
+      Caffe.NetParameter.Builder netParamBuilder =
+          Caffe.NetParameter.newBuilder();
+      TextFormat.getParser().merge(modelPrototxt, netParamBuilder);
+      int[] inputTileShape = getInputTileShape(getTileShape());
+      int[] inputBlobShape = new int[_nDims + 2];
+      inputBlobShape[0] = 1;
+      inputBlobShape[1] = ((SegmentationJob)_job).image().getNChannels();
+      for (int d = 0; d < _nDims; ++d)
+          inputBlobShape[d + 2] = inputTileShape[d];
+      Net net = Net.createFromProto(
+          netParamBuilder.build(), new String[] { inputBlobName },
+          new int[][] { inputBlobShape }, Caffe.Phase.TEST);
+      return net.memoryConsumption(cuDNN);
+    }
+    catch (Exception e) {
+      return -1;
+    }
   }
 
   @Override
