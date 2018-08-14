@@ -30,15 +30,20 @@
 
 package de.unifreiburg.unet;
 
+import caffe.Caffe;
+
 public class DataLayer extends NetworkLayer {
 
-  public DataLayer(String name, Net net, String[] topNames, int[][] topShapes) {
-    super(name, net, null, new CaffeBlob[topNames.length]);
-    for (int i = 0; i < topNames.length; ++i)
-        _out[i] = new CaffeBlob(topNames[i], topShapes[i], this);
+  public DataLayer(Caffe.LayerParameter layerParam, Net net) {
+    super(layerParam, net, null);
+    for (int i = 0; i < layerParam.getTopCount(); ++i)
+    {
+      Caffe.BlobShape blobShape = layerParam.getInputParam().getShape(i);
+      long[] shape = new long[blobShape.getDimCount()];
+      for (int d = 0; d < blobShape.getDimCount(); ++d)
+          shape[d] = blobShape.getDim(d);
+      _out[i] = new CaffeBlob(layerParam.getTop(i), shape, this);
+    }
   }
-
-  @Override
-  public String layerTypeString() { return "DataLayer"; }
 
 }

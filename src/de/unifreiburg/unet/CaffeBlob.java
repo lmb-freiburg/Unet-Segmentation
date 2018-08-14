@@ -32,31 +32,45 @@ package de.unifreiburg.unet;
 
 public class CaffeBlob {
 
-  public CaffeBlob(String name, int[] shape, NetworkLayer layer) {
+  public CaffeBlob(String name, long[] shape, NetworkLayer layer) {
     this(name, shape, layer, false);
   }
 
   public CaffeBlob(
-      String name, int[] shape, NetworkLayer layer, boolean onGPU) {
+      String name, long[] shape, NetworkLayer layer, boolean onGPU) {
+    this(name, shape, layer, false, false);
+  }
+
+  public CaffeBlob(
+      String name, long[] shape, NetworkLayer layer, boolean onGPU,
+      boolean gradientRequired) {
+    this(name, shape, layer, onGPU, gradientRequired, true);
+  }
+
+  public CaffeBlob(
+      String name, long[] shape, NetworkLayer layer, boolean onGPU,
+      boolean gradientRequired, boolean forwardRequired) {
     _name = name;
     _shape = shape;
     _layer = layer;
     _onGPU = onGPU;
+    _forwardRequired = forwardRequired;
+    _gradientRequired = gradientRequired;
   }
 
   public String name() {
     return _name;
   }
 
-  public int[] shape() {
+  public long[] shape() {
     return _shape;
   }
 
-  public int nSamples() {
+  public long nSamples() {
     return _shape[0];
   }
 
-  public int nChannels() {
+  public long nChannels() {
     return _shape[1];
   }
 
@@ -86,9 +100,43 @@ public class CaffeBlob {
     return _onGPU;
   }
 
+  void setGradientRequired(boolean gradientRequired) {
+    _gradientRequired = gradientRequired;
+  }
+
+  boolean forwardRequired() {
+    return _forwardRequired;
+  }
+
+  boolean gradientRequired() {
+    return _gradientRequired;
+  }
+
+  long memoryForward() {
+    return (_onGPU && _forwardRequired) ? 4 * count() : 0;
+  }
+
+  long memoryBackward() {
+    return (_onGPU && _gradientRequired) ? 4 * count() : 0;
+  }
+
+  @Override
+  public String toString() {
+    String res = _name + " [";
+    for (int i = 0; i < _shape.length - 1; ++i) res += _shape[i] + ",";
+    res += _shape[_shape.length - 1] + "]" +
+        ((_onGPU || _forwardRequired || _gradientRequired) ? "{" : "") +
+        (_onGPU ? "*" : "") + (_forwardRequired ? "F" : "") +
+        (_gradientRequired ? "B" : "") +
+        ((_onGPU || _forwardRequired || _gradientRequired) ? "}" : "");
+    return res;
+  }
+
   private final String _name;
-  private final int[] _shape;
+  private final long[] _shape;
   private final NetworkLayer _layer;
   private boolean _onGPU;
+  private boolean _forwardRequired;
+  private boolean _gradientRequired;
 
 }

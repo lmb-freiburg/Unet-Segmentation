@@ -36,50 +36,51 @@ import java.util.Vector;
 
 public abstract class NetworkLayer {
 
-  public NetworkLayer(String name, Net net, CaffeBlob[] in, CaffeBlob[] out) {
-    _name = name;
+  public NetworkLayer(
+      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
+    _layerParam = layerParam;
     _net = net;
     _in = in;
-    _out = out;
+    _out = new CaffeBlob[layerParam.getTopCount()];
   }
 
   public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
       throws NotImplementedException, BlobException {
+
     if (layerParam.getType().equals("CreateDeformation"))
-        return CreateDeformationLayer.createFromProto(layerParam, net, in);
+        return new CreateDeformationLayer(layerParam, net, in);
     if (layerParam.getType().equals("ApplyDeformation"))
-        return ApplyDeformationLayer.createFromProto(layerParam, net, in);
+        return new ApplyDeformationLayer(layerParam, net, in);
     if (layerParam.getType().equals("ValueAugmentation"))
-        return ValueAugmentationLayer.createFromProto(layerParam, net, in);
+        return new ValueAugmentationLayer(layerParam, net, in);
     if (layerParam.getType().equals("ValueTransformation"))
-        return ValueTransformationLayer.createFromProto(layerParam, net, in);
+        return new ValueTransformationLayer(layerParam, net, in);
     if (layerParam.getType().equals("Convolution"))
-        return ConvolutionLayer.createFromProto(layerParam, net, in);
+        return new ConvolutionLayer(layerParam, net, in);
     else if (layerParam.getType().equals("ReLU"))
-        return ReLULayer.createFromProto(layerParam, net, in);
+        return new ReLULayer(layerParam, net, in);
     else if (layerParam.getType().equals("Pooling"))
-        return PoolingLayer.createFromProto(layerParam, net, in);
+        return new PoolingLayer(layerParam, net, in);
     else if (layerParam.getType().equals("Deconvolution"))
-        return UpConvolutionLayer.createFromProto(layerParam, net, in);
+        return new UpConvolutionLayer(layerParam, net, in);
     else if (layerParam.getType().equals("Concat"))
-        return ConcatAndCropLayer.createFromProto(layerParam, net, in);
+        return new ConcatAndCropLayer(layerParam, net, in);
     else if (layerParam.getType().equals("Dropout"))
-        return DropoutLayer.createFromProto(layerParam, net, in);
+        return new DropoutLayer(layerParam, net, in);
     else if (layerParam.getType().equals("SoftmaxWithLoss"))
-        return SoftmaxWithLossLayer.createFromProto(layerParam, net, in);
+        return new SoftmaxWithLossLayer(layerParam, net, in);
     else throw new NotImplementedException(
         "Layer type " + layerParam.getType() + " not implemented");
   }
 
-  public abstract String layerTypeString();
-
-  public String paramString() {
-    return "";
+  public String layerTypeString() {
+    return _layerParam.getType();
   }
 
+
   public final String name() {
-    return _name;
+    return _layerParam.getName();
   }
 
   public final CaffeBlob[] inputBlobs() {
@@ -90,7 +91,11 @@ public abstract class NetworkLayer {
     return _out;
   }
 
-  public long memoryConsumptionParameters() {
+  public long memoryParameters() {
+    return 0;
+  }
+
+  public long memoryOther() {
     return 0;
   }
 
@@ -98,35 +103,29 @@ public abstract class NetworkLayer {
     return 0;
   }
 
-  public final long memoryConsumption(boolean cuDNN) {
-    return memoryConsumptionParameters() + memoryOverhead(cuDNN);
+  public String paramString() {
+    return "";
   }
 
+  @Override
   public String toString() {
-    String res = layerTypeString() + " " + _name + " {";
+    String res = layerTypeString() + " " + name() + " {";
     if (_in != null) {
       res += " in:";
-      for (CaffeBlob blob : _in) {
-        res += " " + blob.name() + " [ ";
-        for (int extent: blob.shape()) res += extent + " ";
-        res += "]" + (blob.onGPU() ? "*" : "");
-      }
+      for (CaffeBlob blob : _in) res += " " + blob;
     }
     if (_out != null) {
       res += " out:";
-      for (CaffeBlob blob : _out) {
-        res += " " + blob.name() + " [ ";
-        for (int extent: blob.shape()) res += extent + " ";
-        res += "]" + (blob.onGPU() ? "*" : "");
-      }
+      for (CaffeBlob blob : _out) res += " " + blob;
     }
-    res += " " + paramString() + " }";
+    String params = paramString();
+    res += (params.equals("") ? "" : (" " + paramString())) + " }";
     return res;
   }
 
-  private final String _name;
   private final Net _net;
   private final CaffeBlob[] _in;
   protected final CaffeBlob[] _out;
+  protected final Caffe.LayerParameter _layerParam;
 
 }

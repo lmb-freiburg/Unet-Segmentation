@@ -35,80 +35,56 @@ import caffe.Caffe;
 public class UpConvolutionLayer extends NetworkLayer {
 
   public UpConvolutionLayer(
-      String name, Net net, CaffeBlob[] in, String topName, int[] kernelShape,
-      int[] pad, int[] stride, int[] dilation, int nChannels)
-      throws BlobException {
-    super(name, net, in, new CaffeBlob[1]);
-    _kernelShape = kernelShape;
-    _pad = pad;
-    _stride = stride;
-    _dilation = dilation;
-
-    if (net.findBlob(topName) != null) throw new BlobException(
-        "In-place up-convolution not implemented");
-
-    int[] outputShape = new int[in[0].shape().length];
-    outputShape[0] = in[0].nSamples();
-    outputShape[1] = nChannels;
-    for (int d = 0; d < kernelShape.length; ++d) {
-      outputShape[d + 2] = stride[d] * (in[0].shape()[d + 2] - 1) +
-          (dilation[d] * (kernelShape[d] - 1) + 1) - 2 * pad[d];
-      if (outputShape[d + 2] <= 0) throw new BlobException(
-          "UpConvolution would reduce output blob size to zero");
-    }
-    _out[0] = new CaffeBlob(topName, outputShape, this, true);
-
-    for (CaffeBlob blob : in) blob.setOnGPU(true);
-
-    long kernelSize = 1;
-    for (int extent: kernelShape) kernelSize *= extent;
-    _memPara = 4 * nChannels * (in[0].nChannels() * kernelSize + 1);
-    _memOverheadCuDNN = 8 * 1024 * 1024;
-    _memOverheadNoCuDNN = (kernelSize > 0) ?
-        4 * in[0].count(2) * nChannels * kernelSize : 0;
-  }
-
-  public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
       throws BlobException {
+    super(layerParam, net, in);
     Caffe.ConvolutionParameter cp = layerParam.getConvolutionParam();
-    int[] kernelShape = new int[in[0].shape().length - 2];
+    _kernelShape = new int[in[0].shape().length - 2];
     for (int d = 0; d < cp.getKernelSizeCount(); ++d)
-        kernelShape[d] = cp.getKernelSize(d);
-    for (int d = cp.getKernelSizeCount(); d < kernelShape.length; ++d)
-        kernelShape[d] = kernelShape[d - 1];
-    int[] pad = new int[in[0].shape().length - 2];
+        _kernelShape[d] = cp.getKernelSize(d);
+    for (int d = cp.getKernelSizeCount(); d < _kernelShape.length; ++d)
+        _kernelShape[d] = _kernelShape[d - 1];
+    _pad = new int[in[0].shape().length - 2];
     if (cp.getPadCount() > 0) {
       for (int d = 0; d < cp.getPadCount(); ++d)
-          pad[d] = cp.getPad(d);
-      for (int d = cp.getPadCount(); d < pad.length; ++d)
-          pad[d] = pad[d - 1];
+          _pad[d] = cp.getPad(d);
+      for (int d = cp.getPadCount(); d < _pad.length; ++d)
+          _pad[d] = _pad[d - 1];
     }
-    else for (int d = 0; d < pad.length; ++d) pad[d] = 0;
-    int[] stride = new int[in[0].shape().length - 2];
+    else for (int d = 0; d < _pad.length; ++d) _pad[d] = 0;
+    _stride = new int[in[0].shape().length - 2];
     if (cp.getStrideCount() > 0) {
       for (int d = 0; d < cp.getStrideCount(); ++d)
-          stride[d] = cp.getStride(d);
-      for (int d = cp.getStrideCount(); d < stride.length; ++d)
-          stride[d] = stride[d - 1];
+          _stride[d] = cp.getStride(d);
+      for (int d = cp.getStrideCount(); d < _stride.length; ++d)
+          _stride[d] = _stride[d - 1];
     }
-    else for (int d = 0; d < stride.length; ++d) stride[d] = 1;
-    int[] dilation = new int[in[0].shape().length - 2];
+    else for (int d = 0; d < _stride.length; ++d) _stride[d] = 1;
+    _dilation = new int[in[0].shape().length - 2];
     if (cp.getDilationCount() > 0) {
       for (int d = 0; d < cp.getDilationCount(); ++d)
-          dilation[d] = cp.getDilation(d);
-      for (int d = cp.getDilationCount(); d < dilation.length; ++d)
-          dilation[d] = dilation[d - 1];
+          _dilation[d] = cp.getDilation(d);
+      for (int d = cp.getDilationCount(); d < _dilation.length; ++d)
+          _dilation[d] = _dilation[d - 1];
     }
-    else for (int d = 0; d < dilation.length; ++d) dilation[d] = 1;
-    int nChannels = cp.getNumOutput();
-    return new UpConvolutionLayer(
-        layerParam.getName(), net, in, layerParam.getTop(0),
-        kernelShape, pad, stride, dilation, nChannels);
-  }
+    else for (int d = 0; d < _dilation.length; ++d) _dilation[d] = 1;
 
-  @Override
-  public String layerTypeString() { return "UpConvolutionLayer"; }
+    for (int i = 0; i < layerParam.getTopCount(); ++i)
+    {
+      long[] outputShape = new long[in[i].shape().length];
+      outputShape[0] = in[i].nSamples();
+      outputShape[1] = cp.getNumOutput();
+      for (int d = 0; d < _kernelShape.length; ++d) {
+        outputShape[d + 2] = _stride[d] * (in[i].shape()[d + 2] - 1) +
+            (_dilation[d] * (_kernelShape[d] - 1) + 1) - 2 * _pad[d];
+        if (outputShape[d + 2] <= 0) throw new BlobException(
+            "UpConvolution would reduce output blob size to zero");
+      }
+      _out[i] = new CaffeBlob(
+          layerParam.getTop(i), outputShape, this, true, true);
+    }
+    for (CaffeBlob blob : in) blob.setOnGPU(true);
+  }
 
   @Override
   public String paramString() {
@@ -128,22 +104,24 @@ public class UpConvolutionLayer extends NetworkLayer {
   }
 
   @Override
-  public long memoryConsumptionParameters() {
-    return _memPara;
+  public long memoryParameters() {
+    long kernelSize = 1;
+    for (int extent: _kernelShape) kernelSize *= extent;
+    return 4 * _out[0].nChannels() *
+        (inputBlobs()[0].nChannels() * kernelSize + 1);
   }
 
   @Override
   public long memoryOverhead(boolean cuDNN) {
-    return cuDNN ? _memOverheadCuDNN : _memOverheadNoCuDNN;
+    if (cuDNN) return 3 * 8 * 1024 * 1024;
+    long kernelSize = 1;
+    for (int extent: _kernelShape) kernelSize *= extent;
+    return (kernelSize > 0) ?
+        4 * inputBlobs()[0].count(2) * _out[0].nChannels() * kernelSize : 0;
   }
 
   private final int[] _kernelShape;
   private final int[] _pad;
   private final int[] _stride;
   private final int[] _dilation;
-
-  private final long _memPara;
-  private final long _memOverheadCuDNN;
-  private final long _memOverheadNoCuDNN;
-
 }

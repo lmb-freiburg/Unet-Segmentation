@@ -35,18 +35,12 @@ import caffe.Caffe;
 public class ApplyDeformationLayer extends NetworkLayer {
 
   public ApplyDeformationLayer(
-      String name, Net net, CaffeBlob[] in, String topName, int[] topShape) {
-    super(name, net, in, new CaffeBlob[1]);
-    _out[0] = new CaffeBlob(topName, topShape, this);
-  }
-
-  public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
       throws BlobException {
+    super(layerParam, net, in);
     Caffe.ApplyDeformationParameter cp = layerParam.getApplyDeformationParam();
     String shapeFrom = cp.getOutputShapeFrom();
-    System.out.println("Using shape from blob " + shapeFrom);
-    int[] outShape = new int[in[0].shape().length];
+    long[] outShape = new long[in[0].shape().length];
     outShape[0] = in[0].nSamples();
     outShape[1] = in[0].nChannels();
     if (shapeFrom.equals("")) {
@@ -61,11 +55,7 @@ public class ApplyDeformationLayer extends NetworkLayer {
       for (int d = 2; d < outShape.length; ++d)
           outShape[d] = fromBlob.shape()[d];
     }
-    return new ApplyDeformationLayer(
-        layerParam.getName(), net, in, layerParam.getTop(0), outShape);
+    _out[0] = new CaffeBlob(layerParam.getTop(0), outShape, this);
   }
-
-  @Override
-  public String layerTypeString() { return "ApplyDeformationLayer"; }
 
 }

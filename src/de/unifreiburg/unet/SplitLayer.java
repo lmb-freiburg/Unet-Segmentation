@@ -32,21 +32,17 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
-public class CreateDeformationLayer extends NetworkLayer {
+import java.util.UUID;
 
-  public CreateDeformationLayer(
-      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
+public class SplitLayer extends NetworkLayer {
+
+  public SplitLayer(Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
     super(layerParam, net, in);
-    Caffe.CreateDeformationParameter cp =
-        layerParam.getCreateDeformationParam();
-    int nDims = (cp.hasNz() && cp.getNz() > 0) ? 3 : 2;
-    long[] topShape = new long[nDims + 2];
-    topShape[0] = (in != null && in.length > 0) ? in[0].nSamples() :
-        cp.getBatchSize();
-    topShape[1] = (nDims == 3) ? cp.getNz() : cp.getNy();
-    topShape[2] = (nDims == 3) ? cp.getNy() : cp.getNx();
-    topShape[3] = (nDims == 3) ? cp.getNx() : cp.getNcomponents();
-    if (nDims == 3) topShape[4] = cp.getNcomponents();
-    _out[0] = new CaffeBlob(layerParam.getTop(0), topShape, this);
+    for (int i = 0; i < layerParam.getTopCount(); ++i)
+        _out[i] = new CaffeBlob(
+            layerParam.getTop(i), in[0].shape(), this, in[0].onGPU(),
+            in[0].gradientRequired(), false);
+    if (net.phase().equals(Caffe.Phase.TRAIN))
+        for (CaffeBlob blob : in) blob.setOnGPU(in[0].onGPU());
   }
 }

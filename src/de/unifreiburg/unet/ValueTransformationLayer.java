@@ -35,35 +35,16 @@ import caffe.Caffe;
 public class ValueTransformationLayer extends NetworkLayer {
 
   public ValueTransformationLayer(
-      String name, Net net, CaffeBlob[] in, String topName)
-      throws BlobException {
-    super(name, net, in, new CaffeBlob[1]);
-
-    if (net.findBlob(topName) != null) throw new BlobException(
-        "In-place value transformation not implemented");
-
-    _out[0] = new CaffeBlob(topName, in[0].shape(), this, true);
-
+      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
+    super(layerParam, net, in);
+    _out[0] = new CaffeBlob(
+        layerParam.getTop(0), in[0].shape(), this, true, true);
     for (CaffeBlob blob : in) blob.setOnGPU(true);
-
-    _memPara = 4 * 2 * in[0].nChannels();
-  }
-
-  public static NetworkLayer createFromProto(
-      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
-      throws BlobException {
-    return new ValueTransformationLayer(
-        layerParam.getName(), net, in, layerParam.getTop(0));
   }
 
   @Override
-  public String layerTypeString() { return "ValueTransformationLayer"; }
-
-  @Override
-  public long memoryConsumptionParameters() {
-    return _memPara;
+  public long memoryParameters() {
+    return 4 * 2 * inputBlobs()[0].nChannels();
   }
-
-  private final long _memPara;
 
 }

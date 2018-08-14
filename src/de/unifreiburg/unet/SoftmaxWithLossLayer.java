@@ -32,25 +32,32 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+import java.util.UUID;
+
 public class SoftmaxWithLossLayer extends NetworkLayer {
 
   public SoftmaxWithLossLayer(
-      String name, Net net, CaffeBlob[] in, String[] topNames) {
-    super(name, net, in, new CaffeBlob[topNames.length]);
-    _out[0] = new CaffeBlob(topNames[0], new int[] { 1 }, this, true);
-    if (topNames.length > 1)
-        _out[1] = new CaffeBlob(topNames[1], in[0].shape(), this, true);
+      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
+    super(layerParam, net, in);
+    Caffe.LayerParameter.Builder lb = layerParam.newBuilder(layerParam);
+    lb.clearTop();
+    lb.addTop(UUID.randomUUID().toString());
+    _softmaxLayer = new SoftmaxLayer(lb.build(), net, in);
+    _out[0] = new CaffeBlob(
+        layerParam.getTop(0), new long[] { 1 }, this, true, true);
+    if (layerParam.getTopCount() > 1)
+        _out[1] = new CaffeBlob(
+            layerParam.getTop(1), in[0].shape(), this, true);
     for (CaffeBlob blob : in) blob.setOnGPU(true);
   }
 
-  public static NetworkLayer createFromProto(
-      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
-    return new SoftmaxWithLossLayer(
-        layerParam.getName(), net, in, layerParam.getTopList().toArray(
-            new String[layerParam.getTopCount()]));
+  @Override
+  public long memoryOther() {
+    return _softmaxLayer.memoryOther() +
+        4 * _softmaxLayer.outputBlobs()[0].count() +
+        ((_softmaxLayer.outputBlobs().length > 1) ?
+         4 * _softmaxLayer.outputBlobs()[1].count() : 0);
   }
 
-  @Override
-  public String layerTypeString() { return "SoftmaxWithLossLayer"; }
-
+  private final SoftmaxLayer _softmaxLayer;
 }

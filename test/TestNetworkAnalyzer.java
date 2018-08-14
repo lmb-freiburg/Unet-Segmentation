@@ -30,6 +30,7 @@
 
 import de.unifreiburg.unet.ModelDefinition;
 import de.unifreiburg.unet.Net;
+import de.unifreiburg.unet.CaffeBlob;
 import de.unifreiburg.unet.NotImplementedException;
 import de.unifreiburg.unet.BlobException;
 
@@ -42,6 +43,18 @@ import java.io.File;
 public class TestNetworkAnalyzer {
 
   public static void main(String[] args) {
+
+    if (args.length < 1) {
+      System.out.println(
+          "Usage: java -cp .:/home/falk/software/Fiji.app/jars/jhdf5-14.12.6." +
+          "jar:/home/falk/software/Fiji.app/jars/protobuf-java-3.3.1.jar:" +
+          "/home/falk/software/Fiji.app/jars/commons-io-2.6.jar:/home/falk" +
+          "/software/Fiji.app/jars/ij-1.52e.jar TestNetworkAnalyzer " +
+          "<inputEdgeLength>");
+      System.exit(1);
+    }
+
+    int inputEdgeLength = Integer.parseInt(args[0]);
     try
     {
       ModelDefinition model = new ModelDefinition();
@@ -51,18 +64,33 @@ public class TestNetworkAnalyzer {
           Caffe.NetParameter.newBuilder();
       TextFormat.getParser().merge(model.modelPrototxt, netParamBuilder);
 
-      // Net net = Net.createFromProto(
-      //     netParamBuilder.build(), new String[] { "data3" },
-      //     new int[][] { new int[] { 1, 1, 1740, 1740 } }, Caffe.Phase.TEST);
-
       Net net = Net.createFromProto(
-          netParamBuilder.build(), null,
-          new int[][] { new int[] { 1, 1, 188, 188 } }, Caffe.Phase.TRAIN);
+          netParamBuilder.build(), new String[] { "data3" },
+          new long[][] {
+              new long[] { 1, 1, inputEdgeLength, inputEdgeLength } },
+          Caffe.Phase.TEST);
 
       System.out.println(net);
-      System.out.println(
-          "Memory required for network: " +
-          (net.memoryConsumption(true) / 1024.0 / 1024.0) + " MB");
+
+      System.out.println(" === TEST === ");
+      net.printMemoryBreakdown(false);
+      net.printMemoryBreakdown(true);
+      System.out.print("Output blobs: ");
+      for (CaffeBlob blob : net.outputBlobs()) System.out.print(blob + " ");
+      System.out.println();
+
+      net = Net.createFromProto(
+          netParamBuilder.build(), null,
+          new long[][] {
+              new long[] { 1, 1, inputEdgeLength, inputEdgeLength } },
+          Caffe.Phase.TRAIN);
+
+      System.out.println(" === TRAIN === ");
+      net.printMemoryBreakdown(false);
+      net.printMemoryBreakdown(true);
+      System.out.print("Output blobs: ");
+      for (CaffeBlob blob : net.outputBlobs()) System.out.print(blob + " ");
+      System.out.println();
     }
     catch (ParseException e) {
       System.err.println("Could not parse model prototxt" + e.getMessage());

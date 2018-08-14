@@ -87,7 +87,9 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/UpConvolutionLayer.java
   src/de/unifreiburg/unet/ConcatAndCropLayer.java
   src/de/unifreiburg/unet/DropoutLayer.java
+  src/de/unifreiburg/unet/SoftmaxLayer.java
   src/de/unifreiburg/unet/SoftmaxWithLossLayer.java
+  src/de/unifreiburg/unet/SplitLayer.java
   caffe/Caffe.java
   caffe/caffe.proto COPYING.txt plugins.config
   test/TestNetworkAnalyzer.java

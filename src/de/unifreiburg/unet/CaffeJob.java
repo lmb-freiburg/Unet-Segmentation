@@ -42,6 +42,7 @@ import java.awt.event.ItemListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
+import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.JDialog;
 import javax.swing.Icon;
@@ -87,14 +88,16 @@ public abstract class CaffeJob extends Job {
   private final String[] gpuList = {
       "none", "all available", "GPU 0", "GPU 1", "GPU 2", "GPU 3",
       "GPU 4", "GPU 5", "GPU 6", "GPU 7" };
-  private final JPanel _tilingModeSelectorPanel =
-      new JPanel(new BorderLayout());
-  private final JPanel _tilingParametersPanel = new JPanel(new BorderLayout());
 
   private final JComboBox<String> _useGPUComboBox = new JComboBox<>(gpuList);
 
   protected final Vector<String> _createdRemoteFolders = new Vector<String>();
   protected final Vector<String> _createdRemoteFiles = new Vector<String>();
+
+  private JComponent _shownTileModeLabel = new JPanel();
+  private JComponent _shownTileModePanel = new JPanel();
+  private JComponent _shownMemoryLabel = new JPanel();
+  private JComponent _shownMemoryPanel = new JPanel();
 
   public CaffeJob() {
     super();
@@ -173,23 +176,44 @@ public abstract class CaffeJob extends Job {
 
   @Override
   protected void processModelSelectionChange() {
-    _tilingModeSelectorPanel.removeAll();
-    _tilingParametersPanel.removeAll();
-    if (model() != null) {
-      _tilingModeSelectorPanel.add(model().tileModeSelector());
-      _tilingModeSelectorPanel.setMinimumSize(
-          model().tileModeSelector().getPreferredSize());
-      _tilingModeSelectorPanel.setMaximumSize(
-          model().tileModeSelector().getPreferredSize());
-      _tilingParametersPanel.add(model().tileModePanel());
-      _tilingParametersPanel.setMinimumSize(
-          model().tileModePanel().getMinimumSize());
-      _tilingParametersPanel.setMaximumSize(
-          new Dimension(
-              Integer.MAX_VALUE,
-              model().tileModeSelector().getPreferredSize().height));
-      _weightsFileTextField.setText(model().weightFile);
+    if (model() == null || !model().isValid()) {
+      JPanel panel = new JPanel();
+      _dialogLayout.replace(_shownTileModeLabel, panel);
+      _shownTileModeLabel = panel;
+      panel = new JPanel();
+      _dialogLayout.replace(_shownTileModePanel, panel);
+      _shownTileModePanel = panel;
+      panel = new JPanel();
+      _dialogLayout.replace(_shownMemoryLabel, panel);
+      _shownMemoryLabel = panel;
+      panel = new JPanel();
+      _dialogLayout.replace(_shownMemoryPanel, panel);
+      _shownMemoryPanel = panel;
+      _weightsFileTextField.setText("");
+
+      super.processModelSelectionChange();
+
+      return;
     }
+
+    if (_shownTileModeLabel != model().tileModeSelector()) {
+      _dialogLayout.replace(_shownTileModeLabel, model().tileModeSelector());
+      _shownTileModeLabel = model().tileModeSelector();
+    }
+    if (_shownTileModePanel != model().tileModePanel()) {
+      _dialogLayout.replace(_shownTileModePanel, model().tileModePanel());
+      _shownTileModePanel = model().tileModePanel();
+    }
+    if (_shownMemoryLabel != model().memoryRequiredLabel()) {
+      _dialogLayout.replace(_shownMemoryLabel, model().memoryRequiredLabel());
+      _shownMemoryLabel = model().memoryRequiredLabel();
+    }
+    if (_shownMemoryPanel != model().memoryRequiredPanel()) {
+      _dialogLayout.replace(_shownMemoryPanel, model().memoryRequiredPanel());
+      _shownMemoryPanel = model().memoryRequiredPanel();
+    }
+    _weightsFileTextField.setText(model().weightFile);
+
     super.processModelSelectionChange();
   }
 
@@ -259,7 +283,8 @@ public abstract class CaffeJob extends Job {
                 .addComponent(weightsFileLabel)
                 .addComponent(processFolderLabel)
                 .addComponent(useGPULabel)
-                .addComponent(_tilingModeSelectorPanel))
+                .addComponent(_shownTileModeLabel)
+                .addComponent(_shownMemoryLabel))
             .addGroup(
                 _dialogLayout.createParallelGroup(GroupLayout.Alignment.LEADING)
                 .addGroup(
@@ -271,7 +296,8 @@ public abstract class CaffeJob extends Job {
                     .addComponent(_processFolderTextField)
                     .addComponent(_processFolderChooseButton))
                 .addComponent(_useGPUComboBox)
-                .addComponent(_tilingParametersPanel)))
+                .addComponent(_shownTileModePanel)
+                .addComponent(_shownMemoryPanel)))
         .addComponent(_hostConfiguration);
 
     _verticalDialogLayoutGroup
@@ -290,13 +316,13 @@ public abstract class CaffeJob extends Job {
             .addComponent(useGPULabel)
             .addComponent(_useGPUComboBox))
         .addGroup(
-            _dialogLayout.createParallelGroup(GroupLayout.Alignment.CENTER)
-            .addComponent(
-                _tilingModeSelectorPanel, GroupLayout.PREFERRED_SIZE,
-                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE)
-            .addComponent(
-                _tilingParametersPanel, GroupLayout.PREFERRED_SIZE,
-                GroupLayout.PREFERRED_SIZE, GroupLayout.PREFERRED_SIZE))
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            .addComponent(_shownTileModeLabel)
+            .addComponent(_shownTileModePanel))
+        .addGroup(
+            _dialogLayout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            .addComponent(_shownMemoryLabel)
+            .addComponent(_shownMemoryPanel))
         .addComponent(_hostConfiguration);
   }
 

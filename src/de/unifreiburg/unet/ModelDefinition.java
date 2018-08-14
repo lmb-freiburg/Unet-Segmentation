@@ -32,6 +32,7 @@ package de.unifreiburg.unet;
 
 import ij.IJ;
 import ij.Prefs;
+import ij.ImagePlus;
 
 import java.io.File;
 import java.io.BufferedWriter;
@@ -98,6 +99,9 @@ public class ModelDefinition {
 
   private final JComboBox<String> _tileModeSelector = new JComboBox<String>();
   private final JPanel _tileModePanel = new JPanel(new CardLayout());
+  private final JLabel _memoryRequiredLabel =
+      new JLabel("Estimated GPU Memory:");
+  private final JLabel _memoryRequiredPanel = new JLabel();
 
   private static final String NTILES = "# Tiles:";
   private static final String GRID = "Grid (tiles):";
@@ -105,13 +109,16 @@ public class ModelDefinition {
   private static final String MEMORY = "Memory (MB):";
 
   private JSpinner _nTilesSpinner = null;
+  private ChangeListener _nTilesChangeListener = null;
   private JSpinner _shapeXSpinner = null;
   private JSpinner _shapeYSpinner = null;
   private JSpinner _shapeZSpinner = null;
-  private JLabel _memoryRequiredLabel = null;
+  private ChangeListener _shapeChangeUpdateGridAndNTilesListener = null;
+  private ChangeListener _shapeChangeUpdateMemoryListener = null;
   private JSpinner _gridXSpinner = null;
   private JSpinner _gridYSpinner = null;
   private JSpinner _gridZSpinner = null;
+  private ChangeListener _gridChangeListener = null;
   private JSpinner _gpuMemSpinner = null;
 
   private final JPanel _elementSizeUmPanel = new JPanel(
@@ -352,11 +359,19 @@ public class ModelDefinition {
   }
 
   public JComponent tileModeSelector() {
-    return isValid() ? _tileModeSelector : new JPanel();
+    return _tileModeSelector;
   }
 
   public JPanel tileModePanel() {
     return _tileModePanel;
+  }
+
+  public JComponent memoryRequiredLabel() {
+    return _memoryRequiredLabel;
+  }
+
+  public JComponent memoryRequiredPanel() {
+    return _memoryRequiredPanel;
   }
 
   public JPanel elementSizeUmPanel() {
@@ -466,54 +481,84 @@ public class ModelDefinition {
       panel.add(_shapeZSpinner);
     }
 
-    _memoryRequiredLabel = new JLabel();
-    panel.add(_memoryRequiredLabel);
+    _shapeChangeUpdateGridAndNTilesListener = new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            if (_job instanceof SegmentationJob) {
+              ImagePlus imp = ((SegmentationJob)_job).image();
+              int[] scaledShape = getScaledShape(imp);
+              int[] tileShape = getTileShape();
+              if (scaledShape == null) return;
+              int nTiles = 1;
+              int[] grid = new int[_nDims];
+              for (int d = 0; d < _nDims; ++d) {
+                grid[d] = (int)Math.ceil(
+                    (double)scaledShape[d] / (double)tileShape[d]);
+                nTiles *= grid[d];
+              }
 
-    long mem = computeMemoryConsumptionInTestPhase(false);
-    if (mem != -1) {
-      long memCuDNN = computeMemoryConsumptionInTestPhase(true);
-      _memoryRequiredLabel.setText(
-          " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 + ") MB");
-    }
-    _shapeXSpinner.addChangeListener(new ChangeListener() {
-          @Override
-          public void stateChanged(ChangeEvent e) {
-            long mem = computeMemoryConsumptionInTestPhase(false);
-            if (mem != -1) {
-              long memCuDNN = computeMemoryConsumptionInTestPhase(true);
-              _memoryRequiredLabel.setText(
-                  " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 +
-                  ") MB");
+              if (_gridXSpinner != null) {
+                _gridXSpinner.removeChangeListener(_gridChangeListener);
+                _gridXSpinner.setValue(grid[_nDims - 1]);
+                _gridXSpinner.addChangeListener(_gridChangeListener);
+              }
+              if (_gridYSpinner != null) {
+                _gridYSpinner.removeChangeListener(_gridChangeListener);
+                _gridYSpinner.setValue(grid[_nDims - 2]);
+                _gridYSpinner.addChangeListener(_gridChangeListener);
+              }
+              if (_nDims == 3 && _gridZSpinner != null) {
+                _gridZSpinner.removeChangeListener(_gridChangeListener);
+                _gridZSpinner.setValue(grid[0]);
+                _gridZSpinner.addChangeListener(_gridChangeListener);
+              }
+              if (_nTilesSpinner != null) {
+                _nTilesSpinner.removeChangeListener(_nTilesChangeListener);
+                _nTilesSpinner.setValue(nTiles);
+                _nTilesSpinner.addChangeListener(_nTilesChangeListener);
+              }
             }
           }
-        });
-    _shapeYSpinner.addChangeListener(new ChangeListener() {
+        };
+
+    _shapeChangeUpdateMemoryListener = new ChangeListener() {
           @Override
           public void stateChanged(ChangeEvent e) {
-            long mem = computeMemoryConsumptionInTestPhase(false);
-            if (mem != -1) {
-              long memCuDNN = computeMemoryConsumptionInTestPhase(true);
-              _memoryRequiredLabel.setText(
-                  " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 +
-                  ") MB");
-            }
-          }
-        });
-    if (_nDims == 3)
-    {
-      _shapeZSpinner.addChangeListener(new ChangeListener() {
-            @Override
-            public void stateChanged(ChangeEvent e) {
+            if (_job instanceof SegmentationJob) {
               long mem = computeMemoryConsumptionInTestPhase(false);
               if (mem != -1) {
                 long memCuDNN = computeMemoryConsumptionInTestPhase(true);
-                _memoryRequiredLabel.setText(
-                    " " + mem / 1024 / 1024 + " (" + memCuDNN / 1024 / 1024 +
-                    ") MB");
+                _memoryRequiredPanel.setText(
+                    " No cuDNN: " + mem / 1024 / 1024 + " MB     cuDNN: " +
+                    memCuDNN / 1024 / 1024 + " MB");
               }
             }
-          });
+            else if (_job instanceof FinetuneJob) {
+              long mem = computeMemoryConsumptionInTrainPhase(false);
+              if (mem != -1) {
+                long memCuDNN = computeMemoryConsumptionInTrainPhase(true);
+                _memoryRequiredPanel.setText(
+                    " No cuDNN: " + mem / 1024 / 1024 + " MB     cuDNN: " +
+                    memCuDNN / 1024 / 1024 + " MB");
+              }
+            }
+          }
+        };
+
+    _shapeXSpinner.addChangeListener(_shapeChangeUpdateGridAndNTilesListener);
+    _shapeXSpinner.addChangeListener(_shapeChangeUpdateMemoryListener);
+    _shapeYSpinner.addChangeListener(_shapeChangeUpdateGridAndNTilesListener);
+    _shapeYSpinner.addChangeListener(_shapeChangeUpdateMemoryListener);
+    if (_nDims == 3) {
+      _shapeZSpinner.addChangeListener(_shapeChangeUpdateGridAndNTilesListener);
+      _shapeZSpinner.addChangeListener(_shapeChangeUpdateMemoryListener);
     }
+
+    // Trigger update of related tiling panels and memory display
+    _shapeChangeUpdateGridAndNTilesListener.stateChanged(
+        new ChangeEvent(_shapeXSpinner));
+    _shapeChangeUpdateMemoryListener.stateChanged(
+        new ChangeEvent(_shapeXSpinner));
 
     _tileModePanel.add(panel, SHAPE);
     _tileModeSelector.addItem(SHAPE);
@@ -524,6 +569,90 @@ public class ModelDefinition {
         new SpinnerNumberModel(
             (int)Prefs.get("unet." + id + ".nTiles", 1), 1,
             (int)Integer.MAX_VALUE, 1));
+
+    _nTilesChangeListener = new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            if (!(_job instanceof SegmentationJob)) return;
+            ImagePlus imp = ((SegmentationJob)_job).image();
+
+            int[] scaledShape = getScaledShape(imp);
+            if (scaledShape == null) return;
+
+            int[] outTileShape = new int[_nDims];
+            int nTilesWanted = (Integer)_nTilesSpinner.getValue();
+            int nTiles = 1;
+            for (int d = 0; d < _nDims; ++d) {
+              outTileShape[d] = _minOutTileShape[d];
+              nTiles *= (int)Math.ceil(
+                  (double)scaledShape[d] / (double)outTileShape[d]);
+            }
+            int currentDim = 0;
+            while (nTiles > nTilesWanted) {
+              while (outTileShape[currentDim] >= scaledShape[currentDim])
+                  currentDim = (currentDim + 1) % _nDims;
+              outTileShape[currentDim] += downsampleFactor[currentDim];
+              nTiles = 1;
+              for (int d = 0; d < _nDims; ++d)
+                  nTiles *= (int)Math.ceil(
+                      (double)scaledShape[d] / (double)outTileShape[d]);
+              currentDim = (currentDim + 1) % _nDims;
+            }
+
+            // Update tile grid spinners
+            if (_gridXSpinner != null) {
+              _gridXSpinner.removeChangeListener(_gridChangeListener);
+              _gridXSpinner.setValue(
+                  (int)Math.ceil((double)scaledShape[_nDims - 1] /
+                                 (double)outTileShape[_nDims - 1]));
+              _gridXSpinner.addChangeListener(_gridChangeListener);
+            }
+            if (_gridYSpinner != null) {
+              _gridYSpinner.removeChangeListener(_gridChangeListener);
+              _gridYSpinner.setValue(
+                  (int)Math.ceil((double)scaledShape[_nDims - 2] /
+                                 (double)outTileShape[_nDims - 2]));
+              _gridYSpinner.addChangeListener(_gridChangeListener);
+            }
+            if (_nDims == 3 && _gridZSpinner != null) {
+              _gridZSpinner.removeChangeListener(_gridChangeListener);
+              _gridZSpinner.setValue(
+                  (int)Math.ceil((double)scaledShape[0] /
+                                 (double)outTileShape[0]));
+              _gridZSpinner.addChangeListener(_gridChangeListener);
+            }
+
+            // Update tile shape spinners, this triggers recomputation of
+            // memory consumption
+            if (_shapeXSpinner != null) {
+              _shapeXSpinner.removeChangeListener(
+                  _shapeChangeUpdateGridAndNTilesListener);
+              _shapeXSpinner.setValue(outTileShape[_nDims - 1]);
+              _shapeXSpinner.addChangeListener(
+                  _shapeChangeUpdateGridAndNTilesListener);
+            }
+            if (_shapeYSpinner != null) {
+              _shapeYSpinner.removeChangeListener(
+                  _shapeChangeUpdateGridAndNTilesListener);
+              _shapeYSpinner.setValue(outTileShape[_nDims - 2]);
+              _shapeYSpinner.addChangeListener(
+                  _shapeChangeUpdateGridAndNTilesListener);
+            }
+            if (_nDims == 3 && _shapeZSpinner != null) {
+              _shapeZSpinner.removeChangeListener(
+                  _shapeChangeUpdateGridAndNTilesListener);
+              _shapeZSpinner.setValue(outTileShape[0]);
+              _shapeZSpinner.addChangeListener(
+                  _shapeChangeUpdateGridAndNTilesListener);
+            }
+          }
+        };
+
+    _nTilesSpinner.addChangeListener(_nTilesChangeListener);
+
+    // Trigger update of related tiling panels and memory display
+    _nTilesChangeListener.stateChanged(new ChangeEvent(_nTilesSpinner));
+
     _tileModePanel.add(_nTilesSpinner, NTILES);
     _tileModeSelector.addItem(NTILES);
   }
@@ -552,6 +681,76 @@ public class ModelDefinition {
               (int)Integer.MAX_VALUE, 1));
       panel.add(_gridZSpinner);
     }
+
+    _gridChangeListener = new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            if (_job instanceof SegmentationJob) {
+              ImagePlus imp = ((SegmentationJob)_job).image();
+              int[] scaledShape = getScaledShape(imp);
+              if (scaledShape == null) return;
+              int[] outTileShape = new int[_nDims];
+              outTileShape[_nDims - 1] = (int)Math.ceil(
+                  (double)scaledShape[_nDims - 1] /
+                  ((Integer)_gridXSpinner.getValue()).doubleValue());
+              outTileShape[_nDims - 2] = (int)Math.ceil(
+                  (double)scaledShape[_nDims - 2] /
+                  ((Integer)_gridYSpinner.getValue()).doubleValue());
+              if (_nDims == 3) {
+                outTileShape[0] = (int)Math.ceil(
+                    (double)scaledShape[0] /
+                    ((Integer)_gridZSpinner.getValue()).doubleValue());
+              }
+              int nTiles =
+                  (Integer)_gridXSpinner.getValue() *
+                  (Integer)_gridYSpinner.getValue() *
+                  ((_nDims == 3) ?
+                   ((Integer)_gridZSpinner.getValue()).intValue() : 1);
+              for (int d = 0; d < _nDims; ++d) {
+                outTileShape[d] =
+                    Math.max(
+                        (int)Math.ceil(
+                            (double)(outTileShape[d] - _minOutTileShape[d]) /
+                            (double)downsampleFactor[d]) * downsampleFactor[d] +
+                        _minOutTileShape[d], _minOutTileShape[d]);
+              }
+
+              if (_shapeXSpinner != null) {
+                _shapeXSpinner.removeChangeListener(
+                    _shapeChangeUpdateGridAndNTilesListener);
+                _shapeXSpinner.setValue(outTileShape[_nDims - 1]);
+                _shapeXSpinner.addChangeListener(
+                    _shapeChangeUpdateGridAndNTilesListener);
+              }
+              if (_shapeYSpinner != null) {
+                _shapeYSpinner.removeChangeListener(
+                    _shapeChangeUpdateGridAndNTilesListener);
+                _shapeYSpinner.setValue(outTileShape[_nDims - 2]);
+                _shapeYSpinner.addChangeListener(
+                    _shapeChangeUpdateGridAndNTilesListener);
+              }
+              if (_nDims == 3 && _shapeZSpinner != null) {
+                _shapeZSpinner.removeChangeListener(
+                    _shapeChangeUpdateGridAndNTilesListener);
+                _shapeZSpinner.setValue(outTileShape[0]);
+                _shapeZSpinner.addChangeListener(
+                    _shapeChangeUpdateGridAndNTilesListener);
+              }
+              if (_nTilesSpinner != null) {
+                _nTilesSpinner.removeChangeListener(_nTilesChangeListener);
+                _nTilesSpinner.setValue(nTiles);
+                _nTilesSpinner.addChangeListener(_nTilesChangeListener);
+              }
+            }
+          }
+        };
+    _gridXSpinner.addChangeListener(_gridChangeListener);
+    _gridYSpinner.addChangeListener(_gridChangeListener);
+    if (_nDims == 3) _gridZSpinner.addChangeListener(_gridChangeListener);
+
+    // Trigger update of related tiling panels and memory display
+    _gridChangeListener.stateChanged(new ChangeEvent(_gridXSpinner));
+
     _tileModePanel.add(panel, GRID);
     _tileModeSelector.addItem(GRID);
   }
@@ -860,19 +1059,51 @@ public class ModelDefinition {
     if (_job == null || !(_job instanceof SegmentationJob ||
                           _job instanceof DetectionJob)) return -1;
     try {
+      ImagePlus imp = ((SegmentationJob)_job).image();
       Caffe.NetParameter.Builder netParamBuilder =
           Caffe.NetParameter.newBuilder();
       TextFormat.getParser().merge(modelPrototxt, netParamBuilder);
       int[] inputTileShape = getInputTileShape(getTileShape());
-      int[] inputBlobShape = new int[_nDims + 2];
+      long[] inputBlobShape = new long[_nDims + 2];
       inputBlobShape[0] = 1;
-      inputBlobShape[1] = ((SegmentationJob)_job).image().getNChannels();
+      inputBlobShape[1] = imp.getNChannels();
       for (int d = 0; d < _nDims; ++d)
           inputBlobShape[d + 2] = inputTileShape[d];
       Net net = Net.createFromProto(
           netParamBuilder.build(), new String[] { inputBlobName },
-          new int[][] { inputBlobShape }, Caffe.Phase.TEST);
-      return net.memoryConsumption(cuDNN);
+          new long[][] { inputBlobShape }, Caffe.Phase.TEST);
+      return net.memoryTotal(cuDNN);
+    }
+    catch (Exception e) {
+      return -1;
+    }
+  }
+
+  public long computeMemoryConsumptionInTrainPhase(boolean cuDNN) {
+    if (_job == null || !(_job instanceof FinetuneJob)) return -1;
+    try {
+      FinetuneJob job = (FinetuneJob)_job;
+      ImagePlus imp = null;
+      if (job.trainingList().getModel().getSize() > 0)
+          imp = job.trainingList().getModel().getElementAt(0);
+      else if (job.validationList().getModel().getSize() > 0)
+          imp = job.validationList().getModel().getElementAt(0);
+      else return -1;
+      Caffe.NetParameter.Builder netParamBuilder =
+          Caffe.NetParameter.newBuilder();
+      TextFormat.getParser().merge(modelPrototxt, netParamBuilder);
+      int[] inputTileShape = getTileShape();
+      long[] inputBlobShape = new long[_nDims + 2];
+      inputBlobShape[0] = 1;
+      inputBlobShape[1] = imp.getNChannels();
+      for (int d = 0; d < _nDims; ++d)
+          inputBlobShape[d + 2] = inputTileShape[d];
+      Net net = Net.createFromProto(
+          netParamBuilder.build(), new String[] { inputBlobName },
+          new long[][] { inputBlobShape }, Caffe.Phase.TRAIN);
+      return (job.validationList().getModel().getSize() > 0) ?
+          net.memoryTotalWithValidation(cuDNN) :
+          net.memoryTotal(cuDNN);
     }
     catch (Exception e) {
       return -1;
@@ -957,6 +1188,48 @@ public class ModelDefinition {
         "  weightFile = " + ((weightFile != null) ? weightFile : "N/A") + "\n" +
         "}";
     return res;
+  }
+
+  private int[] getScaledShape(ImagePlus imp) {
+    double[] elSizeImage = Tools.getElementSizeUm(imp);
+    int[] scaledShape = new int[_nDims];
+
+    if (_nDims == 2 && elSizeImage.length == 2) {
+      scaledShape[0] = (int)Math.ceil(
+          imp.getHeight() * elSizeImage[0] / elementSizeUm()[0]);
+      scaledShape[1] = (int)Math.ceil(
+          imp.getWidth() * elSizeImage[1] / elementSizeUm()[1]);
+      return scaledShape;
+    }
+
+    if (_nDims == 2 && elSizeImage.length == 3) {
+      scaledShape[0] = (int)Math.ceil(
+          imp.getHeight() * elSizeImage[1] / elementSizeUm()[0]);
+      scaledShape[1] = (int)Math.ceil(
+          imp.getWidth() * elSizeImage[2] / elementSizeUm()[1]);
+      return scaledShape;
+    }
+
+    if (_nDims == 3 && elSizeImage.length == 2) {
+      scaledShape[0] = 1;
+      scaledShape[1] = (int)Math.ceil(
+          imp.getHeight() * elSizeImage[0] / elementSizeUm()[1]);
+      scaledShape[2] = (int)Math.ceil(
+          imp.getWidth() * elSizeImage[1] / elementSizeUm()[2]);
+      return scaledShape;
+    }
+
+    if (_nDims == 3 && elSizeImage.length == 3) {
+      scaledShape[0] = (int)Math.ceil(
+          imp.getNSlices() * elSizeImage[0] / elementSizeUm()[0]);
+      scaledShape[1] = (int)Math.ceil(
+          imp.getHeight() * elSizeImage[1] / elementSizeUm()[1]);
+      scaledShape[2] = (int)Math.ceil(
+          imp.getWidth() * elSizeImage[2] / elementSizeUm()[2]);
+      return scaledShape;
+    }
+
+    return null;
   }
 
 };

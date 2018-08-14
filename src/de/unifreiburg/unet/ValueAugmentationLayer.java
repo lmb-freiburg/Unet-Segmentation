@@ -35,18 +35,9 @@ import caffe.Caffe;
 public class ValueAugmentationLayer extends NetworkLayer {
 
   public ValueAugmentationLayer(
-      String name, Net net, CaffeBlob[] in, String topName) {
-    super(name, net, in, new CaffeBlob[1]);
-    _out[0] = new CaffeBlob(topName, in[0].shape(), this);
-  }
-
-  public static NetworkLayer createFromProto(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
-    return new ValueAugmentationLayer(
-        layerParam.getName(), net, in, layerParam.getTop(0));
+    super(layerParam, net, in);
+    _out[0] = new CaffeBlob(layerParam.getTop(0), in[0].shape(), this);
   }
-
-  @Override
-  public String layerTypeString() { return "ValueAugmentationLayer"; }
 
 }

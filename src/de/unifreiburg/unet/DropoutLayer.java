@@ -35,41 +35,30 @@ import caffe.Caffe;
 public class DropoutLayer extends NetworkLayer {
 
   public DropoutLayer(
-      String name, Net net, CaffeBlob[] in, String[] topNames) {
-    super(name, net, in, new CaffeBlob[in.length]);
+      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
+    super(layerParam, net, in);
     long mem = 0;
     for (int i = 0; i < in.length; ++i) {
-      if (topNames[i].equals(in[i].name())) {
-        _out[i] = in[i];
-        // Even if the blobs have the same name, the operation is not in-place!
-        // Since the blobs are not counted, add their required memory to the
-        // layer's overhead
-        mem += 4 * in[i].count();
-      }
-      else _out[i] = new CaffeBlob(topNames[i], in[i].shape(), this, true);
+      if (layerParam.getTop(i).equals(in[i].name())) _out[i] = in[i];
+      else _out[i] = new CaffeBlob(
+          layerParam.getTop(i), in[i].shape(),
+          this, true, in[i].gradientRequired());
     }
     for (CaffeBlob blob : in) blob.setOnGPU(true);
 
     // Random masks are unsigned int and the same size as the blobs
     for (CaffeBlob blob : in) mem += 4 * blob.count();
 
-    _memOverhead = mem;
-  }
-
-  public static NetworkLayer createFromProto(
-      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
-    return new DropoutLayer(
-        layerParam.getName(), net, in, layerParam.getTopList().toArray(
-            new String[layerParam.getTopCount()]));
+    _memOther = mem;
   }
 
   @Override
   public String layerTypeString() { return "DropoutLayer"; }
 
   @Override
-  public long memoryOverhead(boolean cuDNN) {
-    return _memOverhead;
+  public long memoryOther() {
+    return _memOther;
   }
 
-  private final long _memOverhead;
+  private final long _memOther;
 }

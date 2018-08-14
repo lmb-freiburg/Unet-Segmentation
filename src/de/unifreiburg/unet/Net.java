@@ -34,6 +34,7 @@ import caffe.Caffe;
 
 import java.util.Vector;
 import java.util.UUID;
+import java.util.Arrays;
 
 public class Net {
 
@@ -43,17 +44,26 @@ public class Net {
 
   public static Net createFromProto(
       Caffe.NetParameter netParam, String[] inputBlobNames,
-      int[][] inputBlobShapes, Caffe.Phase phase)
+      long[][] inputBlobShapes, Caffe.Phase phase)
       throws NotImplementedException, BlobException {
 
     Net net = new Net(phase);
 
-    Vector<CaffeBlob> blobs = new Vector<CaffeBlob>();
-    if (inputBlobNames != null)
-        net.addLayer(
-            new DataLayer(
-                UUID.randomUUID().toString(), net,
-                inputBlobNames, inputBlobShapes));
+    Caffe.InputParameter.Builder ib = Caffe.InputParameter.newBuilder();
+    for (long[] shape : inputBlobShapes) {
+      Caffe.BlobShape.Builder bb = Caffe.BlobShape.newBuilder();
+      for (long extent : shape) bb.addDim(extent);
+      ib.addShape(bb);
+    }
+
+    if (inputBlobNames != null) {
+      Caffe.LayerParameter.Builder lb = Caffe.LayerParameter.newBuilder();
+      lb.setType("Input");
+      lb.setName(UUID.randomUUID().toString());
+      lb.setInputParam(ib);
+      for (String blobName : inputBlobNames) lb.addTop(blobName);
+      net.addLayer(new DataLayer(lb.build(), net));
+    }
 
     boolean allConnected = false;
     while (!allConnected) {
@@ -84,19 +94,16 @@ public class Net {
         if (!phaseIncluded) continue;
 
         if (l.getType().equals("HDF5Data")) {
-          int[][] blobShapes = inputBlobShapes;
-          if (l.getTopCount() > blobShapes.length) {
-            blobShapes = new int[l.getTopCount()][];
-            for (int i = 0; i < inputBlobShapes.length; ++i)
-                blobShapes[i] = inputBlobShapes[i];
-            for (int i = inputBlobShapes.length; i < blobShapes.length; ++i)
-                blobShapes[i] = inputBlobShapes[inputBlobShapes.length - 1];
+          if (l.getTopCount() > inputBlobShapes.length) {
+            for (int i = inputBlobShapes.length; i < l.getTopCount(); ++i)
+                ib.addShape(ib.getShape(ib.getShapeCount() - 1));
           }
-          net.addLayer(
-              new DataLayer(
-                  l.getName(), net,
-                  l.getTopList().toArray(new String[l.getTopCount()]),
-                  blobShapes));
+          Caffe.LayerParameter.Builder lb = Caffe.LayerParameter.newBuilder();
+          lb.setType("Input");
+          lb.setName(l.getName());
+          lb.setInputParam(ib);
+          for (String blobName : l.getTopList()) lb.addTop(blobName);
+          net.addLayer(new DataLayer(lb.build(), net));
           allConnected = false;
           continue;
         }
@@ -125,6 +132,40 @@ public class Net {
         allConnected = false;
       }
     }
+
+    // Add necessary split layers
+    Vector<NetworkLayer> splitLayers = new Vector<NetworkLayer>();
+    Vector<CaffeBlob> splitBlobs = new Vector<CaffeBlob>();
+    for (NetworkLayer l : net.layers()) {
+      if (l.outputBlobs() == null) continue;
+      for (int i = 0; i < l.outputBlobs().length; ++i) {
+        CaffeBlob thisOutput = l.outputBlobs()[i];
+        if (splitBlobs.contains(thisOutput)) continue;
+        int nConsumers = 0;
+        for (NetworkLayer l2 : net.layers()) {
+          if (l != l2 && l2.inputBlobs() != null &&
+              Arrays.asList(l2.inputBlobs()).contains(thisOutput) &&
+              (l2.outputBlobs() == null ||
+               !Arrays.asList(l2.outputBlobs()).contains(thisOutput))) {
+            nConsumers++;
+          }
+        }
+        if (nConsumers > 1)
+        {
+          Caffe.LayerParameter.Builder lb =
+              Caffe.LayerParameter.newBuilder();
+          lb.setType("Split");
+          String name = thisOutput.name() + "_" + l.name() + "_" + i + "_split";
+          lb.setName(name);
+          for (int c = 0; c < nConsumers; ++c) lb.addTop(name + "_" + c);
+          splitLayers.add(
+              new SplitLayer(lb.build(), net, new CaffeBlob[] { thisOutput }));
+          splitBlobs.add(thisOutput);
+        }
+      }
+    }
+    for (NetworkLayer layer : splitLayers) net.addLayer(layer, true);
+
     return net;
   }
 
@@ -132,6 +173,7 @@ public class Net {
     return _phase;
   }
 
+  @Override
   public String toString() {
     String res = "Net (phase = " +
         (_phase.equals(Caffe.Phase.TRAIN) ? "TRAIN" : "TEST")+ ") { \n";
@@ -140,28 +182,92 @@ public class Net {
     return res;
   }
 
-  public long memoryConsumption(boolean cuDNN) {
+  public CaffeBlob[] outputBlobs() {
+    return _outputBlobs.toArray(new CaffeBlob[_outputBlobs.size()]);
+  }
+
+  public long memoryParameters() {
     long mem = 0;
-    for (CaffeBlob blob : _blobs) if (blob.onGPU()) mem += 4 * blob.count();
-
-    // In training every data blob has an associated gradient blob
-    if (_phase.equals(Caffe.Phase.TRAIN)) mem *= 2;
-
-    for (NetworkLayer layer : _layers) mem += layer.memoryConsumption(cuDNN);
+    for (NetworkLayer layer : _layers) mem += layer.memoryParameters();
     return mem;
   }
 
+  public long memorySolver() {
+    return (_phase.equals(Caffe.Phase.TRAIN)) ?
+        3 * memoryParameters() : 0;
+  }
+
+  public long memoryOther() {
+    long mem = 0;
+    for (NetworkLayer layer : _layers) mem += layer.memoryOther();
+    return mem;
+  }
+
+  public long memoryOverhead(boolean cuDNN) {
+    long mem = 0;
+    for (NetworkLayer layer : _layers) mem += layer.memoryOverhead(cuDNN);
+    return mem;
+  }
+
+  public long memoryBlobsForward() {
+    long mem = 0;
+    for (CaffeBlob blob : _blobs) mem += blob.memoryForward();
+    return mem;
+  }
+
+  public long memoryBlobsBackward() {
+    if (!_phase.equals(Caffe.Phase.TRAIN)) return 0;
+    long mem = 0;
+    for (CaffeBlob blob : _blobs) mem += blob.memoryBackward();
+    return mem;
+  }
+
+  public long memoryTotal(boolean cuDNN) {
+    return memoryParameters() + memoryOther() + memoryOverhead(cuDNN) +
+        memoryBlobsForward() + memoryBlobsBackward() + memorySolver();
+  }
+
+  public long memoryTotalWithValidation(boolean cuDNN) {
+    return memoryTotal(cuDNN) + memoryOther() + memoryBlobsForward();
+  }
+
+  public void printMemoryBreakdown(boolean cuDNN) {
+    System.out.println(
+        "Total memory used (" + (cuDNN ? "" : "no ") + "cuDNN) = " +
+        (memoryTotal(cuDNN) / 1024 / 1024) +
+        " MB <= " + (memoryParameters() / 1024 / 1024) +
+        " MB (param) + " + (memoryBlobsForward() / 1024 / 1024) +
+        " MB (data) + " + (memoryBlobsBackward() / 1024 / 1024) +
+        " MB (gradient) + " + (memoryOverhead(cuDNN) / 1024 / 1024) +
+        " MB (conv) + " + (memoryOther() / 1024 / 1024) +
+        " MB (other) + " + (memorySolver() / 1024 / 1024) + " MB (solver)");
+    if (_phase.equals(Caffe.Phase.TRAIN))
+        System.out.println(
+            "  Training with validation set requires " +
+            (memoryTotalWithValidation(cuDNN) /1024 / 1024) + " MB");
+  }
+
   public void addLayer(NetworkLayer layer) {
+    addLayer(layer, false);
+  }
+
+  public void addLayer(NetworkLayer layer, boolean isConsumed) {
     _layers.add(layer);
     if (layer.inputBlobs() != null)
         for (CaffeBlob blob : layer.inputBlobs())
             if (_outputBlobs.contains(blob)) _outputBlobs.remove(blob);
     if (layer.outputBlobs() != null)
         for (CaffeBlob blob : layer.outputBlobs()) {
-          if (!_outputBlobs.contains(blob)) _outputBlobs.add(blob);
+          if (!_outputBlobs.contains(blob) && !isConsumed)
+              _outputBlobs.add(blob);
           if (!_blobs.contains(blob)) _blobs.add(blob);
         }
   }
+
+  public Vector<NetworkLayer> layers() {
+    return _layers;
+  }
+
 
   public NetworkLayer findLayer(String name) {
     for (NetworkLayer layer : _layers)

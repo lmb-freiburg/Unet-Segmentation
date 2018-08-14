@@ -35,37 +35,21 @@ import caffe.Caffe;
 public class ConcatAndCropLayer extends NetworkLayer {
 
   public ConcatAndCropLayer(
-      String name, Net net, CaffeBlob[] in, String topName)
-      throws BlobException {
-    super(name, net, in, new CaffeBlob[1]);
-
-    if (net.findBlob(topName) != null) throw new BlobException(
-        "In-place concat and crop not implemented");
-
-    int[] outputShape = new int[in[0].shape().length];
+      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
+    super(layerParam, net, in);
+    long[] outputShape = new long[in[0].shape().length];
     outputShape[0] = in[0].nSamples();
     outputShape[1] = 0;
     for (int d = 2; d < outputShape.length; ++d)
-        outputShape[d] = Integer.MAX_VALUE;
+        outputShape[d] = in[0].shape()[d];
+    boolean gradientRequired = false;
     for (CaffeBlob blob: in) {
       outputShape[1] += blob.nChannels();
-      for (int d = 2; d < outputShape.length; ++d)
-          if (blob.shape()[d] < outputShape[d])
-              outputShape[d] = blob.shape()[d];
+      gradientRequired |= blob.gradientRequired();
     }
-    _out[0] = new CaffeBlob(topName, outputShape, this, true);
-
+    _out[0] = new CaffeBlob(
+        layerParam.getTop(0), outputShape, this, true, gradientRequired);
     for (CaffeBlob blob : in) blob.setOnGPU(true);
   }
-
-  public static NetworkLayer createFromProto(
-      Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
-        throws BlobException {
-    return new ConcatAndCropLayer(
-        layerParam.getName(), net, in, layerParam.getTop(0));
-  }
-
-  @Override
-  public String layerTypeString() { return "ConcatAndCropLayer"; }
 
 }

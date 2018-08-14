@@ -193,6 +193,14 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     super(model);
   }
 
+  public ImagePlusListView trainingList() {
+    return _trainFileList;
+  }
+
+  public ImagePlusListView validationList() {
+    return _validFileList;
+  }
+
   @Override
   public void finish() {
     if (progressMonitor().finished()) return;
