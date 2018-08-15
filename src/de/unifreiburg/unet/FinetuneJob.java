@@ -51,6 +51,8 @@ import java.awt.Insets;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 import java.awt.Color;
+import javax.swing.event.ListDataListener;
+import javax.swing.event.ListDataEvent;
 import javax.swing.JPanel;
 import javax.swing.JCheckBox;
 import javax.swing.GroupLayout;
@@ -321,12 +323,40 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     JLabel trainImagesLabel = new JLabel("Train images");
     _trainImagesPanel.add(trainImagesLabel, BorderLayout.NORTH);
     JScrollPane trainScroller = new JScrollPane(_trainFileList);
+    _trainFileList.getModel().addListDataListener(new ListDataListener() {
+      @Override
+      public void contentsChanged(ListDataEvent e) {
+        if (model() != null) model().updateMemoryConsumptionDisplay();
+      }
+      @Override
+      public void intervalAdded(ListDataEvent e) {
+        if (model() != null) model().updateMemoryConsumptionDisplay();        
+      }
+      @Override
+      public void intervalRemoved(ListDataEvent e) {
+        if (model() != null) model().updateMemoryConsumptionDisplay();        
+      }
+    });
     trainScroller.setMinimumSize(new Dimension(100, 50));
     _trainImagesPanel.add(trainScroller, BorderLayout.CENTER);
 
     JLabel validImagesLabel = new JLabel("Validation images");
     _validImagesPanel.add(validImagesLabel, BorderLayout.NORTH);
     JScrollPane validScroller = new JScrollPane(_validFileList);
+    _validFileList.getModel().addListDataListener(new ListDataListener() {
+      @Override
+      public void contentsChanged(ListDataEvent e) {
+        if (model() != null) model().updateMemoryConsumptionDisplay();
+      }
+      @Override
+      public void intervalAdded(ListDataEvent e) {
+        if (model() != null) model().updateMemoryConsumptionDisplay();        
+      }
+      @Override
+      public void intervalRemoved(ListDataEvent e) {
+        if (model() != null) model().updateMemoryConsumptionDisplay();        
+      }
+    });
     validScroller.setMinimumSize(new Dimension(100, 50));
     _validImagesPanel.add(validScroller, BorderLayout.CENTER);
 

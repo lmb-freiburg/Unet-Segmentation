@@ -1055,6 +1055,11 @@ public class ModelDefinition {
         (String)_tileModeSelector.getSelectedItem() + "'");
   }
 
+  public void updateMemoryConsumptionDisplay() {
+    _shapeChangeUpdateMemoryListener.stateChanged(
+      new ChangeEvent(_shapeXSpinner));
+  }
+  
   public long computeMemoryConsumptionInTestPhase(boolean cuDNN) {
     if (_job == null || !(_job instanceof SegmentationJob ||
                           _job instanceof DetectionJob)) return -1;
