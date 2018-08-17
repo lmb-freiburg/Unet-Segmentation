@@ -38,19 +38,21 @@ import java.lang.ArrayIndexOutOfBoundsException;
 import java.util.Arrays;
 
 /**
- * Generic n-D data container with continuous memory layout
+ * n-D data container with continuous memory layout for storing 32-Bit integer
+ * values
  *
  * @author Thorsten Falk
  * @version 1.0
+ * @since 1.0
  */
 public class IntBlob extends Blob {
 
   private int[] _data;
 
 /**
- * Construct a new uninitialized n-D blob with given shape.
+ * Creates a new uninitialized n-D blob storing int values with given shape.
  *
- * @param shape The shape of the new n-D Blob
+ * @param shape The shape of the n-D blob
  * @param elementSizeUm For any spatial dimension this array must contain
  *   the actual element size in micrometers, for 1-D (e_x), for 2-D (e_y, e_x),
  *   for 3-D (e_z, e_y, e_x). The number of spatial dimensions of the blob
@@ -61,90 +63,21 @@ public class IntBlob extends Blob {
     this._data = new int[_stride[0] * _shape[0]];
   }
 
-/**
- * Get the raw int[] array for direct access.
- *
- * @return A reference to the raw data array
- */
+  @Override
   public Object data() {
     return _data;
   }
 
 /**
- * Get the value at the specified position in the blob. Extra dimensions
- * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
- * For immutable types T the function returns the value, otherwise a reference
- * to the contained object.
- *
- * @param t The index in time (5th) dimension (slowest moving)
- * @param c The index in channel (4th) dimension
- * @param z The index in depth (3rd) dimension
- * @param y The index in row (2nd) dimension
- * @param x The index in column (1st) dimension (fastest moving)
- *
- * @return The value or reference to the object at the given array position.
- *
- * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
- *   indices exceeds the corresponding Blob extent or the blob has more than 5
- *   dimensions.
- */
-  public int get(int t, int c, int z, int y, int x)
-      throws ArrayIndexOutOfBoundsException {
-    switch (_shape.length)
-    {
-    case 1:
-      if (x < 0 || x >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index " + x + " out of bounds for blob with shape " +
-              shapeString());
-      return _data[x];
-    case 2:
-      if (x < 0 || x >= _shape[1] || y < 0 || y >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + y + "," + x + ") out of bounds for blob with " +
-              "shape " + shapeString());
-      return _data[y * _shape[1] + x];
-    case 3:
-      if (x < 0 || x >= _shape[2] || y < 0 || y >= _shape[1] ||
-          z < 0 || z >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + z + "," + y + "," + x + ") out of bounds for " +
-              "blob with shape " + shapeString());
-      return _data[(z * _shape[1] + y) * _shape[2] + x];
-    case 4:
-      if (x < 0 || x >= _shape[3] || y < 0 || y >= _shape[2] ||
-          z < 0 || z >= _shape[1] || c < 0 || c >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + c + "," + z + "," + y + "," + x + ") out of " +
-              "bounds for blob with shape " + shapeString());
-      return _data[((c * _shape[1] + z) * _shape[2] + y) * _shape[3] + x];
-    case 5:
-      if (x < 0 || x >= _shape[4] || y < 0 || y >= _shape[3] ||
-          z < 0 || z >= _shape[2] || c < 0 || c >= _shape[1] ||
-          t < 0 || t >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + t + "," + c + "," + z + "," + y + "," + x +
-              ") out of bounds for blob with shape " + shapeString());
-      return _data[(((t * _shape[1] + c) * _shape[2] + z) * _shape[3] + y) *
-                   _shape[4] + x];
-    }
-    throw new ArrayIndexOutOfBoundsException(
-        _shape.length + "-D blob cannot be read using get(t, c, z, y, x)");
-  }
-
-/**
  * Get the value at the specified position in the blob. The given array's
- * length must match the dimensionality of the Blob. For immutable types T
- * the function returns the value, otherwise a reference to the contained
- * object.
+ * length must match the dimensionality of this <code>Blob</code>.
  *
- * @param pos The position in the Blob
+ * @param pos the position to read
+ * @return the value at the given position in the blob.
  *
- * @return The value or reference to the object at the given array position.
- *
- * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
- *   indices exceeds the corresponding Blob extent or the length of the pos
- *   vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent or the length of the pos
+ *   vector does not match the number of blob dimensions.
  */
   public int get(int[] pos)
       throws ArrayIndexOutOfBoundsException {
@@ -158,83 +91,15 @@ public class IntBlob extends Blob {
   }
 
 /**
- * Set the value at the specified position in the blob. Extra dimensions
- * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
- *
- * @param t The index in time (5th) dimension (slowest moving)
- * @param c The index in channel (4th) dimension
- * @param z The index in depth (3rd) dimension
- * @param y The index in row (2nd) dimension
- * @param x The index in column (1st) dimension (fastest moving)
- * @param value The value to write. The value is not copied, changes of the
- *              original reference will also affect the reference in the array
- *              for mutable types!
- *
- * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
- *   indices exceeds the corresponding Blob extent or the blob has more than 5
- *   dimensions.
- */
-  public void set(int t, int c, int z, int y, int x, int value)
-      throws ArrayIndexOutOfBoundsException {
-    switch (_shape.length)
-    {
-    case 1:
-      if (x < 0 || x >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index " + x + " out of bounds for blob with shape " +
-              shapeString());
-      _data[x] = value;
-      return;
-    case 2:
-      if (x < 0 || x >= _shape[1] || y < 0 || y >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + y + "," + x + ") out of bounds for blob with " +
-              "shape " + shapeString());
-      _data[y * _shape[1] + x] = value;
-      return;
-    case 3:
-      if (x < 0 || x >= _shape[2] || y < 0 || y >= _shape[1] ||
-          z < 0 || z >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + z + "," + y + "," + x + ") out of bounds for " +
-              "blob with shape " + shapeString());
-      _data[(z * _shape[1] + y) * _shape[2] + x] = value;
-      return;
-    case 4:
-      if (x < 0 || x >= _shape[3] || y < 0 || y >= _shape[2] ||
-          z < 0 || z >= _shape[1] || c < 0 || c >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + c + "," + z + "," + y + "," + x + ") out of " +
-              "bounds for blob with shape " + shapeString());
-      _data[((c * _shape[1] + z) * _shape[2] + y) * _shape[3] + x] = value;
-      return;
-    case 5:
-      if (x < 0 || x >= _shape[4] || y < 0 || y >= _shape[3] ||
-          z < 0 || z >= _shape[2] || c < 0 || c >= _shape[1] ||
-          t < 0 || t >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + t + "," + c + "," + z + "," + y + "," + x +
-              ") out of bounds for blob with shape " + shapeString());
-      _data[(((t * _shape[1] + c) * _shape[2] + z) * _shape[3] + y) *
-            _shape[4] + x] = value;
-      return;
-    }
-    throw new ArrayIndexOutOfBoundsException(
-        _shape.length + "-D blob cannot be read using get(t, c, z, y, x)");
-  }
-
-/**
  * Set the value at the specified position in the blob. The given array's
- * length must match the dimensionality of the Blob.
+ * length must match the dimensionality of this <code>Blob</code>.
  *
- * @param pos The position in the Blob
- * @param value The value to write. The value is not copied, changes of the
- *              original reference will also affect the reference in the array
- *              for mutable types!
+ * @param pos the position to write
+ * @param value the value to write
  *
- * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
- *   indices exceeds the corresponding Blob extent or the length of the pos
- *   vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent or the length of the pos
+ *   vector does not match the number of blob dimensions.
  */
   public void set(int[] pos, int value)
       throws ArrayIndexOutOfBoundsException {
@@ -247,7 +112,8 @@ public class IntBlob extends Blob {
     _data[idx] = value;
   }
 
-  public IntBlob rescale(
+  @Override
+  public void rescale(
       double[] targetElementSizeUm, InterpolationType interp,
       ProgressMonitor pr) throws InterruptedException {
 
@@ -257,7 +123,7 @@ public class IntBlob extends Blob {
       scales[d] = _elementSizeUm[d] / targetElementSizeUm[d];
       if (scales[d] != 1.0) needsRescaling = true;
     }
-    if (!needsRescaling) return this;
+    if (!needsRescaling) return;
 
     int[] targetShape = new int[_shape.length];
     for (int d = 0; d < _shape.length - _elementSizeUm.length; ++d)
@@ -441,24 +307,18 @@ public class IntBlob extends Blob {
     _elementSizeUm = targetElementSizeUm;
 
     if (pr != null) pr.end();
-
-    return this;
   }
 
 /**
- * Create an ImagePlus from this blob for Visualization in ImageJ.
+ * {@inheritDoc}
  *
- * If the Blob has less than 5 dimensions leading axes will be omitted in
- * order (t, c, z, y, x), e.g. if the Blob has 3 dimensions they will be
- * treated as (z, y, x).
+ * This implementation creates a 32-Bit ImagePlus.
  *
- * The ImagePlus will contain short values. Output will be clamped to
- * short range [-32768, 32767].
+ * @return {@inheritDoc}
  *
- * @return The ImagePlus
- *
- * @exception BlobException is thrown if the Blob has more than 5 dimensions
+ * @exception BlobException {@inheritDoc}
  */
+  @Override
   public ImagePlus convertToImagePlus() throws BlobException {
 
     if (_shape.length > 5)

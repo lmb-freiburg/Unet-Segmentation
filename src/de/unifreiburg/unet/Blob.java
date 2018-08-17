@@ -157,6 +157,22 @@ public abstract class Blob {
   public abstract Object data();
 
 /**
+ * Rescale this blob so that it has the given element size in micrometers
+ * afterwards.
+ *
+ * @param targetElementSizeUm the new element size in micrometers
+ * @param interp how to interpolate during scaling
+ * @param pr if not <code>null</code>, progress is reported to the given
+ *   <code>ProgressMonitor</code>
+ *
+ * @exception InterruptedException if the user aborts the computation via the
+ *   <code>ProgressMonitor</code>
+ */
+  public abstract void rescale(
+      double[] targetElementSizeUm, InterpolationType interp,
+      ProgressMonitor pr) throws InterruptedException;
+
+/**
  * Create an <code>ImagePlus</code> from this blob for visualization in ImageJ.
  * <p>
  *   Non-Spatial dimensions will be treated as first channel and secondly
@@ -170,6 +186,11 @@ public abstract class Blob {
  */
   public abstract ImagePlus convertToImagePlus() throws BlobException;
 
+/**
+ * Get a string representation of this <code>Blob</code>'s shape vector
+ *
+ * @return The shape of this <code>Blob</code> as <code>String</code>
+ */
   protected String shapeString() {
     String out = "(";
     for (int d = 0; d < _shape.length - 1; ++d)

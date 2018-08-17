@@ -32,8 +32,31 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+/**
+ * ApplyDeformationLayer provides functionality to compute the required
+ * memory of the corresponding caffe ApplyDeformationLayer.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class ApplyDeformationLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>ApplyDeformationLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   *
+   * @throws BlobException if the network does not contain the blob that is
+   *   referenced in the ApplyDeformationParameter for getting the output
+   *   shapes for the blobs of this layer. Make sure to setup layers producing
+   *   these blobs before creating this layer.
+   *
+   * @see caffe.Caffe.ApplyDeformationParameter
+   */
   public ApplyDeformationLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
       throws BlobException {

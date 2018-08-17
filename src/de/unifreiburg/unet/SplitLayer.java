@@ -34,8 +34,25 @@ import caffe.Caffe;
 
 import java.util.UUID;
 
+/**
+ * SplitLayer provides functionality to compute the required
+ * memory of the corresponding caffe SplitLayer. SplitLayers are not
+ * part of the network model, but are silently added at data branching points
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class SplitLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>SplitLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   */
   public SplitLayer(Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
     super(layerParam, net, in);
     for (int i = 0; i < layerParam.getTopCount(); ++i)

@@ -32,8 +32,26 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+/**
+ * DropoutLayer provides functionality to compute the required
+ * memory of the corresponding caffe DropoutLayer.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class DropoutLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>DropoutLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   *
+   * @see caffe.Caffe.DropoutParameter
+   */
   public DropoutLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
     super(layerParam, net, in);
@@ -52,6 +70,13 @@ public class DropoutLayer extends NetworkLayer {
     _memOther = mem;
   }
 
+  /**
+   * {@inheritDoc}
+   * <p>
+   * The DropoutLayer allocates 32-Bit masks for each input blob.
+   *
+   * @return {@inheritDoc}
+   */
   @Override
   public long memoryOther() {
     return _memOther;

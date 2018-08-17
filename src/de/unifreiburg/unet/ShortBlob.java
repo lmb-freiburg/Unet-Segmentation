@@ -38,7 +38,8 @@ import java.lang.ArrayIndexOutOfBoundsException;
 import java.util.Arrays;
 
 /**
- * n-D data container with continuous memory layout for storing short values
+ * n-D data container with continuous memory layout for storing 16-Bit integer
+ * values
  *
  * @author Thorsten Falk
  * @version 1.0
@@ -62,76 +63,9 @@ public class ShortBlob extends Blob {
     this._data = new short[_stride[0] * _shape[0]];
   }
 
-/**
- * Get the raw short array for direct access.
- *
- * @return a reference to the raw data array
- */
+  @Override
   public Object data() {
     return _data;
-  }
-
-/**
- * Get the value at the specified position in the blob. Extra dimensions
- * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
- * <p>
- * Warning: This function does not respect the number of spatial dimensions and
- * will simply apply the dimension map t=4,c=3,z=2,y=1,x=0.
- *
- * @param t the index in time (5th) dimension (slowest moving)
- * @param c the index in channel (4th) dimension
- * @param z the index in depth (3rd) dimension
- * @param y the index in row (2nd) dimension
- * @param x the index in column (1st) dimension (fastest moving)
- *
- * @return the value at the given array position.
- *
- * @exception ArrayIndexOutOfBoundsException if any of the given
- *   indices exceeds the corresponding blob extent
- * @exception BlobException if the blob has more than five dimensions
- */
-  public short get(int t, int c, int z, int y, int x)
-      throws ArrayIndexOutOfBoundsException, BlobException {
-    switch (_shape.length)
-    {
-    case 1:
-      if (x < 0 || x >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index " + x + " out of bounds for blob with shape " +
-              shapeString());
-      return _data[x];
-    case 2:
-      if (x < 0 || x >= _shape[1] || y < 0 || y >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + y + "," + x + ") out of bounds for blob with " +
-              "shape " + shapeString());
-      return _data[y * _shape[1] + x];
-    case 3:
-      if (x < 0 || x >= _shape[2] || y < 0 || y >= _shape[1] ||
-          z < 0 || z >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + z + "," + y + "," + x + ") out of bounds for " +
-              "blob with shape " + shapeString());
-      return _data[(z * _shape[1] + y) * _shape[2] + x];
-    case 4:
-      if (x < 0 || x >= _shape[3] || y < 0 || y >= _shape[2] ||
-          z < 0 || z >= _shape[1] || c < 0 || c >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + c + "," + z + "," + y + "," + x + ") out of " +
-              "bounds for blob with shape " + shapeString());
-      return _data[((c * _shape[1] + z) * _shape[2] + y) * _shape[3] + x];
-    case 5:
-      if (x < 0 || x >= _shape[4] || y < 0 || y >= _shape[3] ||
-          z < 0 || z >= _shape[2] || c < 0 || c >= _shape[1] ||
-          t < 0 || t >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + t + "," + c + "," + z + "," + y + "," + x +
-              ") out of bounds for blob with shape " + shapeString());
-      return _data[(((t * _shape[1] + c) * _shape[2] + z) * _shape[3] + y) *
-                   _shape[4] + x];
-    }
-    throw new BlobException(
-        _shape.length + "-D blob cannot be read using get(t, c, z, y, x)");
   }
 
 /**
@@ -157,73 +91,6 @@ public class ShortBlob extends Blob {
   }
 
 /**
- * Set the value at the specified position in the blob. Extra dimensions
- * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
- * <p>
- * Warning: This function does not respect the number of spatial dimensions and
- * will simply apply the dimension map t=4,c=3,z=2,y=1,x=0.
- *
- * @param t the index in time (5th) dimension (slowest moving)
- * @param c the index in channel (4th) dimension
- * @param z the index in depth (3rd) dimension
- * @param y the index in row (2nd) dimension
- * @param x the index in column (1st) dimension (fastest moving)
- * @param value the value to write
- *
- * @exception ArrayIndexOutOfBoundsException if any of the given
- *   indices exceeds the corresponding blob extent
- * @exception BlobException if the blob has more than five dimensions
- */
-  public void set(int t, int c, int z, int y, int x, short value)
-      throws ArrayIndexOutOfBoundsException, BlobException {
-    switch (_shape.length)
-    {
-    case 1:
-      if (x < 0 || x >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index " + x + " out of bounds for blob with shape " +
-              shapeString());
-      _data[x] = value;
-      return;
-    case 2:
-      if (x < 0 || x >= _shape[1] || y < 0 || y >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + y + "," + x + ") out of bounds for blob with " +
-              "shape " + shapeString());
-      _data[y * _shape[1] + x] = value;
-      return;
-    case 3:
-      if (x < 0 || x >= _shape[2] || y < 0 || y >= _shape[1] ||
-          z < 0 || z >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + z + "," + y + "," + x + ") out of bounds for " +
-              "blob with shape " + shapeString());
-      _data[(z * _shape[1] + y) * _shape[2] + x] = value;
-      return;
-    case 4:
-      if (x < 0 || x >= _shape[3] || y < 0 || y >= _shape[2] ||
-          z < 0 || z >= _shape[1] || c < 0 || c >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + c + "," + z + "," + y + "," + x + ") out of " +
-              "bounds for blob with shape " + shapeString());
-      _data[((c * _shape[1] + z) * _shape[2] + y) * _shape[3] + x] = value;
-      return;
-    case 5:
-      if (x < 0 || x >= _shape[4] || y < 0 || y >= _shape[3] ||
-          z < 0 || z >= _shape[2] || c < 0 || c >= _shape[1] ||
-          t < 0 || t >= _shape[0])
-          throw new ArrayIndexOutOfBoundsException(
-              "Array index (" + t + "," + c + "," + z + "," + y + "," + x +
-              ") out of bounds for blob with shape " + shapeString());
-      _data[(((t * _shape[1] + c) * _shape[2] + z) * _shape[3] + y) *
-            _shape[4] + x] = value;
-      return;
-    }
-    throw new BlobException(
-        _shape.length + "-D blob cannot be set using set(t, c, z, y, x, v)");
-  }
-
-/**
  * Set the value at the specified position in the blob. The given array's
  * length must match the dimensionality of this <code>Blob</code>.
  *
@@ -245,20 +112,8 @@ public class ShortBlob extends Blob {
     _data[idx] = value;
   }
 
-/**
- * Rescale this blob so that it has the given element size in micrometers
- * afterwards.
- *
- * @param targetElementSizeUm the new element size in micrometers
- * @param interp how to interpolate during scaling
- * @param pr if not <code>null</code>progress is reported to the given
- *   <code>ProgressMonitor</code>
- * @return A reference to <code>this</code> for chaining
- *
- * @exception InterruptedException if the user aborts the computation via the
- *   <code>ProgressMonitor</code>
- */
-  public ShortBlob rescale(
+  @Override
+  public void rescale(
       double[] targetElementSizeUm, InterpolationType interp,
       ProgressMonitor pr) throws InterruptedException {
 
@@ -268,7 +123,7 @@ public class ShortBlob extends Blob {
       scales[d] = _elementSizeUm[d] / targetElementSizeUm[d];
       if (scales[d] != 1.0) needsRescaling = true;
     }
-    if (!needsRescaling) return this;
+    if (!needsRescaling) return;
 
     int[] targetShape = new int[_shape.length];
     for (int d = 0; d < _shape.length - _elementSizeUm.length; ++d)
@@ -452,19 +307,18 @@ public class ShortBlob extends Blob {
     _elementSizeUm = targetElementSizeUm;
 
     if (pr != null) pr.end();
-
-    return this;
   }
 
 /**
  * {@inheritDoc}
  *
- * This implementation creates a short ImagePlus.
+ * This implementation creates a 16-Bit ImagePlus.
  *
  * @return {@inheritDoc}
  *
  * @exception BlobException {@inheritDoc}
  */
+  @Override
   public ImagePlus convertToImagePlus() throws BlobException {
 
     if (_shape.length > 5)

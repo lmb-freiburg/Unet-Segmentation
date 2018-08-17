@@ -32,8 +32,28 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+/**
+ * DataLayer provides functionality to compute the required
+ * memory of the HDF5DataLayer or a generic InputLayer that has no input
+ * blobs but produces output blobs. It is not strictly resembling a specific
+ * caffe layer, but is a placeholder for any kind of data generation.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class DataLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>DataLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format. The shapes of the output blobs are taken from
+   *   the InputParameter values.
+   * @param net the parent <code>Net</code> object
+   *
+   * @see caffe.Caffe.InputParameter
+   */
   public DataLayer(Caffe.LayerParameter layerParam, Net net) {
     super(layerParam, net, null);
     for (int i = 0; i < layerParam.getTopCount(); ++i)

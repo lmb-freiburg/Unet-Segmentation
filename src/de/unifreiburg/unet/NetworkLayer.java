@@ -46,14 +46,12 @@ import java.util.Vector;
 public abstract class NetworkLayer {
 
   /**
-   * Creates a new <code>NetworkLayer</code> object.
+   * Create a new <code>NetworkLayer</code> object.
    *
    * @param layerParam the parameters used to setup the layer in compiled
    *   protocol buffer format
    * @param net the parent <code>Net</code> object
    * @param in the input blobs for this layer
-   *
-   * @see caffe.Caffe.LayerParameter
    */
   public NetworkLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {

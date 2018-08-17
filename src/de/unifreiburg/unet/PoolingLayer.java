@@ -32,8 +32,29 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+/**
+ * PoolingLayer provides functionality to compute the required
+ * memory of the corresponding caffe PoolingLayer.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class PoolingLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>PoolingLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   *
+   * @throws BlobException if the stride and pad combination is invalid for
+   *   any input blob shape
+   *
+   * @see caffe.Caffe.PoolingParameter
+   */
   public PoolingLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
       throws BlobException {
@@ -86,6 +107,11 @@ public class PoolingLayer extends NetworkLayer {
     for (CaffeBlob blob : in) blob.setOnGPU(true);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return a string representation of kernel shape, padding and stride
+   */
   @Override
   public String paramString() {
     String res = "kernelShape: [ ";
@@ -100,6 +126,15 @@ public class PoolingLayer extends NetworkLayer {
     return res;
   }
 
+  /**
+   * {@inheritDoc}
+   * <p>
+   * For gradient propagation and unpooling operations, the index for each
+   * local pooling operation is stored leading to an overhead corresponding
+   * the the output blob shape.
+   *
+   * @return {@inheritDoc}
+   */
   @Override
   public long memoryOther() {
     return 4 * (_out[0].count() + 4 * _kernelShape.length +

@@ -32,8 +32,26 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+/**
+ * CreateDeformationLayer provides functionality to compute the required
+ * memory of the corresponding caffe CreateDeformationLayer.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class CreateDeformationLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>CreateDeformationLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   *
+   * @see caffe.Caffe.CreateDeformationParameter
+   */
   public CreateDeformationLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
     super(layerParam, net, in);

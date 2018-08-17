@@ -72,7 +72,6 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/ShortBlob.java
   src/de/unifreiburg/unet/IntBlob.java
   src/de/unifreiburg/unet/FloatBlob.java
-  src/de/unifreiburg/unet/GenericBlob.java
   src/de/unifreiburg/unet/CaffeBlob.java
   src/de/unifreiburg/unet/Net.java
   src/de/unifreiburg/unet/NetworkLayer.java

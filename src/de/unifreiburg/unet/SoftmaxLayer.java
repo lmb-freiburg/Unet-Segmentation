@@ -34,8 +34,24 @@ import caffe.Caffe;
 
 import java.util.UUID;
 
+/**
+ * SoftmaxLayer provides functionality to compute the required
+ * memory of the corresponding caffe SoftmaxLayer.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class SoftmaxLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>SoftmaxLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   */
   public SoftmaxLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
     super(layerParam, net, in);

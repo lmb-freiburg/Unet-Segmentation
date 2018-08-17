@@ -32,8 +32,29 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+/**
+ * UpConvolutionLayer provides functionality to compute the required
+ * memory of the corresponding caffe DeconvolutionLayer.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class UpConvolutionLayer extends NetworkLayer {
 
+  /**
+   * Create a new <code>UpConvolutionLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   *
+   * @throws BlobException if the upconvolution would reduce any input blob to
+   *   zero size
+   *
+   * @see caffe.Caffe.ConvolutionParameter
+   */
   public UpConvolutionLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in)
       throws BlobException {
@@ -86,6 +107,12 @@ public class UpConvolutionLayer extends NetworkLayer {
     for (CaffeBlob blob : in) blob.setOnGPU(true);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return a string representation of kernel shape, padding, stride and
+   *   dilation
+   */
   @Override
   public String paramString() {
     String res = "kernelShape: [ ";
@@ -103,6 +130,13 @@ public class UpConvolutionLayer extends NetworkLayer {
     return res;
   }
 
+  /**
+   * {@inheritDoc}
+   * <p>
+   * #parameters = (#input channels * #kernel entries + 1) * #output channels
+   *
+   * @return {@inheritDoc}
+   */
   @Override
   public long memoryParameters() {
     long kernelSize = 1;
@@ -111,6 +145,18 @@ public class UpConvolutionLayer extends NetworkLayer {
         (inputBlobs()[0].nChannels() * kernelSize + 1);
   }
 
+  /**
+   * {@inheritDoc}
+   * <p>
+   * With cuDNN: constant 24MB (upper bound of allocated workspace)
+   * <p>
+   * Without cuDNN: 0 MB if this is a 1x1 convolution, otherwise an im2col
+   * is allocated with size #inputPixels * #output channels * #kernel entries
+   *
+   * @param cuDNN returns required memory for workspaces if <code>true</code>,
+   *   or memory required for alternative data structures otherwise
+   * @return {@inheritDoc}
+   */
   @Override
   public long memoryOverhead(boolean cuDNN) {
     if (cuDNN) return 3 * 8 * 1024 * 1024;
