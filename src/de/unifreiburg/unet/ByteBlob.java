@@ -84,9 +84,9 @@ public class ByteBlob extends Blob {
  *
  * @return The value or reference to the object at the given array position.
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the blob has more than 5
- *         dimensions.
+ * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
+ *   indices exceeds the corresponding Blob extent or the blob has more than 5
+ *   dimensions.
  */
   public byte get(int t, int c, int z, int y, int x)
       throws ArrayIndexOutOfBoundsException {
@@ -142,9 +142,9 @@ public class ByteBlob extends Blob {
  *
  * @return The value or reference to the object at the given array position.
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the length of the pos
- *         vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
+ *   indices exceeds the corresponding Blob extent or the length of the pos
+ *   vector does not match the number of Blob dimensions.
  */
   public byte get(int[] pos)
       throws ArrayIndexOutOfBoundsException {
@@ -170,9 +170,9 @@ public class ByteBlob extends Blob {
  *              original reference will also affect the reference in the array
  *              for mutable types!
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the blob has more than 5
- *         dimensions.
+ * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
+ *   indices exceeds the corresponding Blob extent or the blob has more than 5
+ *   dimensions.
  */
   public void set(int t, int c, int z, int y, int x, byte value)
       throws ArrayIndexOutOfBoundsException {
@@ -232,9 +232,9 @@ public class ByteBlob extends Blob {
  *              original reference will also affect the reference in the array
  *              for mutable types!
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the length of the pos
- *         vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException is thrown if any of the given
+ *   indices exceeds the corresponding Blob extent or the length of the pos
+ *   vector does not match the number of Blob dimensions.
  */
   public void set(int[] pos, byte value)
       throws ArrayIndexOutOfBoundsException {
@@ -454,7 +454,7 @@ public class ByteBlob extends Blob {
  *
  * @return The ImagePlus
  *
- * @except BlobException is thrown if the Blob has more than 5 dimensions
+ * @exception BlobException is thrown if the Blob has more than 5 dimensions
  */
   public ImagePlus convertToImagePlus() throws BlobException {
 

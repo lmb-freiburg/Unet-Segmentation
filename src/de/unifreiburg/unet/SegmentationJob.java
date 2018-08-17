@@ -71,6 +71,8 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
@@ -154,39 +156,41 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     if (progressMonitor().finished()) return;
     readyCancelButton().setEnabled(false);
     try {
-      new Thread()
-      {
-        @Override
-        public void run() {
-          try {
-            loadSegmentationToImagePlus();
-            if (Recorder.record) {
-              Recorder.setCommand(null);
-              String command =
-                  "call('de.unifreiburg.unet.SegmentationJob." +
-                  "processHyperStack', " +
-                  "'modelFilename=" + model().file.getAbsolutePath() +
-                  ",weightsFilename=" + weightsFileName() +
-                  "," + model().getTilingParameterString() +
-                  ",gpuId=" + selectedGPUString() +
-                  "," + hostConfiguration().getMacroParameterString() +
-                  ",processFolder=" + processFolder() +
-                  ",average=" + (String)_averagingComboBox.getSelectedItem() +
-                  ",keepOriginal=" + String.valueOf(
-                      _keepOriginalCheckBox.isSelected()) +
-                  ",outputScores=" + String.valueOf(
-                      _outputScoresCheckBox.isSelected()) +
-                  ",outputSoftmaxScores=" + String.valueOf(
-                      _outputSoftmaxScoresCheckBox.isSelected()) + "');\n";
-              Recorder.recordString(command);
+      Thread finishThread =  new Thread() {
+            @Override
+            public void run() {
+              try {
+                loadSegmentationToImagePlus();
+                if (Recorder.record) {
+                  Recorder.setCommand(null);
+                  String command =
+                      "call('de.unifreiburg.unet.SegmentationJob." +
+                      "processHyperStack', " +
+                      "'modelFilename=" + model().file.getAbsolutePath() +
+                      ",weightsFilename=" + weightsFileName() +
+                      "," + model().getTilingParameterString() +
+                      ",gpuId=" + selectedGPUString() +
+                      "," + hostConfiguration().getMacroParameterString() +
+                      ",processFolder=" + processFolder() +
+                      ",average=" +
+                      (String)_averagingComboBox.getSelectedItem() +
+                      ",keepOriginal=" + String.valueOf(
+                          _keepOriginalCheckBox.isSelected()) +
+                      ",outputScores=" + String.valueOf(
+                          _outputScoresCheckBox.isSelected()) +
+                      ",outputSoftmaxScores=" + String.valueOf(
+                          _outputSoftmaxScoresCheckBox.isSelected()) + "');\n";
+                  Recorder.recordString(command);
+                }
+              }
+              catch (IOException e) {
+                showError("Could not load segmentation result", e);
+              }
+              finishJob();
             }
-          }
-          catch (IOException e) {
-            showError("Could not load segmentation result", e);
-          }
-          finishJob();
-        }
-      }.start();
+          };
+      if (isInteractive()) finishThread.start();
+      else finishThread.run();
     }
     catch (IllegalThreadStateException e) {}
   }
@@ -432,245 +436,124 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     return true;
   }
 
-  private void runSegmentation(
-      String fileName, Session session)
-      throws JSchException, IOException, InterruptedException {
-
-    String gpuParm = caffeGPUParameter();
-    String nTilesParm = model().getCaffeTilingParameter();
-    String averagingParm = new String();
-    if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
-        averagingParm = "-average_mirror";
-    else if (((String)_averagingComboBox.getSelectedItem()).equals("rotate"))
-        averagingParm = "-average_rotate";
-
-    String commandString =
-        Prefs.get("unet.caffe_unetBinary", "caffe_unet") +
-        " tiled_predict -infileH5 \"" + fileName +
-        "\" -outfileH5 \"" + fileName + "\" -model \"" +
-        model().remoteAbsolutePath + "\" -weights \"" +
-        weightsFileName() + "\" -iterations 0 " +
-        nTilesParm + " " + averagingParm + " " + gpuParm;
-
-    IJ.log(commandString);
-
-    Channel channel = session.openChannel("exec");
-    ((ChannelExec)channel).setCommand(commandString);
-
-    InputStream stdError = ((ChannelExec)channel).getErrStream();
-    InputStream stdOutput = channel.getInputStream();
-
-    channel.connect();
-
-    byte[] buf = new byte[1024];
-    String errorMsg = new String();
-    String outMsg = new String();
-    int exitStatus = -1;
-    boolean initialized = false;
-    try {
-      while (true) {
-        while(stdOutput.available() > 0) {
-          int i = stdOutput.read(buf, 0, 1024);
-          if (i < 0) break;
-          outMsg += "\n" + new String(buf, 0, i);
-        }
-        while(stdError.available() > 0) {
-          int i = stdError.read(buf, 0, 1024);
-          if (i < 0) break;
-          errorMsg += "\n" + new String(buf, 0, i);
-        }
-        int idx = -1;
-        while ((idx = outMsg.indexOf('\n')) != -1) {
-          String line = outMsg.substring(0, idx);
-          outMsg = outMsg.substring(idx + 1);
-          if (line.regionMatches(0, "Processing batch ", 0, 17)) {
-            line = line.substring(17);
-            int sepPos = line.indexOf('/');
-            int batchIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            sepPos = line.indexOf(',');
-            int nBatches = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 7);
-            sepPos = line.indexOf('/');
-            int tileIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            int nTiles = Integer.parseInt(line);
-            if (!initialized)
-            {
-              progressMonitor().init(0, "", "", nBatches * nTiles);
-              initialized = true;
-            }
-            progressMonitor().count(
-                "Segmenting batch " + String.valueOf(batchIdx) + "/" +
-                String.valueOf(nBatches) + ", tile " +
-                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles), 1);
-          }
-        }
-        if (channel.isClosed()) {
-          if(stdOutput.available() > 0 || stdError.available() > 0) continue;
-          exitStatus = channel.getExitStatus();
-          break;
-        }
-        if (interrupted()) throw new InterruptedException();
-        Thread.sleep(100);
-      }
+  private boolean parseCaffeOutputString(String msg, boolean initialized) {
+    boolean init = initialized;
+    Matcher matcher = Pattern.compile(
+        "Processing batch ([0-9]+)/([0-9]+), tile ([0-9]+)/([0-9]+)").matcher(
+            msg);
+    if (!matcher.matches() || matcher.groupCount() < 4) return init;
+    int batchIdx = Integer.parseInt(matcher.group(1));
+    int nBatches = Integer.parseInt(matcher.group(2));
+    int tileIdx = Integer.parseInt(matcher.group(3));
+    int nTiles = Integer.parseInt(matcher.group(4));
+    if (!init) {
+      progressMonitor().init(0, "", "", nBatches * nTiles);
+      init = true;
     }
-    catch (InterruptedException e) {
-      readyCancelButton().setText("Terminating...");
-      readyCancelButton().setEnabled(false);
-      try {
-        channel.sendSignal("TERM");
-        int graceMilliSeconds = 10000;
-        int timeElapsedMilliSeconds = 0;
-        while (!channel.isClosed() &&
-               timeElapsedMilliSeconds <= graceMilliSeconds) {
-          timeElapsedMilliSeconds += 100;
-          try {
-            Thread.sleep(100);
-          }
-          catch (InterruptedException eInner) {}
-        }
-        if (!channel.isClosed()) channel.sendSignal("KILL");
-      }
-      catch (Exception eInner) {
-        IJ.log("Process could not be terminated using SIGTERM: " + eInner);
-      }
-      channel.disconnect();
-      throw e;
-    }
-    channel.disconnect();
-
-    if (exitStatus != 0) {
-      IJ.log(errorMsg);
-      throw new IOException(
-          "Error during segmentation: exit status " + exitStatus +
-          "\nSee log for further details");
-    }
+    progressMonitor().count(
+        "Segmenting batch " + batchIdx + "/" + nBatches + ", tile " +
+        tileIdx + "/" + nTiles, 1);
+    return init;
   }
 
-  public void runSegmentation(File file)
-      throws IOException, InterruptedException {
-    String gpuAttribute = new String();
-    String gpuValue = new String();
-    String selectedGPU = selectedGPUString();
-    if (selectedGPU.contains("GPU ")) {
-      gpuAttribute = "-gpu";
-      gpuValue = selectedGPU.substring(selectedGPU.length() - 1);
-    }
-    else if (selectedGPU.contains("all")) {
-      gpuAttribute = "-gpu";
-      gpuValue = "all";
-    }
-    String averagingParm = new String();
-    if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
-        averagingParm = "-average_mirror";
-    else if (((String)_averagingComboBox.getSelectedItem()).equals("rotate"))
-        averagingParm = "-average_rotate";
+  private void runSegmentation(String fileName)
+      throws JSchException, IOException, InterruptedException {
 
-    String[] parameters = model().getCaffeTilingParameter().split(
+    Vector<String> cmd = new Vector<String>();
+    cmd.add(Prefs.get("unet.caffe_unetBinary", "caffe_unet"));
+    cmd.add("tiled_predict");
+    cmd.add("-infileH5");
+    cmd.add(fileName);
+    cmd.add("-outfileH5");
+    cmd.add(fileName);
+    cmd.add("-model");
+    cmd.add(model().file.getAbsolutePath());
+    cmd.add("-weights");
+    cmd.add(weightsFileName());
+    cmd.add("-iterations");
+    cmd.add("0");
+    String[] tilingParameters = model().getCaffeTilingParameter().split(
         "\\s");
-    String nTilesAttribute = parameters[0];
-    String nTilesValue = parameters[1];
+    cmd.add(tilingParameters[0]);
+    cmd.add(tilingParameters[1]);
+    if (((String)_averagingComboBox.getSelectedItem()).equals("mirror"))
+        cmd.add("-average_mirror");
+    else if (((String)_averagingComboBox.getSelectedItem()).equals("rotate"))
+        cmd.add("-average_rotate");
+    if (selectedGPUString().contains("GPU ")) {
+      cmd.add("-gpu");
+      cmd.add(selectedGPUString().substring(selectedGPUString().length() - 1));
+    }
+    else if (selectedGPUString().contains("all")) {
+      cmd.add("-gpu");
+      cmd.add("all");
+    }
+    String cmdString = "";
+    for (String cmdComponent : cmd) cmdString += cmdComponent + " ";
+    IJ.log(cmdString);
 
-    String commandString =
-        Prefs.get("unet.caffe_unetBinary", "caffe_unet");
-
-    IJ.log(
-        commandString + " tiled_predict -infileH5 \"" +
-        file.getAbsolutePath() + "\" -outfileH5 \"" +
-        file.getAbsolutePath() + "\" -model \"" +
-        model().file.getAbsolutePath() + "\" -weights \"" +
-        weightsFileName() + "\" -iterations 0 " +
-        nTilesAttribute + " " + nTilesValue + " " + averagingParm + " " +
-        gpuAttribute + " " + gpuValue);
-    ProcessBuilder pb;
-    if (averagingParm.equals("")) {
-      if (!gpuAttribute.equals(""))
-          pb = new ProcessBuilder(
-              commandString, "tiled_predict", "-infileH5",
-              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
-              weightsFileName(), "-iterations", "0",
-              nTilesAttribute, nTilesValue, gpuAttribute,
-              gpuValue);
-      else
-          pb = new ProcessBuilder(
-              commandString, "tiled_predict", "-infileH5",
-              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
-              weightsFileName(), "-iterations", "0",
-              nTilesAttribute, nTilesValue);
+    Channel channel = null;
+    Process p = null;
+    int pid = -1;
+    BufferedReader stdOutput = null;
+    BufferedReader stdError = null;
+    if (sshSession() == null) {
+      ProcessBuilder pb = new ProcessBuilder(cmd);
+      p = pb.start();
+      pid = Tools.getPID(p);
+      stdOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
+      stdError = new BufferedReader(new InputStreamReader(p.getErrorStream()));
     }
     else {
-      if (!gpuAttribute.equals(""))
-          pb = new ProcessBuilder(
-              commandString, "tiled_predict", "-infileH5",
-              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
-              weightsFileName(), "-iterations", "0",
-              nTilesAttribute, nTilesValue, averagingParm, gpuAttribute,
-              gpuValue);
-      else
-          pb = new ProcessBuilder(
-              commandString, "tiled_predict", "-infileH5",
-              file.getAbsolutePath(), "-outfileH5", file.getAbsolutePath(),
-              "-model", model().file.getAbsolutePath(), "-weights",
-              weightsFileName(), "-iterations", "0",
-              nTilesAttribute, nTilesValue, averagingParm);
+      channel = sshSession().openChannel("exec");
+      ((ChannelExec)channel).setCommand("echo $$ && exec " + cmdString);
+      stdOutput = new BufferedReader(
+          new InputStreamReader(channel.getInputStream()));
+      stdError = new BufferedReader(
+          new InputStreamReader(((ChannelExec)channel).getErrStream()));
+      channel.connect();
     }
 
-    Process p = pb.start();
-
-    BufferedReader stdOutput =
-        new BufferedReader(new InputStreamReader(p.getInputStream()));
-    BufferedReader stdError =
-        new BufferedReader(new InputStreamReader(p.getErrorStream()));
-
     int exitStatus = -1;
-    String line;
-    String errorMsg = "";
+    String line = null;
+    String outMsg = new String();
+    String errorMsg = new String();
     boolean initialized = false;
+    boolean firstLine = true;
     try {
       while (true) {
         // Check for ready() to avoid thread blocking, then read
         // all available lines from the buffer and update progress
         while (stdOutput.ready()) {
           line = stdOutput.readLine();
-          if (line.regionMatches(0, "Processing batch ", 0, 17)) {
-            line = line.substring(17);
-            int sepPos = line.indexOf('/');
-            int batchIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            sepPos = line.indexOf(',');
-            int nBatches = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 7);
-            sepPos = line.indexOf('/');
-            int tileIdx = Integer.parseInt(line.substring(0, sepPos));
-            line = line.substring(sepPos + 1);
-            int nTiles = Integer.parseInt(line);
-            if (!initialized)
-            {
-              progressMonitor().init(nBatches * nTiles);
-              initialized = true;
-            }
-            progressMonitor().count(
-                "Segmenting batch " + String.valueOf(batchIdx) + "/" +
-                String.valueOf(nBatches) + ", tile " +
-                String.valueOf(tileIdx) + "/" + String.valueOf(nTiles), 1);
+          if (firstLine) {
+            pid = Integer.parseInt(line);
+            firstLine = false;
           }
+          else outMsg += line + "\n";
+          initialized = parseCaffeOutputString(line, initialized);
         }
         // Also read error stream to avoid stream overflow that leads
         // to process stalling
         while (stdError.ready()) {
           line = stdError.readLine();
           errorMsg += line + "\n";
+          initialized = parseCaffeOutputString(line, initialized);
         }
-
-        try {
-          exitStatus = p.exitValue();
-          break;
+        if (sshSession() != null) {
+          if (channel.isClosed()) {
+            if(stdOutput.ready() || stdError.ready()) continue;
+            exitStatus = channel.getExitStatus();
+            break;
+          }
         }
-        catch (IllegalThreadStateException e) {}
+        else {
+          try {
+            exitStatus = p.exitValue();
+            break;
+          }
+          catch (IllegalThreadStateException e) {}
+        }
         if (interrupted()) throw new InterruptedException();
         Thread.sleep(100);
       }
@@ -678,10 +561,22 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     catch (InterruptedException e) {
       readyCancelButton().setText("Terminating...");
       readyCancelButton().setEnabled(false);
-      p.destroy();
+      if (pid != -1) {
+        if (sshSession() != null)
+            Tools.execute(
+                "kill -2 " + pid, sshSession(), progressMonitor());
+        else {
+          Vector<String> cmd2 = new Vector<String>();
+          cmd2.add("kill");
+          cmd2.add("-2");
+          cmd2.add(new Integer(pid).toString());
+          Tools.execute(cmd2, progressMonitor());
+        }
+      }
+      if (sshSession() != null) channel.disconnect();
+      else p.destroy();
       throw e;
     }
-
     if (exitStatus != 0) {
       IJ.log(errorMsg);
       throw new IOException(
@@ -701,10 +596,11 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
     String[] parameterStrings = params.split(",");
     Map<String,String> parameters = new HashMap<String,String>();
-    for (int i = 0; i < parameterStrings.length; i++)
-        parameters.put(parameterStrings[i].split("=")[0],
-                       parameterStrings[i].split("=")[1]);
-    ModelDefinition model = new ModelDefinition();
+    for (int i = 0; i < parameterStrings.length; i++) {
+      String[] param = parameterStrings[i].split("=");
+      parameters.put(param[0], (param.length > 1) ? param[1] : "");
+    }
+    ModelDefinition model = new ModelDefinition(job);
     model.load(new File(parameters.get("modelFilename")));
     job.setModel(model);
     job.setWeightsFileName(parameters.get("weightsFilename"));
@@ -729,7 +625,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         Boolean.valueOf(parameters.get("outputSoftmaxScores")));
     job.setInteractive(false);
 
-    job.start();
+    // Run blocking on current thread
+    job.run();
   }
 
   @Override
@@ -809,22 +706,21 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
                   model().file, model().remoteAbsolutePath));
           _createdRemoteFiles.add(model().remoteAbsolutePath);
         }
-
         progressMonitor().pop();
-        progressMonitor().push("U-Net segmentation", 0.1f, 0.9f);
+      }
 
-        runSegmentation(remoteFileName, sshSession());
+      progressMonitor().push(
+          "U-Net segmentation", 0.1f, (sshSession() != null) ? 0.9f : 1.0f);
+      runSegmentation(
+          (sshSession() != null) ? remoteFileName :
+          _localTmpFile.getAbsolutePath());
+      if (interrupted()) throw new InterruptedException();
 
-        if (interrupted()) throw new InterruptedException();
+      if (sshSession() != null) {
         progressMonitor().pop();
         progressMonitor().push("Downloading segmentation", 0.9f, 1.0f);
-
         new SftpFileIO(sshSession(), progressMonitor()).get(
             remoteFileName, _localTmpFile);
-      }
-      else {
-        progressMonitor().push("U-Net segmentation", 0.1f, 1.0f);
-        runSegmentation(_localTmpFile);
       }
 
       if (interrupted()) throw new InterruptedException();

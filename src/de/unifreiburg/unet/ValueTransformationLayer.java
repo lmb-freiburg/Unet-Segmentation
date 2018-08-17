@@ -32,8 +32,27 @@ package de.unifreiburg.unet;
 
 import caffe.Caffe;
 
+/**
+ * ValueTransformationLayer provides functionalyity to compute the required
+ * memory of the caffe ValueTransformationLayer.
+ *
+ * @author Thorsten Falk
+ * @version 1.0
+ * @since 1.0
+ */
 public class ValueTransformationLayer extends NetworkLayer {
 
+  /**
+   * Creates a new <code>ValueTransformationLayer</code> object.
+   *
+   * @param layerParam the parameters used to setup the layer in compiled
+   *   protocol buffer format
+   * @param net the parent <code>Net</code> object
+   * @param in the input blobs for this layer
+   *
+   * @see caffe.Caffe.LayerParameter
+   * @see caffe.Caffe.ValueTransformationParameter
+   */
   public ValueTransformationLayer(
       Caffe.LayerParameter layerParam, Net net, CaffeBlob[] in) {
     super(layerParam, net, in);

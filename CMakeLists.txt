@@ -108,3 +108,15 @@ add_custom_command(OUTPUT ${PROJECT_SOURCE_DIR}/caffe/Caffe.java
   )
 
 install_jar(Unet_Segmentation ${CMAKE_INSTALL_PREFIX})
+
+create_javadoc(doc
+  PACKAGES de.unifreiburg.unet caffe
+  SOURCEPATH "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src"
+  CLASSPATH ${CMAKE_JAVA_INCLUDE_PATH}
+  INSTALLPATH "${CMAKE_BINARY_DIR}"
+  WINDOWTITLE "U-Net Segmentation"
+  DOCTITLE "<h1>U-Net Segmentation API Documentation</h1>"
+  AUTHOR TRUE
+  USE TRUE
+  VERSION TRUE
+  )

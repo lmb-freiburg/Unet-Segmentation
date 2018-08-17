@@ -39,25 +39,26 @@ import java.lang.reflect.Array;
 import java.util.Arrays;
 
 /**
- * Generic n-D data container with continuous memory layout
+ * n-D data container with continuous memory layout for storing references
  *
  * @author Thorsten Falk
  * @version 1.0
+ * @since 1.0
  */
 public class GenericBlob<T> extends Blob {
 
   private final T[] _data;
 
 /**
- * Construct a new uninitialized n-D blob with given shape.
+ * Creates a new uninitialized n-D blob storing references of type
+ * <code>T</code> with given shape.
  *
- * @param shape The shape of the new n-D Blob
+ * @param shape The shape of the n-D blob
  * @param elementSizeUm For any spatial dimension this array must contain
  *   the actual element size in micrometers, for 1-D (e_x), for 2-D (e_y, e_x),
  *   for 3-D (e_z, e_y, e_x). The number of spatial dimensions of the blob
  *   will be deduced from the length of this vector!
- * @param cl The Array type of the given base type.
- *   E.g. Blob<Float> = new Blob<Float>(shape, elSize, Float[].class);
+ * @param cl The Array type to use
  */
   public GenericBlob(int[] shape, double[] elementSizeUm, Class<T[]> cl) {
     super(shape, elementSizeUm);
@@ -75,25 +76,27 @@ public class GenericBlob<T> extends Blob {
   }
 
 /**
- * Get the value at the specified position in the blob. Extra dimensions
- * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
- * For immutable types T the function returns the value, otherwise a reference
- * to the contained object.
+ * Get a reference to the value at the specified position in the blob. Extra
+ * dimensions are ignored, i.e. in a 2-D blob only the given x- and y-indices
+ * are handled.
+ * <p>
+ * Warning: This function does not respect the number of spatial dimensions and
+ * will simply apply the dimension map t=4,c=3,z=2,y=1,x=0.
  *
- * @param t The index in time (5th) dimension (slowest moving)
- * @param c The index in channel (4th) dimension
- * @param z The index in depth (3rd) dimension
- * @param y The index in row (2nd) dimension
- * @param x The index in column (1st) dimension (fastest moving)
+ * @param t the index in time (5th) dimension (slowest moving)
+ * @param c the index in channel (4th) dimension
+ * @param z the index in depth (3rd) dimension
+ * @param y the index in row (2nd) dimension
+ * @param x the index in column (1st) dimension (fastest moving)
  *
- * @return The value or reference to the object at the given array position.
+ * @return a reference to the object at the given array position.
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the blob has more than 5
- *         dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent
+ * @exception BlobException if the blob has more than five dimensions
  */
   public T get(int t, int c, int z, int y, int x)
-      throws ArrayIndexOutOfBoundsException {
+      throws ArrayIndexOutOfBoundsException, BlobException {
     switch (_shape.length)
     {
     case 1:
@@ -132,23 +135,20 @@ public class GenericBlob<T> extends Blob {
       return _data[(((t * _shape[1] + c) * _shape[2] + z) * _shape[3] + y) *
                    _shape[4] + x];
     }
-    throw new ArrayIndexOutOfBoundsException(
+    throw new BlobException(
         _shape.length + "-D blob cannot be read using get(t, c, z, y, x)");
   }
 
 /**
- * Get the value at the specified position in the blob. The given array's
- * length must match the dimensionality of the Blob. For immutable types T
- * the function returns the value, otherwise a reference to the contained
- * object.
+ * Get a reference to the value at the specified position in the blob. The
+ * given array's length must match the dimensionality of this <code>Blob</code>.
  *
- * @param pos The position in the Blob
+ * @param pos the position to read
+ * @return the value at the given position in the blob.
  *
- * @return The value or reference to the object at the given array position.
- *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the length of the pos
- *         vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent or the length of the pos
+ *   vector does not match the number of blob dimensions.
  */
   public T get(int[] pos)
       throws ArrayIndexOutOfBoundsException {
@@ -162,24 +162,28 @@ public class GenericBlob<T> extends Blob {
   }
 
 /**
- * Set the value at the specified position in the blob. Extra dimensions
+ * Set the reference at the specified position in the blob. Extra dimensions
  * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
+ * This method is provided for convenience to match the interface of the Blobs
+ * for storing primitive types. The corresponding <code>get</code>-Method
+ * can be used for direct manipulation of the blob content.
+ * <p>
+ * Warning: This function does not respect the number of spatial dimensions and
+ * will simply apply the dimension map t=4,c=3,z=2,y=1,x=0.
  *
- * @param t The index in time (5th) dimension (slowest moving)
- * @param c The index in channel (4th) dimension
- * @param z The index in depth (3rd) dimension
- * @param y The index in row (2nd) dimension
- * @param x The index in column (1st) dimension (fastest moving)
- * @param value The value to write. The value is not copied, changes of the
- *              original reference will also affect the reference in the array
- *              for mutable types!
+ * @param t the index in time (5th) dimension (slowest moving)
+ * @param c the index in channel (4th) dimension
+ * @param z the index in depth (3rd) dimension
+ * @param y the index in row (2nd) dimension
+ * @param x the index in column (1st) dimension (fastest moving)
+ * @param value the reference to write
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the blob has more than 5
- *         dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent
+ * @exception BlobException if the blob has more than five dimensions
  */
   public void set(int t, int c, int z, int y, int x, T value)
-      throws ArrayIndexOutOfBoundsException {
+      throws ArrayIndexOutOfBoundsException, BlobException {
     switch (_shape.length)
     {
     case 1:
@@ -223,22 +227,23 @@ public class GenericBlob<T> extends Blob {
             _shape[4] + x] = value;
       return;
     }
-    throw new ArrayIndexOutOfBoundsException(
+    throw new BlobException(
         _shape.length + "-D blob cannot be read using get(t, c, z, y, x)");
   }
 
 /**
  * Set the value at the specified position in the blob. The given array's
- * length must match the dimensionality of the Blob.
+ * length must match the dimensionality of this <code>Blob</code>.
+ * This method is provided for convenience to match the interface of the Blobs
+ * for storing primitive types. The corresponding <code>get</code>-Method
+ * can be used for direct manipulation of the blob content.
  *
- * @param pos The position in the Blob
- * @param value The value to write. The value is not copied, changes of the
- *              original reference will also affect the reference in the array
- *              for mutable types!
+ * @param pos the position to write
+ * @param value the value to write
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the length of the pos
- *         vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent or the length of the pos
+ *   vector does not match the number of blob dimensions.
  */
   public void set(int[] pos, T value)
       throws ArrayIndexOutOfBoundsException {
@@ -252,29 +257,29 @@ public class GenericBlob<T> extends Blob {
   }
 
 /**
- * Create an ImagePlus from this blob for Visualization in ImageJ. Supported
- * types are:
- *   - Boolean - Converted to 8-Bit ImagePlus with values 0, 255
- *   - Byte    - as is
- *   - Short   - as is
- *   - Integer - Converted to 16-Bit ImagePlus without overflow check!
- *   - Float   - as is
- *   - Double  - Converted to 32-Bit ImagePlus
+ * {@inheritDoc}
+ * <p>
+ *   Supported types are:
+ *   <ul>
+ *   <li>Boolean - Converted to 8-Bit ImagePlus with values 0, 255
+ *   <li>Byte    - as is
+ *   <li>Short   - as is
+ *   <li>Integer - Converted to 16-Bit ImagePlus without overflow check!
+ *   <li>Float   - as is
+ *   <li>Double  - Converted to 32-Bit ImagePlus
+ *   </ul>
  *
- * If the Blob has less than 5 dimensions leading axes will be omitted in
- * order (t, c, z, y, x), e.g. if the Blob has 3 dimensions they will be
- * treated as (z, y, x).
+ * @return {@inheritDoc}
  *
- * @return The ImagePlus
- *
- * @except BlobException is thrown if the Blob has more than 5 dimensions or
- *         the datatype of the blob is not supported.
+ * @exception BlobException {@inheritDoc}
  */
   public ImagePlus convertToImagePlus()
         throws BlobException {
-    if (_shape.length > 5)
+    int nNonSpatialDimensions = _shape.length - _elementSizeUm.length;
+    if (nNonSpatialDimensions > 2)
         throw new BlobException(
-            _shape.length + "-D blob cannot be converted to ImagePlus");
+            _shape.length + "-D blob with " + _elementSizeUm.length +
+            " spatial dimensions cannot be converted to ImagePlus");
     int width = _shape[_shape.length - 1];
     int height = (_elementSizeUm.length > 1) ? _shape[_shape.length - 2] : 1;
     int depth = (_elementSizeUm.length > 2) ? _shape[_shape.length - 3] : 1;
@@ -314,9 +319,8 @@ public class GenericBlob<T> extends Blob {
     for (int i = 0; i < nFrames * nChannels * depth; ++i) {
       switch (bitdepth) {
       case 8: {
-        byte[] out = (byte[])(
-            (impOut.getStackSize() == 1) ? impOut.getProcessor().getPixels() :
-            impOut.getStack().getProcessor(i + 1).getPixels());
+        byte[] out =
+            (byte[])(impOut.getStack().getProcessor(i + 1).getPixels());
         for (int j = 0; j < out.length; ++j, ++lblIdx)
             out[j] = (_data instanceof Boolean[]) ?
                 (((Boolean)_data[lblIdx]) ? (byte)255 : (byte)0) :
@@ -324,9 +328,8 @@ public class GenericBlob<T> extends Blob {
         break;
       }
       case 16: {
-        short[] out = (short[])(
-            (impOut.getStackSize() == 1) ? impOut.getProcessor().getPixels() :
-            impOut.getStack().getProcessor(i + 1).getPixels());
+        short[] out =
+            (short[])(impOut.getStack().getProcessor(i + 1).getPixels());
         for (int j = 0; j < out.length; ++j, ++lblIdx)
             out[j] = (_data instanceof Short[]) ?
                 ((Short)_data[lblIdx]).shortValue() :
@@ -334,9 +337,8 @@ public class GenericBlob<T> extends Blob {
         break;
       }
       case 32: {
-        float[] out = (float[])(
-            (impOut.getStackSize() == 1) ? impOut.getProcessor().getPixels() :
-            impOut.getStack().getProcessor(i + 1).getPixels());
+        float[] out =
+            (float[])(impOut.getStack().getProcessor(i + 1).getPixels());
         for (int j = 0; j < out.length; ++j, ++lblIdx)
             out[j] = (_data instanceof Float[]) ?
                 ((Float)_data[lblIdx]).floatValue() :

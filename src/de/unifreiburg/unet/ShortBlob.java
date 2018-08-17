@@ -38,19 +38,20 @@ import java.lang.ArrayIndexOutOfBoundsException;
 import java.util.Arrays;
 
 /**
- * Generic n-D data container with continuous memory layout
+ * n-D data container with continuous memory layout for storing short values
  *
  * @author Thorsten Falk
  * @version 1.0
+ * @since 1.0
  */
 public class ShortBlob extends Blob {
 
   private short[] _data;
 
 /**
- * Construct a new uninitialized n-D blob with given shape.
+ * Creates a new uninitialized n-D blob storing short values with given shape.
  *
- * @param shape The shape of the new n-D Blob
+ * @param shape The shape of the n-D blob
  * @param elementSizeUm For any spatial dimension this array must contain
  *   the actual element size in micrometers, for 1-D (e_x), for 2-D (e_y, e_x),
  *   for 3-D (e_z, e_y, e_x). The number of spatial dimensions of the blob
@@ -62,9 +63,9 @@ public class ShortBlob extends Blob {
   }
 
 /**
- * Get the raw short[] array for direct access.
+ * Get the raw short array for direct access.
  *
- * @return A reference to the raw data array
+ * @return a reference to the raw data array
  */
   public Object data() {
     return _data;
@@ -73,23 +74,24 @@ public class ShortBlob extends Blob {
 /**
  * Get the value at the specified position in the blob. Extra dimensions
  * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
- * For immutable types T the function returns the value, otherwise a reference
- * to the contained object.
+ * <p>
+ * Warning: This function does not respect the number of spatial dimensions and
+ * will simply apply the dimension map t=4,c=3,z=2,y=1,x=0.
  *
- * @param t The index in time (5th) dimension (slowest moving)
- * @param c The index in channel (4th) dimension
- * @param z The index in depth (3rd) dimension
- * @param y The index in row (2nd) dimension
- * @param x The index in column (1st) dimension (fastest moving)
+ * @param t the index in time (5th) dimension (slowest moving)
+ * @param c the index in channel (4th) dimension
+ * @param z the index in depth (3rd) dimension
+ * @param y the index in row (2nd) dimension
+ * @param x the index in column (1st) dimension (fastest moving)
  *
- * @return The value or reference to the object at the given array position.
+ * @return the value at the given array position.
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the blob has more than 5
- *         dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent
+ * @exception BlobException if the blob has more than five dimensions
  */
   public short get(int t, int c, int z, int y, int x)
-      throws ArrayIndexOutOfBoundsException {
+      throws ArrayIndexOutOfBoundsException, BlobException {
     switch (_shape.length)
     {
     case 1:
@@ -128,23 +130,20 @@ public class ShortBlob extends Blob {
       return _data[(((t * _shape[1] + c) * _shape[2] + z) * _shape[3] + y) *
                    _shape[4] + x];
     }
-    throw new ArrayIndexOutOfBoundsException(
+    throw new BlobException(
         _shape.length + "-D blob cannot be read using get(t, c, z, y, x)");
   }
 
 /**
  * Get the value at the specified position in the blob. The given array's
- * length must match the dimensionality of the Blob. For immutable types T
- * the function returns the value, otherwise a reference to the contained
- * object.
+ * length must match the dimensionality of this <code>Blob</code>.
  *
- * @param pos The position in the Blob
+ * @param pos the position to read
+ * @return the value at the given position in the blob.
  *
- * @return The value or reference to the object at the given array position.
- *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the length of the pos
- *         vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent or the length of the pos
+ *   vector does not match the number of blob dimensions.
  */
   public short get(int[] pos)
       throws ArrayIndexOutOfBoundsException {
@@ -160,22 +159,23 @@ public class ShortBlob extends Blob {
 /**
  * Set the value at the specified position in the blob. Extra dimensions
  * are ignored, i.e. in a 2-D blob only the given x- and y-indices are handled.
+ * <p>
+ * Warning: This function does not respect the number of spatial dimensions and
+ * will simply apply the dimension map t=4,c=3,z=2,y=1,x=0.
  *
- * @param t The index in time (5th) dimension (slowest moving)
- * @param c The index in channel (4th) dimension
- * @param z The index in depth (3rd) dimension
- * @param y The index in row (2nd) dimension
- * @param x The index in column (1st) dimension (fastest moving)
- * @param value The value to write. The value is not copied, changes of the
- *              original reference will also affect the reference in the array
- *              for mutable types!
+ * @param t the index in time (5th) dimension (slowest moving)
+ * @param c the index in channel (4th) dimension
+ * @param z the index in depth (3rd) dimension
+ * @param y the index in row (2nd) dimension
+ * @param x the index in column (1st) dimension (fastest moving)
+ * @param value the value to write
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the blob has more than 5
- *         dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent
+ * @exception BlobException if the blob has more than five dimensions
  */
   public void set(int t, int c, int z, int y, int x, short value)
-      throws ArrayIndexOutOfBoundsException {
+      throws ArrayIndexOutOfBoundsException, BlobException {
     switch (_shape.length)
     {
     case 1:
@@ -219,22 +219,20 @@ public class ShortBlob extends Blob {
             _shape[4] + x] = value;
       return;
     }
-    throw new ArrayIndexOutOfBoundsException(
-        _shape.length + "-D blob cannot be read using get(t, c, z, y, x)");
+    throw new BlobException(
+        _shape.length + "-D blob cannot be set using set(t, c, z, y, x, v)");
   }
 
 /**
  * Set the value at the specified position in the blob. The given array's
- * length must match the dimensionality of the Blob.
+ * length must match the dimensionality of this <code>Blob</code>.
  *
- * @param pos The position in the Blob
- * @param value The value to write. The value is not copied, changes of the
- *              original reference will also affect the reference in the array
- *              for mutable types!
+ * @param pos the position to write
+ * @param value the value to write
  *
- * @except ArrayIndexOutOfBoundsException is thrown if any of the given indices
- *         exceeds the corresponding Blob extent or the length of the pos
- *         vector does not match the number of Blob dimensions.
+ * @exception ArrayIndexOutOfBoundsException if any of the given
+ *   indices exceeds the corresponding blob extent or the length of the pos
+ *   vector does not match the number of blob dimensions.
  */
   public void set(int[] pos, short value)
       throws ArrayIndexOutOfBoundsException {
@@ -247,6 +245,19 @@ public class ShortBlob extends Blob {
     _data[idx] = value;
   }
 
+/**
+ * Rescale this blob so that it has the given element size in micrometers
+ * afterwards.
+ *
+ * @param targetElementSizeUm the new element size in micrometers
+ * @param interp how to interpolate during scaling
+ * @param pr if not <code>null</code>progress is reported to the given
+ *   <code>ProgressMonitor</code>
+ * @return A reference to <code>this</code> for chaining
+ *
+ * @exception InterruptedException if the user aborts the computation via the
+ *   <code>ProgressMonitor</code>
+ */
   public ShortBlob rescale(
       double[] targetElementSizeUm, InterpolationType interp,
       ProgressMonitor pr) throws InterruptedException {
@@ -446,15 +457,13 @@ public class ShortBlob extends Blob {
   }
 
 /**
- * Create an ImagePlus from this blob for Visualization in ImageJ.
+ * {@inheritDoc}
  *
- * If the Blob has less than 5 dimensions leading axes will be omitted in
- * order (t, c, z, y, x), e.g. if the Blob has 3 dimensions they will be
- * treated as (z, y, x).
+ * This implementation creates a short ImagePlus.
  *
- * @return The ImagePlus
+ * @return {@inheritDoc}
  *
- * @except BlobException is thrown if the Blob has more than 5 dimensions
+ * @exception BlobException {@inheritDoc}
  */
   public ImagePlus convertToImagePlus() throws BlobException {
 

@@ -68,39 +68,48 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
     if (progressMonitor().finished()) return;
     readyCancelButton().setEnabled(false);
     try {
-      new Thread()
-      {
-        @Override
-        public void run() {
-          try {
-            loadSegmentationToImagePlus();
-            if (Recorder.record) {
-              Recorder.setCommand(null);
-              String command =
-                  "call('de.unifreiburg.unet.DetectionJob." +
-                  "processHyperStack', " +
-                  "'modelFilename=" + model().file.getAbsolutePath() +
-                  ",weightsFilename=" + weightsFileName() +
-                  "," + model().getTilingParameterString() +
-                  ",gpuId=" + selectedGPUString() +
-                  "," + hostConfiguration().getMacroParameterString() +
-                  ",processFolder=" + processFolder() +
-                  ",average=" + (String)_averagingComboBox.getSelectedItem() +
-                  ",keepOriginal=" + String.valueOf(
-                      _keepOriginalCheckBox.isSelected()) +
-                  ",outputScores=" + String.valueOf(
-                      _outputScoresCheckBox.isSelected()) +
-                  ",outputSoftmaxScores=" + String.valueOf(
-                      _outputSoftmaxScoresCheckBox.isSelected()) + "');\n";
-              Recorder.recordString(command);
+      Thread finishThread = new Thread() {
+            @Override
+            public void run() {
+              try {
+                loadSegmentationToImagePlus();
+                if (Recorder.record) {
+                  Recorder.setCommand(null);
+                  String command =
+                      "call('de.unifreiburg.unet.DetectionJob." +
+                      "processHyperStack', " +
+                      "'modelFilename=" + model().file.getAbsolutePath() +
+                      ",weightsFilename=" + weightsFileName() +
+                      "," + model().getTilingParameterString() +
+                      ",gpuId=" + selectedGPUString() +
+                      "," + hostConfiguration().getMacroParameterString() +
+                      ",processFolder=" + processFolder() +
+                      ",average=" +
+                      (String)_averagingComboBox.getSelectedItem() +
+                      ",keepOriginal=" + String.valueOf(
+                          _keepOriginalCheckBox.isSelected()) +
+                      ",outputScores=" + String.valueOf(
+                          _outputScoresCheckBox.isSelected()) +
+                      ",outputSoftmaxScores=" + String.valueOf(
+                          _outputSoftmaxScoresCheckBox.isSelected()) + "');\n";
+                  Recorder.recordString(command);
+                }
+              }
+              catch (IOException e) {
+                showError("Could not load detection result", e);
+              }
+              finishJob();
             }
-          }
-          catch (IOException e) {
-            showError("Could not load detection result", e);
-          }
-          finishJob();
+          };
+      finishThread.start();
+      if (!isInteractive()) {
+        try {
+          finishThread.join();
         }
-      }.start();
+        catch (InterruptedException e) {
+          abort();
+        }
+      }
     }
     catch (IllegalThreadStateException e) {}
   }
@@ -120,7 +129,7 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
     for (int i = 0; i < parameterStrings.length; i++)
         parameters.put(parameterStrings[i].split("=")[0],
                        parameterStrings[i].split("=")[1]);
-    ModelDefinition model = new ModelDefinition();
+    ModelDefinition model = new ModelDefinition(job);
     model.load(new File(parameters.get("modelFilename")));
     job.setModel(model);
     job.setWeightsFileName(parameters.get("weightsFilename"));
@@ -146,6 +155,8 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
     job.setInteractive(false);
 
     job.start();
+    // Block until segmentation is finished
+    job.join();
   }
 
 };

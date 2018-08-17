@@ -53,9 +53,6 @@ public class DropoutLayer extends NetworkLayer {
   }
 
   @Override
-  public String layerTypeString() { return "DropoutLayer"; }
-
-  @Override
   public long memoryOther() {
     return _memOther;
   }

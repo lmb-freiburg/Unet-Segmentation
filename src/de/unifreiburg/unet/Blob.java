@@ -41,21 +41,43 @@ import java.util.Arrays;
  *
  * @author Thorsten Falk
  * @version 1.0
+ * @since 1.0
  */
 public abstract class Blob {
 
+  /**
+   * Interpolation type constants used in rescale operations
+   */
   public enum InterpolationType {
-      NEAREST, LINEAR;
+      /**
+       * Nearest Neighbor interpolation
+       */
+      NEAREST,
+      /**
+       * Linear Interpolation
+       */
+      LINEAR;
   }
 
+  /**
+   * The blob shape including both spatial and non-spatial dimensions
+   */
   protected int[] _shape;
+
+  /**
+   * The pixel/voxel size of this blob in micrometers
+   */
   protected double[] _elementSizeUm;
+
+  /**
+   * The stride between adjacent pixels/voxels for each dimension
+   */
   protected int[] _stride;
 
 /**
- * Construct a new uninitialized n-D blob with given shape.
+ * Creates a new uninitialized n-D blob with given shape.
  *
- * @param shape The shape of the n-D Blob
+ * @param shape The shape of the n-D blob
  * @param elementSizeUm For any spatial dimension this array must contain
  *   the actual element size in micrometers, for 1-D (e_x), for 2-D (e_y, e_x),
  *   for 3-D (e_z, e_y, e_x). The number of spatial dimensions of the blob
@@ -135,23 +157,16 @@ public abstract class Blob {
   public abstract Object data();
 
 /**
- * Create an ImagePlus from this blob for Visualization in ImageJ. Supported
- * types are:
- *   - boolean - Converted to 8-Bit ImagePlus with values 0, 255
- *   - byte    - as is
- *   - short   - as is
- *   - int     - Converted to 16-Bit ImagePlus without overflow check!
- *   - float   - as is
- *   - double  - Converted to 32-Bit ImagePlus
+ * Create an <code>ImagePlus</code> from this blob for visualization in ImageJ.
+ * <p>
+ *   Non-Spatial dimensions will be treated as first channel and secondly
+ *   time dimension, i.e. if your blob is 3-D and has two spatial dimensions,
+ *   the blob dimensions will be interpreted as (c, y, x)
  *
- * If the Blob has less than 5 dimensions leading axes will be omitted in
- * order (t, c, z, y, x), e.g. if the Blob has 3 dimensions they will be
- * treated as (z, y, x).
+ * @return A new <code>ImagePlus</code> object
  *
- * @return The ImagePlus
- *
- * @except BlobException is thrown if the Blob has more than 5 dimensions or
- *         the datatype of the blob is not supported.
+ * @exception BlobException if the Blob has more than 2 non-spatial dimensions
+ *            or the datatype of the blob is not supported.
  */
   public abstract ImagePlus convertToImagePlus() throws BlobException;
 
