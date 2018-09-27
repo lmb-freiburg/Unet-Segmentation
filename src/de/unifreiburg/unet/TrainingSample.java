@@ -252,13 +252,13 @@ public class TrainingSample
           _conversionModel.foregroundBackgroundRatio);
       writer.float64().setAttr(
           "/conversionParameters", "sigma1_um",
-          _conversionModel.sigma1Um);
+          _conversionModel.sigma1Px);
       writer.float64().setAttr(
           "/conversionParameters", "borderWeightFactor",
           _conversionModel.borderWeightFactor);
       writer.float64().setAttr(
-          "/conversionParameters", "borderWeightSigmaUm",
-          _conversionModel.borderWeightSigmaUm);
+          "/conversionParameters", "borderWeightSigmaPx",
+          _conversionModel.borderWeightSigmaPx);
       writer.int32().setAttr(
           "/conversionParameters", "normalizationType",
           _conversionModel.normalizationType);
@@ -600,8 +600,8 @@ public class TrainingSample
         _conversionModel.elementSizeUm().length &&
         model.foregroundBackgroundRatio ==
         _conversionModel.foregroundBackgroundRatio &&
-        model.sigma1Um == _conversionModel.sigma1Um &&
-        model.borderWeightSigmaUm == _conversionModel.borderWeightSigmaUm &&
+        model.sigma1Px == _conversionModel.sigma1Px &&
+        model.borderWeightSigmaPx == _conversionModel.borderWeightSigmaPx &&
         model.borderWeightFactor == _conversionModel.borderWeightFactor &&
         model.normalizationType == _conversionModel.normalizationType;
     for (int d = 0; res && d < _conversionModel.elementSizeUm().length; ++d)
@@ -1464,9 +1464,9 @@ public class TrainingSample
     }
 
     double foregroundBackgroundRatio = model.foregroundBackgroundRatio;
-    double sigma1Um = model.sigma1Um;
+    double sigma1Px = model.sigma1Px;
     double borderWeightFactor = model.borderWeightFactor;
-    double borderWeightSigmaUm = model.borderWeightSigmaUm;
+    double borderWeightSigmaPx = model.borderWeightSigmaPx;
     double[] elementSizeUm = model.elementSizeUm();
 
     int[] inst = (int[])instancelabels.labels.data();
@@ -1578,7 +1578,7 @@ public class TrainingSample
             throw new InterruptedException();
         FloatBlob d = DistanceTransform.getDistance(
             instances, i, DistanceTransform.Mode.DISTANCE_TO_FOREGROUND,
-            true, null);
+            false, null);
         for (int j = 0; j < D * H * W; j++) {
           float min1dist = min1Dist[j];
           float min2dist = Math.min(min2Dist[j], ((float[])d.data())[j]);
@@ -1602,10 +1602,10 @@ public class TrainingSample
           if (w[i] >= 0.0f) continue;
           float d1 = min1Dist[z * W * H + i];
           float d2 = min2Dist[z * W * H + i];
-          double wa = Math.exp(-(d1 * d1) / (2 * sigma1Um * sigma1Um));
+          double wa = Math.exp(-(d1 * d1) / (2 * sigma1Px * sigma1Px));
           double we = Math.exp(
               -(d1 + d2) * (d1 + d2) /
-              (2 * borderWeightSigmaUm * borderWeightSigmaUm));
+              (2 * borderWeightSigmaPx * borderWeightSigmaPx));
           extraWeights[z * H * W + i] += borderWeightFactor * we + va * wa;
         }
         if (pr != null && !pr.count(1)) throw new InterruptedException();
