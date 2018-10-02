@@ -124,11 +124,11 @@ public class ModelDefinition {
   private final JPanel _elementSizeUmPanel = new JPanel(
       new FlowLayout(FlowLayout.LEFT, 0, 0));
   private final JSpinner _elSizeXSpinner = new JSpinner(
-      new SpinnerNumberModel(0.5, 0.0001, 1000000.0, 0.01));
+      new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01));
   private final JSpinner _elSizeYSpinner = new JSpinner(
-      new SpinnerNumberModel(0.5, 0.0001, 1000000.0, 0.01));
+      new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01));
   private final JSpinner _elSizeZSpinner = new JSpinner(
-      new SpinnerNumberModel(0.5, 0.0001, 1000000.0, 0.01));
+      new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01));
 
   public ModelDefinition() {
     this(null);
@@ -173,8 +173,8 @@ public class ModelDefinition {
   public void setElementSizeUm(double[] elSize) {
     if (elSize == null || elSize.length < 2 || elSize.length > 3) return;
 
-    if (elSize.length != _nDims) {
-
+    // Model dimension is not set ==> Panel must be initialized
+    if (_nDims == -1) {
       _nDims = elSize.length;
       _elementSizeUmPanel.removeAll();
       _elementSizeUmPanel.add(new JLabel(" x: "));
@@ -187,14 +187,32 @@ public class ModelDefinition {
       }
     }
 
-    if (_nDims == 2) {
-      _elSizeXSpinner.setValue((double)elSize[1]);
-      _elSizeYSpinner.setValue((double)elSize[0]);
+    // Case 1: _nDims and given element size dimension match ==> update
+    if (elSize.length == _nDims) {
+      if (_nDims == 2) {
+        _elSizeXSpinner.setValue((double)elSize[1]);
+        _elSizeYSpinner.setValue((double)elSize[0]);
+      }
+      else {
+        _elSizeXSpinner.setValue((double)elSize[2]);
+        _elSizeYSpinner.setValue((double)elSize[1]);
+        _elSizeZSpinner.setValue((double)elSize[0]);
+      }
+      return;
     }
-    else {
+
+    // Case 2: _nDims == 2 & elSize.length = 3 ==> update spatial dimensions
+    if (elSize.length == 3 && _nDims == 2) {
       _elSizeXSpinner.setValue((double)elSize[2]);
       _elSizeYSpinner.setValue((double)elSize[1]);
-      _elSizeZSpinner.setValue((double)elSize[0]);
+      return;
+    }
+
+    // Case 3: _nDims == 3 & elSize.length = 2 ==> update spatial dimensions
+    if (elSize.length == 2 && _nDims == 3) {
+      _elSizeXSpinner.setValue((double)elSize[1]);
+      _elSizeYSpinner.setValue((double)elSize[0]);
+      return;
     }
   }
 

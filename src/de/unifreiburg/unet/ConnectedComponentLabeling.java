@@ -186,43 +186,8 @@ public class ConnectedComponentLabeling implements PlugIn {
       }
     }
 
-    Calibration cal = imp.getCalibration();
-    double factor = 1.0;
-    switch (cal.getUnit())
-    {
-    case "m":
-    case "meter":
-      factor = 1000000.0;
-      break;
-    case "cm":
-    case "centimeter":
-      factor = 10000.0;
-      break;
-    case "mm":
-    case "millimeter":
-      factor = 1000.0;
-      break;
-    case "nm":
-    case "nanometer":
-      factor = 0.0001;
-      break;
-    case "pm":
-    case "pikometer":
-      factor = 0.0000001;
-      break;
-    }
-
     int[] shape = new int[] { T, C, D, H, W };
-    double[] elSize = null;
-    if (D == 1) {
-      elSize = new double[] {
-          factor * cal.pixelHeight, factor * cal.pixelWidth };
-    }
-    else {
-      elSize = new double[] {
-          factor * cal.pixelDepth, factor * cal.pixelHeight,
-          factor * cal.pixelWidth };
-    }
+    double[] elSize = Tools.getElementSizeUm(imp);
     ConnectedComponents res = new ConnectedComponents();
     res.labels = new IntBlob(shape, elSize);
     int[] labels = (int[])res.labels.data();
@@ -252,7 +217,8 @@ public class ConnectedComponentLabeling implements PlugIn {
               if (ip.getf(x, y) == 0) continue;
               int val = labels[outIdx];
               for (int nbIdx = 0; nbIdx < dx.length; ++nbIdx) {
-                if (x + dx[nbIdx] < 0 || y + dy[nbIdx] < 0 ||
+                if (x + dx[nbIdx] < 0 || x + dx[nbIdx] >= W ||
+                    y + dy[nbIdx] < 0 || y + dy[nbIdx] >= H ||
                     z + dz[nbIdx] < 0) continue;
                 int nbVal = labels[
                     outIdx + (dz[nbIdx] * H + dy[nbIdx]) * W + dx[nbIdx]];

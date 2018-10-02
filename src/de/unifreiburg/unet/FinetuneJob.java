@@ -330,11 +330,11 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       }
       @Override
       public void intervalAdded(ListDataEvent e) {
-        if (model() != null) model().updateMemoryConsumptionDisplay();        
+        if (model() != null) model().updateMemoryConsumptionDisplay();
       }
       @Override
       public void intervalRemoved(ListDataEvent e) {
-        if (model() != null) model().updateMemoryConsumptionDisplay();        
+        if (model() != null) model().updateMemoryConsumptionDisplay();
       }
     });
     trainScroller.setMinimumSize(new Dimension(100, 50));
@@ -350,11 +350,11 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
       }
       @Override
       public void intervalAdded(ListDataEvent e) {
-        if (model() != null) model().updateMemoryConsumptionDisplay();        
+        if (model() != null) model().updateMemoryConsumptionDisplay();
       }
       @Override
       public void intervalRemoved(ListDataEvent e) {
-        if (model() != null) model().updateMemoryConsumptionDisplay();        
+        if (model() != null) model().updateMemoryConsumptionDisplay();
       }
     });
     validScroller.setMinimumSize(new Dimension(100, 50));
@@ -1910,7 +1910,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           throw new InterruptedException();
         }
 
-        if (!labelsAreClasses) {
+        if (labelsAreClasses) {
           if (imagesContainRoiAnnotations) {
             _finetunedModel.classNames = new String[classNames.size()];
             for (int i = 0; i < classNames.size(); ++i)

@@ -177,7 +177,8 @@ public abstract class Blob {
  * <p>
  *   Non-Spatial dimensions will be treated as first channel and secondly
  *   time dimension, i.e. if your blob is 3-D and has two spatial dimensions,
- *   the blob dimensions will be interpreted as (c, y, x)
+ *   the blob dimensions will be interpreted as (c, y, x). 5D blobs will be
+ *   always interpreted as (t, c, z, y, x).
  *
  * @return A new <code>ImagePlus</code> object
  *
@@ -196,6 +197,20 @@ public abstract class Blob {
     for (int d = 0; d < _shape.length - 1; ++d)
         out += _shape[d] + ",";
     out += _shape[_shape.length - 1] + ")";
+    return out;
+  }
+
+/**
+ * Get a string representation of this <code>Blob</code>'s element size vector
+ *
+ * @return The element size in micrometers of this <code>Blob</code> as
+ *   <code>String</code>
+ */
+  protected String elementSizeUmString() {
+    String out = "(";
+    for (int d = 0; d < _elementSizeUm.length - 1; ++d)
+        out += _elementSizeUm[d] + ",";
+    out += _elementSizeUm[_elementSizeUm.length - 1] + ")";
     return out;
   }
 

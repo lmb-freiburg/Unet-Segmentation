@@ -312,7 +312,7 @@ public class IntBlob extends Blob {
 /**
  * {@inheritDoc}
  *
- * This implementation creates a 32-Bit ImagePlus.
+ * This implementation creates a 16-Bit ImagePlus.
  *
  * @return {@inheritDoc}
  *
@@ -325,13 +325,23 @@ public class IntBlob extends Blob {
         throw new BlobException(
             _shape.length + "-D blob cannot be converted to ImagePlus");
 
-    int W = _shape[_shape.length - 1];
-    int H = (_elementSizeUm.length > 1) ? _shape[_shape.length - 2] : 1;
-    int D = (_elementSizeUm.length > 2) ? _shape[_shape.length - 3] : 1;
-    int C = (_shape.length > _elementSizeUm.length) ?
-        _shape[_shape.length - _elementSizeUm.length - 1] : 1;
-    int T = (_shape.length > _elementSizeUm.length + 1) ?
-        _shape[_shape.length - _elementSizeUm.length - 2] : 1;
+    int W, H, D, C, T;
+    if (_shape.length == 5) {
+      W = _shape[4];
+      H = _shape[3];
+      D = _shape[2];
+      C = _shape[1];
+      T = _shape[0];
+    }
+    else {
+      W = _shape[_shape.length - 1];
+      H = (_elementSizeUm.length > 1) ? _shape[_shape.length - 2] : 1;
+      D = (_elementSizeUm.length > 2) ? _shape[_shape.length - 3] : 1;
+      C = (_shape.length > _elementSizeUm.length) ?
+          _shape[_shape.length - _elementSizeUm.length - 1] : 1;
+      T = (_shape.length > _elementSizeUm.length + 1) ?
+          _shape[_shape.length - _elementSizeUm.length - 2] : 1;
+    }
 
     ImagePlus impOut = IJ.createHyperStack("", W, H, C, D, T, 16);
 

@@ -277,11 +277,11 @@ public class Tools {
     break;
     case "nm":
     case "nanometer":
-      factor = 0.0001;
+      factor = 0.001;
     break;
     case "pm":
     case "pikometer":
-      factor = 0.0000001;
+      factor = 0.000001;
     break;
     }
     if (imp.getNSlices() == 1)

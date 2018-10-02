@@ -519,7 +519,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     String outMsg = new String();
     String errorMsg = new String();
     boolean initialized = false;
-    boolean firstLine = true;
+    boolean firstLine = (sshSession() == null) ? false : true;
     try {
       while (true) {
         // Check for ready() to avoid thread blocking, then read
