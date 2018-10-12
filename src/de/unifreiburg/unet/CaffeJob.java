@@ -149,7 +149,8 @@ public abstract class CaffeJob extends Job {
 
   @Override
   public String hostname() {
-    return _hostConfiguration.hostname();
+    return _hostConfiguration.useRemoteHost() ?
+        _hostConfiguration.hostname() : "localhost";
   }
 
   @Override
