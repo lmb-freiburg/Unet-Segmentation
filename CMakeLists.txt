@@ -57,6 +57,7 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/MyUserInfo.java
   src/de/unifreiburg/unet/ProgressMonitor.java
   src/de/unifreiburg/unet/ModelDefinition.java
+  src/de/unifreiburg/unet/ModelDefinitionEditor.java
   src/de/unifreiburg/unet/ProcessResult.java
   src/de/unifreiburg/unet/ImagePlusListView.java
   src/de/unifreiburg/unet/NotImplementedException.java
@@ -89,6 +90,7 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/SoftmaxLayer.java
   src/de/unifreiburg/unet/SoftmaxWithLossLayer.java
   src/de/unifreiburg/unet/SplitLayer.java
+  src/de/unifreiburg/unet/URLOpener.java
   caffe/Caffe.java
   caffe/caffe.proto COPYING.txt plugins.config
   test/TestNetworkAnalyzer.java

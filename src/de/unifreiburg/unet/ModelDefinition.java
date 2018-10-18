@@ -84,7 +84,7 @@ public class ModelDefinition {
   public String solverPrototxt = null;
   public String modelPrototxt = null;
   public String padding = null;
-  public int normalizationType = 0;
+  public int normalizationType = 1;
   public int[] downsampleFactor = null;
   public int[] padInput = null;
   public int[] padOutput = null;
@@ -151,6 +151,12 @@ public class ModelDefinition {
     _elementSizeUmPanel.setBorder(
         BorderFactory.createEmptyBorder(0, 0, 0, 0));
     ((FlowLayout)_elementSizeUmPanel.getLayout()).setAlignOnBaseline(true);
+    ((JSpinner.NumberEditor)_elSizeXSpinner.getEditor())
+      .getFormat().applyPattern("######0.0######");
+    ((JSpinner.NumberEditor)_elSizeYSpinner.getEditor())
+      .getFormat().applyPattern("######0.0######");
+    ((JSpinner.NumberEditor)_elSizeZSpinner.getEditor())
+      .getFormat().applyPattern("######0.0######");
   }
 
   private void _initGUIElements() {
@@ -394,6 +400,23 @@ public class ModelDefinition {
 
   public JPanel elementSizeUmPanel() {
     return _elementSizeUmPanel;
+  }
+
+  public int[] getMinimumOutputShape() {
+    if (_minOutTileShape == null || _minOutTileShape.length != _nDims) {
+      // Compute minimum output tile shape
+      _minOutTileShape = new int[_nDims];
+      for (int d = 0; d < _nDims; d++) {
+        _minOutTileShape[d] = padOutput[d];
+        while (_minOutTileShape[d] < 0)
+            _minOutTileShape[d] += downsampleFactor[d];
+      }
+    }
+    return _minOutTileShape;
+  }
+
+  public int[] getMinimumInputShape() {
+    return getInputTileShape(getMinimumOutputShape());
   }
 
   public int[] getOutputTileShape(int[] inputTileShape) {
