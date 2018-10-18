@@ -33,8 +33,10 @@ package de.unifreiburg.unet;
 import ij.IJ;
 import ij.plugin.PlugIn;
 import ij.WindowManager;
+import ij.Prefs;
 
 import java.awt.Dimension;
+import java.awt.Insets;
 import java.awt.BorderLayout;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
@@ -53,6 +55,10 @@ import javax.swing.JTextField;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.UIManager;
+import javax.swing.Icon;
+import javax.swing.JFileChooser;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import java.io.File;
 import java.io.IOException;
@@ -62,123 +68,246 @@ import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
 public class ModelDefinitionEditor implements PlugIn {
 
   private JDialog _parametersDialog = new JDialog(
-    WindowManager.getCurrentWindow(), "U-Net Model Editor", true);
+      WindowManager.getCurrentWindow(), "U-Net Model Editor", true);
 
-  private final JTextField _id = new JTextField("U-Net-2D-4-64");
-  private final JTextField _name = new JTextField("U-Net (2D-4-64)");
+  private final JTextField _id = new JTextField(
+      Prefs.get("unet.newModel.id", "U-Net-2D-4-64"));
+  private final JTextField _name = new JTextField(
+      Prefs.get("unet.newModel.name", "U-Net (2D-4-64)"));
   private final JTextField _description = new JTextField(
-    "2D U-Net with 4 resolution levels and 64 base channels");
-  private final JTextField _filename =
-    new JTextField("u-net-4-64.modeldef.h5");
+      Prefs.get("unet.newModel.description",
+                "2D U-Net with 4 resolution levels and 64 base channels"));
+  private final JTextField _filename = new JTextField(
+      Prefs.get("unet.newModel.filename", "u-net-4-64.modeldef.h5"));
   private final JSpinner _dimension =
-    new JSpinner(new SpinnerNumberModel(2, 2, 3, 1));
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.dimension", 2), 2, 3, 1));
   private final JSpinner[] _levels = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(4, 0, Integer.MAX_VALUE, 1)),
-    new JSpinner(new SpinnerNumberModel(4, 0, Integer.MAX_VALUE, 1)),
-    new JSpinner(new SpinnerNumberModel(3, 0, Integer.MAX_VALUE, 1)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.levelsX", 4), 0,
+              Integer.MAX_VALUE, 1)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.levelsY", 4), 0,
+              Integer.MAX_VALUE, 1)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.levelsZ", 3), 0,
+              Integer.MAX_VALUE, 1))
+  };
   private final JSpinner _nChannels =
-    new JSpinner(new SpinnerNumberModel(64, 1, Integer.MAX_VALUE, 1));
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.nChannels", 64), 1,
+              Integer.MAX_VALUE, 1));
   private final JSpinner[] _elementSizeUm = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(0.5, 0.0000001, 1000000.0, 0.01)),
-    new JSpinner(new SpinnerNumberModel(0.5, 0.0000001, 1000000.0, 0.01)),
-    new JSpinner(new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01))
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.elSizeX", 0.5),
+              0.0000001, 1000000.0, 0.01)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.elSizeY", 0.5),
+              0.0000001, 1000000.0, 0.01)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.elSizeZ", 1.0),
+              0.0000001, 1000000.0, 0.01))
   };
   private final JSpinner _borderWeightFactor = new JSpinner(
-    new SpinnerNumberModel(50.0, 0.0, 1000000.0, 0.1));
+      new SpinnerNumberModel(
+          (double)Prefs.get("unet.newModel.borderWeightFactor", 50.0),
+          0.0, 1000000.0, 0.1));
   private final JSpinner _borderWeightSigmaPx = new JSpinner(
-    new SpinnerNumberModel(6.0, 0.0, 1000.0, 0.1));
+      new SpinnerNumberModel(
+          (double)Prefs.get("unet.newModel.borderWeightSigmaPx", 6.0),
+          0.0, 1000.0, 0.1));
   private final JSpinner _foregroundBackgroundRatio = new JSpinner(
-    new SpinnerNumberModel(0.1, 0.0, 1000000.0, 0.01));
+      new SpinnerNumberModel(
+          (double)Prefs.get("unet.newModel.foregroundBackgroundRatio", 0.1),
+          0.0, 1000000.0, 0.01));
   private final JSpinner _borderSmoothnessSigmaPx = new JSpinner(
-    new SpinnerNumberModel(10.0, 0.0, 1000.0, 0.1));
+      new SpinnerNumberModel(
+          (double)Prefs.get("unet.newModel.borderSmoothnessSigmaPx", 10.0),
+          0.0, 1000.0, 0.1));
   private final JSpinner[] _minAngles = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(0.0, -360.0, 0.0, 1.0)),
-    new JSpinner(new SpinnerNumberModel(0.0, -360.0, 0.0, 1.0)),
-    new JSpinner(new SpinnerNumberModel(0.0, -360.0, 0.0, 1.0)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.minAnglesPhi", 0.0), -360.0,
+              (double)Prefs.get("unet.newModel.maxAnglesPhi", 360.0), 1.0)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.minAnglesTheta", 0.0), -360.0,
+              (double)Prefs.get("unet.newModel.maxAnglesTheta", 0.0), 1.0)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.minAnglesPsi", 0.0), -360.0,
+              (double)Prefs.get("unet.newModel.maxAnglesPsi", 0.0), 1.0)) };
   private final JSpinner[] _maxAngles = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(360.0, 0.0, 360.0, 1.0)),
-    new JSpinner(new SpinnerNumberModel(0.0, 0.0, 360.0, 1.0)),
-    new JSpinner(new SpinnerNumberModel(0.0, 0.0, 360.0, 1.0)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.maxAnglesPhi", 360.0),
+              (double)Prefs.get("unet.newModel.minAnglesPhi", 0.0),
+              360.0, 1.0)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.maxAnglesTheta", 0.0),
+              (double)Prefs.get("unet.newModel.minAnglesTheta", 0.0),
+              360.0, 1.0)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.maxAnglesPsi", 0.0),
+              (double)Prefs.get("unet.newModel.minAnglesPsi", 0.0),
+              360.0, 1.0)) };
   private final JCheckBox _mirroring = new JCheckBox();
   private final JSpinner[] _deformationGrid = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(150, 1, Integer.MAX_VALUE, 1)),
-    new JSpinner(new SpinnerNumberModel(150, 1, Integer.MAX_VALUE, 1)),
-    new JSpinner(new SpinnerNumberModel(150, 1, Integer.MAX_VALUE, 1)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.deformationGridX", 150),
+              1, Integer.MAX_VALUE, 1)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.deformationGridY", 150),
+              1, Integer.MAX_VALUE, 1)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.deformationGridZ", 150),
+              1, Integer.MAX_VALUE, 1))
+  };
   private final JSpinner[] _deformationMagnitude = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(10, 0, Integer.MAX_VALUE, 1)),
-    new JSpinner(new SpinnerNumberModel(10, 0, Integer.MAX_VALUE, 1)),
-    new JSpinner(new SpinnerNumberModel(10, 0, Integer.MAX_VALUE, 1)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.deformationMagnitudeX", 10),
+              0, Integer.MAX_VALUE, 1)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.deformationMagnitudeY", 10),
+              0, Integer.MAX_VALUE, 1)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet.newModel.deformationMagnitudeZ", 10),
+              0, Integer.MAX_VALUE, 1)),
+  };
   private final JSpinner[] _minValueRange = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(-0.05, -1.0, 0.05, 0.01)),
-    new JSpinner(new SpinnerNumberModel(0.05, -0.05, 1.0, 0.01)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.minValueRangeStart", -0.05),
+              -1.0, (double)Prefs.get("unet.newModel.minValueRangeEnd", 0.05),
+              0.01)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.minValueRangeEnd", 0.05),
+              (double)Prefs.get("unet.newModel.minValueRangeStart", -0.05),
+              (double)Prefs.get("unet.newModel.maxValueRangeStart", 0.95),
+              0.01))
+  };
   private final JSpinner[] _maxValueRange = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(0.95, 0.05, 1.05, 0.01)),
-    new JSpinner(new SpinnerNumberModel(1.05, 0.95, 2.0, 0.01)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.maxValueRangeStart", 0.95),
+              (double)Prefs.get("unet.newModel.minValueRangeEnd", 0.05),
+              (double)Prefs.get("unet.newModel.maxValueRangeEnd", 1.05), 0.01)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.maxValueRangeEnd", 1.05),
+              (double)Prefs.get("unet.newModel.maxValueRangeStart", 0.95),
+              2.0, 0.01))
+  };
   private final JSpinner[] _slopeRange = new JSpinner[] {
-    new JSpinner(new SpinnerNumberModel(0.8, 0.1, 1.2, 0.01)),
-    new JSpinner(new SpinnerNumberModel(1.2, 0.8, 10.0, 0.01)) };
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.slopeStart", 0.8), 0.1,
+              (double)Prefs.get("unet.newModel.slopeEnd", 1.2), 0.01)),
+      new JSpinner(
+          new SpinnerNumberModel(
+              (double)Prefs.get("unet.newModel.slopeEnd", 1.2),
+              (double)Prefs.get("unet.newModel.slopeStart", 0.8), 10.0, 0.01))
+  };
 
   public ModelDefinitionEditor() {
 
     // General information
-    JLabel idLabel = new JLabel("Network ID:");
-    _id.setToolTipText("This ID is used as prefix for model-related " +
-        "files, avoid whitespace and special characters.");
-    JLabel nameLabel = new JLabel("Network Name:");
-    _name.setToolTipText("This name is shown in the Model selection combo " +
-        "boxes.");
     JLabel fileLabel = new JLabel("Filename:");
     _filename.setToolTipText("Output file to save the model to. We " +
-    "recommend to use the composite extension .modeldef.h5");
+                             "recommend to use the composite extension .modeldef.h5");
+    JButton fileChooseButton =
+        (UIManager.get("FileView.directoryIcon") instanceof Icon) ? new JButton(
+            (Icon)UIManager.get("FileView.directoryIcon")) : new JButton("...");
+    int marginTop = (int) Math.ceil(
+        (fileChooseButton.getPreferredSize().getHeight() -
+         _filename.getPreferredSize().getHeight()) / 2.0);
+    int marginBottom = (int) Math.floor(
+        (fileChooseButton.getPreferredSize().getHeight() -
+         _filename.getPreferredSize().getHeight()) / 2.0);
+    Insets insets = fileChooseButton.getMargin();
+    insets.top -= marginTop;
+    insets.left = 1;
+    insets.bottom -= marginBottom;
+    insets.right = 1;
+    fileChooseButton.setMargin(insets);
+    fileChooseButton.setToolTipText("Select file from filesystem");
+    JLabel idLabel = new JLabel("Network ID:");
+    _id.setToolTipText("This ID is used as prefix for model-related " +
+                       "files, avoid whitespace and special characters.");
+    JLabel nameLabel = new JLabel("Network Name:");
+    _name.setToolTipText("This name is shown in the Model selection combo " +
+                         "boxes.");
     JLabel descriptionLabel = new JLabel("Description:");
     _description.setToolTipText(
-      "This description is not actually used, but is stored to the model " +
-      "for more detailed information on the experiment.");
+        "This description is not actually used, but is stored to the model " +
+        "for more detailed information on the experiment.");
     JPanel generalInfoPanel = new JPanel();
     GroupLayout generalInfoPanelLayout = new GroupLayout(generalInfoPanel);
     generalInfoPanel.setLayout(generalInfoPanelLayout);
     generalInfoPanelLayout.setAutoCreateGaps(true);
     generalInfoPanelLayout.setAutoCreateContainerGaps(true);
     generalInfoPanel.setBorder(
-      BorderFactory.createTitledBorder("General"));
+        BorderFactory.createTitledBorder("General"));
     generalInfoPanelLayout.setHorizontalGroup(
-      generalInfoPanelLayout.createSequentialGroup()
-      .addGroup(
-        generalInfoPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.TRAILING)
-        .addComponent(fileLabel).addComponent(idLabel)
-        .addComponent(nameLabel).addComponent(descriptionLabel)
-      )
-      .addGroup(
-        generalInfoPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.LEADING)
-        .addComponent(_filename).addComponent(_id).addComponent(_name)
-        .addComponent(_description)
-      )
-    );
+        generalInfoPanelLayout.createSequentialGroup()
+        .addGroup(
+            generalInfoPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.TRAILING)
+            .addComponent(fileLabel).addComponent(idLabel)
+            .addComponent(nameLabel).addComponent(descriptionLabel)
+                  )
+        .addGroup(
+            generalInfoPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.LEADING)
+            .addGroup(
+                generalInfoPanelLayout.createSequentialGroup()
+                .addComponent(_filename).addComponent(fileChooseButton)
+                      )
+            .addComponent(_id).addComponent(_name)
+            .addComponent(_description)
+                  )
+                                              );
     generalInfoPanelLayout.setVerticalGroup(
-      generalInfoPanelLayout.createSequentialGroup()
-      .addGroup(
-        generalInfoPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(fileLabel).addComponent(_filename)
-      )
-      .addGroup(
-        generalInfoPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(idLabel).addComponent(_id)
-      )
-      .addGroup(
-        generalInfoPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(nameLabel).addComponent(_name)
-      )
-      .addGroup(
-        generalInfoPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(descriptionLabel).addComponent(_description)
-      )
-    );
+        generalInfoPanelLayout.createSequentialGroup()
+        .addGroup(
+            generalInfoPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(fileLabel).addComponent(_filename)
+            .addComponent(fileChooseButton)
+                  )
+        .addGroup(
+            generalInfoPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(idLabel).addComponent(_id)
+                  )
+        .addGroup(
+            generalInfoPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(nameLabel).addComponent(_name)
+                  )
+        .addGroup(
+            generalInfoPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(descriptionLabel).addComponent(_description)
+                  )
+                                            );
 
     // Architecture (goes to prototxt)
     JLabel dimensionLabel = new JLabel("Dimensionality:");
@@ -188,353 +317,361 @@ public class ModelDefinitionEditor implements PlugIn {
     _levels[1].setToolTipText("Number of sub-sampling steps in y-direction");
     _levels[2].setToolTipText("Number of sub-sampling steps in z-direction");
     JLabel[] levelDimLabels = new JLabel[] {
-      new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
+        new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
     JLabel nChannelsLabel = new JLabel("Base channels:");
-    _nChannels.setToolTipText("The number of channels at original " +
-      "resolution. With each sub-sampling step the number of channels " +
-      "is doubled.");
+    _nChannels.setToolTipText(
+        "The number of channels at original " +
+        "resolution. With each sub-sampling step the number of channels " +
+        "is doubled.");
     JPanel architecturePanel = new JPanel();
     GroupLayout architecturePanelLayout = new GroupLayout(architecturePanel);
     architecturePanel.setLayout(architecturePanelLayout);
     architecturePanelLayout.setAutoCreateGaps(true);
     architecturePanelLayout.setAutoCreateContainerGaps(true);
     architecturePanel.setBorder(
-      BorderFactory.createTitledBorder("Architecture"));
+        BorderFactory.createTitledBorder("Architecture"));
     architecturePanelLayout.setHorizontalGroup(
-      architecturePanelLayout.createSequentialGroup()
-      .addGroup(
-        architecturePanelLayout.createParallelGroup(
-          GroupLayout.Alignment.TRAILING)
-        .addComponent(dimensionLabel).addComponent(levelsLabel)
-        .addComponent(nChannelsLabel)
-      )
-      .addGroup(
-        architecturePanelLayout.createParallelGroup(
-          GroupLayout.Alignment.LEADING)
-        .addComponent(_dimension)
+        architecturePanelLayout.createSequentialGroup()
         .addGroup(
-          architecturePanelLayout.createSequentialGroup()
-          .addComponent(levelDimLabels[0]).addComponent(_levels[0])
-          .addComponent(levelDimLabels[1]).addComponent(_levels[1])
-          .addComponent(levelDimLabels[2]).addComponent(_levels[2])
-        )
-        .addComponent(_nChannels)
-      )
-    );
+            architecturePanelLayout.createParallelGroup(
+                GroupLayout.Alignment.TRAILING)
+            .addComponent(dimensionLabel).addComponent(levelsLabel)
+            .addComponent(nChannelsLabel)
+                  )
+        .addGroup(
+            architecturePanelLayout.createParallelGroup(
+                GroupLayout.Alignment.LEADING)
+            .addComponent(_dimension)
+            .addGroup(
+                architecturePanelLayout.createSequentialGroup()
+                .addComponent(levelDimLabels[0]).addComponent(_levels[0])
+                .addComponent(levelDimLabels[1]).addComponent(_levels[1])
+                .addComponent(levelDimLabels[2]).addComponent(_levels[2])
+                      )
+            .addComponent(_nChannels)
+                  )
+                                               );
     architecturePanelLayout.setVerticalGroup(
-      architecturePanelLayout.createSequentialGroup()
-      .addGroup(
-        architecturePanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(dimensionLabel).addComponent(_dimension)
-      )
-      .addGroup(
-        architecturePanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(levelsLabel)
-        .addComponent(levelDimLabels[0]).addComponent(_levels[0])
-        .addComponent(levelDimLabels[1]).addComponent(_levels[1])
-        .addComponent(levelDimLabels[2]).addComponent(_levels[2])
-      )
-      .addGroup(
-        architecturePanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(nChannelsLabel).addComponent(_nChannels)
-      )
-    );
+        architecturePanelLayout.createSequentialGroup()
+        .addGroup(
+            architecturePanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(dimensionLabel).addComponent(_dimension)
+                  )
+        .addGroup(
+            architecturePanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(levelsLabel)
+            .addComponent(levelDimLabels[0]).addComponent(_levels[0])
+            .addComponent(levelDimLabels[1]).addComponent(_levels[1])
+            .addComponent(levelDimLabels[2]).addComponent(_levels[2])
+                  )
+        .addGroup(
+            architecturePanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(nChannelsLabel).addComponent(_nChannels)
+                  )
+                                             );
 
     // Data pre-processing (goes to attributes)
     JLabel elSizeLabel = new JLabel("Element Size [\u00b5m]:");
     JLabel[] elSizeDimLabels = new JLabel[] {
-      new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
+        new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
     for (int d = 0; d < 3; ++d)
-      ((JSpinner.NumberEditor)_elementSizeUm[d].getEditor())
-        .getFormat().applyPattern("######0.0######");
+        ((JSpinner.NumberEditor)_elementSizeUm[d].getEditor())
+            .getFormat().applyPattern("######0.0######");
     _elementSizeUm[0].setToolTipText(
-      "Resize input images to given pixel width");
+        "Resize input images to given pixel width");
     _elementSizeUm[1].setToolTipText(
-      "Resize input images to given pixel height");
+        "Resize input images to given pixel height");
     _elementSizeUm[2].setToolTipText(
-      "Resize input images to given voxel depth");
+        "Resize input images to given voxel depth");
     JLabel borderWeightFactorLabel = new JLabel("Ridge weight:");
     ((JSpinner.NumberEditor)_borderWeightFactor.getEditor())
-      .getFormat().applyPattern("######0.0######");
+        .getFormat().applyPattern("######0.0######");
     _borderWeightFactor.setToolTipText(
-      "Loss weight of artificially introduces instance separation ridges.");
+        "Loss weight of artificially introduces instance separation ridges.");
     JLabel borderWeightSigmaPxLabel = new JLabel("Ridge width sigma [px]:");
     ((JSpinner.NumberEditor)_borderWeightSigmaPx.getEditor())
-      .getFormat().applyPattern("######0.0######");
+        .getFormat().applyPattern("######0.0######");
     _borderWeightSigmaPx.setToolTipText(
-      "The half-width of the Gaussian ridge weight function.");
+        "The half-width of the Gaussian ridge weight function.");
     JLabel foregroundBackgroundRatioLabel =
-      new JLabel("Foreground/Background ratio:");
+        new JLabel("Foreground/Background ratio:");
     ((JSpinner.NumberEditor)_foregroundBackgroundRatio.getEditor())
-      .getFormat().applyPattern("######0.0######");
+        .getFormat().applyPattern("######0.0######");
     _foregroundBackgroundRatio.setToolTipText(
-      "Loss weight for background pixels. Foreground pixel weight is 1");
+        "Loss weight for background pixels. Foreground pixel weight is 1");
     JLabel borderSmoothnessSigmaPxLabel =
-      new JLabel("Boundary smoothness sigma [px]:");
+        new JLabel("Boundary smoothness sigma [px]:");
     ((JSpinner.NumberEditor)_borderSmoothnessSigmaPx.getEditor())
-      .getFormat().applyPattern("######0.0######");
+        .getFormat().applyPattern("######0.0######");
     _borderSmoothnessSigmaPx.setToolTipText(
-      "The half-width of the Gaussian transition between foreground and " +
-      "background");
+        "The half-width of the Gaussian transition between foreground and " +
+        "background");
     JPanel preprocessingPanel = new JPanel();
     GroupLayout preprocessingPanelLayout = new GroupLayout(preprocessingPanel);
     preprocessingPanel.setLayout(preprocessingPanelLayout);
     preprocessingPanelLayout.setAutoCreateGaps(true);
     preprocessingPanelLayout.setAutoCreateContainerGaps(true);
     preprocessingPanel.setBorder(
-      BorderFactory.createTitledBorder("Pre-Processing"));
+        BorderFactory.createTitledBorder("Pre-Processing"));
     preprocessingPanelLayout.setHorizontalGroup(
-      preprocessingPanelLayout.createSequentialGroup()
-      .addGroup(
-        preprocessingPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.TRAILING)
-        .addComponent(elSizeLabel).addComponent(borderWeightFactorLabel)
-        .addComponent(borderWeightSigmaPxLabel)
-        .addComponent(foregroundBackgroundRatioLabel)
-        .addComponent(borderSmoothnessSigmaPxLabel)
-      )
-      .addGroup(
-        preprocessingPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.LEADING)
+        preprocessingPanelLayout.createSequentialGroup()
         .addGroup(
-          preprocessingPanelLayout.createSequentialGroup()
-          .addComponent(elSizeDimLabels[0]).addComponent(_elementSizeUm[0])
-          .addComponent(elSizeDimLabels[1]).addComponent(_elementSizeUm[1])
-          .addComponent(elSizeDimLabels[2]).addComponent(_elementSizeUm[2])
-        )
-        .addComponent(_borderWeightFactor).addComponent(_borderWeightSigmaPx)
-        .addComponent(_foregroundBackgroundRatio)
-        .addComponent(_borderSmoothnessSigmaPx)
-      )
-    );
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.TRAILING)
+            .addComponent(elSizeLabel).addComponent(borderWeightFactorLabel)
+            .addComponent(borderWeightSigmaPxLabel)
+            .addComponent(foregroundBackgroundRatioLabel)
+            .addComponent(borderSmoothnessSigmaPxLabel)
+                  )
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.LEADING)
+            .addGroup(
+                preprocessingPanelLayout.createSequentialGroup()
+                .addComponent(elSizeDimLabels[0])
+                .addComponent(_elementSizeUm[0])
+                .addComponent(elSizeDimLabels[1])
+                .addComponent(_elementSizeUm[1])
+                .addComponent(elSizeDimLabels[2])
+                .addComponent(_elementSizeUm[2])
+                      )
+            .addComponent(_borderWeightFactor)
+            .addComponent(_borderWeightSigmaPx)
+            .addComponent(_foregroundBackgroundRatio)
+            .addComponent(_borderSmoothnessSigmaPx)
+                  )
+                                                );
     preprocessingPanelLayout.setVerticalGroup(
-      preprocessingPanelLayout.createSequentialGroup()
-      .addGroup(
-        preprocessingPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(elSizeLabel)
-        .addComponent(elSizeDimLabels[0]).addComponent(_elementSizeUm[0])
-        .addComponent(elSizeDimLabels[1]).addComponent(_elementSizeUm[1])
-        .addComponent(elSizeDimLabels[2]).addComponent(_elementSizeUm[2])
-      )
-      .addGroup(
-        preprocessingPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(borderWeightFactorLabel)
-        .addComponent(_borderWeightFactor)
-      )
-      .addGroup(
-        preprocessingPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(borderWeightSigmaPxLabel)
-        .addComponent(_borderWeightSigmaPx)
-      )
-      .addGroup(
-        preprocessingPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(foregroundBackgroundRatioLabel)
-        .addComponent(_foregroundBackgroundRatio)
-      )
-      .addGroup(
-        preprocessingPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(borderSmoothnessSigmaPxLabel)
-        .addComponent(_borderSmoothnessSigmaPx)
-      )
-    );
+        preprocessingPanelLayout.createSequentialGroup()
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(elSizeLabel)
+            .addComponent(elSizeDimLabels[0]).addComponent(_elementSizeUm[0])
+            .addComponent(elSizeDimLabels[1]).addComponent(_elementSizeUm[1])
+            .addComponent(elSizeDimLabels[2]).addComponent(_elementSizeUm[2])
+                  )
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(borderWeightFactorLabel)
+            .addComponent(_borderWeightFactor)
+                  )
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(borderWeightSigmaPxLabel)
+            .addComponent(_borderWeightSigmaPx)
+                  )
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(foregroundBackgroundRatioLabel)
+            .addComponent(_foregroundBackgroundRatio)
+                  )
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(borderSmoothnessSigmaPxLabel)
+            .addComponent(_borderSmoothnessSigmaPx)
+                  )
+                                              );
 
     // Augmentation (goes to prototxt)
     JLabel rotationLabel = new JLabel("Rotation:");
     for (int d = 0; d < 3; ++d) {
       ((JSpinner.NumberEditor)_minAngles[d].getEditor())
-        .getFormat().applyPattern("######0.0######");
+          .getFormat().applyPattern("######0.0######");
       ((JSpinner.NumberEditor)_maxAngles[d].getEditor())
-        .getFormat().applyPattern("######0.0######");
+          .getFormat().applyPattern("######0.0######");
     }
     _minAngles[0].setToolTipText(
-      "The minimum rotation-angle around the z-axis");
+        "The minimum rotation-angle around the z-axis");
     _maxAngles[0].setToolTipText(
-      "The maximum rotation-angle around the z-axis");
+        "The maximum rotation-angle around the z-axis");
     _minAngles[1].setToolTipText(
-      "The minimum rotation-angle around the y-axis (after \u03c6 rotation)");
+        "The minimum rotation-angle around the y-axis (after \u03c6 rotation)");
     _minAngles[1].setToolTipText(
-      "The maximum rotation-angle around the y-axis (after \u03c6 rotation)");
+        "The maximum rotation-angle around the y-axis (after \u03c6 rotation)");
     _minAngles[2].setToolTipText(
-      "The minimum rotation-angle around the z-axis (after \u03c6-\u03b8 " +
-      "rotation)");
+        "The minimum rotation-angle around the z-axis (after \u03c6-\u03b8 " +
+        "rotation)");
     _maxAngles[2].setToolTipText(
-      "The maximum rotation-angle around the z-axis (after \u03c6-\u03b8 " +
-      "rotation)");
+        "The maximum rotation-angle around the z-axis (after \u03c6-\u03b8 " +
+        "rotation)");
     JLabel[] rotationDimLabels = new JLabel[] {
-      new JLabel(" \u03c6:"), new JLabel(" \u03b8:"), new JLabel(" \u03a8:") };
+        new JLabel(" \u03c6:"), new JLabel(" \u03b8:"),
+        new JLabel(" \u03a8:") };
     JLabel[] rotationDashLabels = new JLabel[] {
-      new JLabel("-"), new JLabel("-"), new JLabel("-") };
+        new JLabel("-"), new JLabel("-"), new JLabel("-") };
     JLabel mirroringLabel = new JLabel("Mirroring:");
+    _mirroring.setSelected(Prefs.get("unet.newModel.mirroring", false));
     _mirroring.setToolTipText(
-      "Check if you want to also train on mirrored tiles");
+        "Check if you want to also train on mirrored tiles");
     JLabel deformationGridLabel = new JLabel("Deformation grid spacing [px]:");
     JLabel[] deformationGridDimLabels = new JLabel[] {
-      new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
+        new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
     _deformationGrid[0].setToolTipText(
-      "Deformation grid point spacing in x direction");
+        "Deformation grid point spacing in x direction");
     _deformationGrid[1].setToolTipText(
-      "Deformation grid point spacing in y direction");
+        "Deformation grid point spacing in y direction");
     _deformationGrid[2].setToolTipText(
-      "Deformation grid point spacing in z direction");
-    JLabel deformationMagnitudeLabel = new JLabel("Deformation magnitude [px]:");
+        "Deformation grid point spacing in z direction");
+    JLabel deformationMagnitudeLabel =
+        new JLabel("Deformation magnitude [px]:");
     JLabel[] deformationMagnitudeDimLabels = new JLabel[] {
-      new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
+        new JLabel(" x:"), new JLabel(" y:"), new JLabel(" z:") };
     _deformationMagnitude[0].setToolTipText(
-      "Deformation component magnitude in x direction");
+        "Deformation component magnitude in x direction");
     _deformationMagnitude[1].setToolTipText(
-      "Deformation component magnitude in y direction");
+        "Deformation component magnitude in y direction");
     _deformationMagnitude[2].setToolTipText(
-    "Deformation component magnitude in z direction");
+        "Deformation component magnitude in z direction");
     JLabel valueAugmentationLabel = new JLabel("Intensity Curve:");
     JLabel minValueLabel = new JLabel("Min:");
     JLabel slopeLabel = new JLabel("Slope:");
     JLabel maxValueLabel = new JLabel("Max:");
     for (int d = 0; d < 2; ++d) {
       ((JSpinner.NumberEditor)_minValueRange[d].getEditor())
-        .getFormat().applyPattern("######0.0######");
+          .getFormat().applyPattern("######0.0######");
       ((JSpinner.NumberEditor)_slopeRange[d].getEditor())
-        .getFormat().applyPattern("######0.0######");
+          .getFormat().applyPattern("######0.0######");
       ((JSpinner.NumberEditor)_maxValueRange[d].getEditor())
-        .getFormat().applyPattern("######0.0######");
+          .getFormat().applyPattern("######0.0######");
     }
     _minValueRange[0].setToolTipText(
-      "Intensity zero will be mapped to a random number of at least this " +
-      "value");
+        "Intensity zero will be mapped to a random number of at least this " +
+        "value");
     JLabel minValueDash = new JLabel("-");
     _minValueRange[1].setToolTipText(
-      "Intensity zero will be mapped to a random number of at most this " +
-      "value");
+        "Intensity zero will be mapped to a random number of at most this " +
+        "value");
     _maxValueRange[0].setToolTipText(
-      "Intensity one will be mapped to a random number of at least this " +
-      "value");
+        "Intensity one will be mapped to a random number of at least this " +
+        "value");
     JLabel maxValueDash = new JLabel("-");
     _maxValueRange[1].setToolTipText(
-      "Intensity one will be mapped to a random number of at most this " +
-      "value");
+        "Intensity one will be mapped to a random number of at most this " +
+        "value");
     _slopeRange[0].setToolTipText(
-      "Gamma curve slope at intensity 0.5 will be at least this value");
+        "Gamma curve slope at intensity 0.5 will be at least this value");
     JLabel slopeDash = new JLabel("-");
     _slopeRange[1].setToolTipText(
-      "Gamma curve slope at intensity 0.5 will be at most this value");
+        "Gamma curve slope at intensity 0.5 will be at most this value");
     JPanel augmentationPanel = new JPanel();
     GroupLayout augmentationPanelLayout = new GroupLayout(augmentationPanel);
     augmentationPanel.setLayout(augmentationPanelLayout);
     augmentationPanelLayout.setAutoCreateGaps(true);
     augmentationPanelLayout.setAutoCreateContainerGaps(true);
     augmentationPanel.setBorder(
-      BorderFactory.createTitledBorder("Augmentation"));
+        BorderFactory.createTitledBorder("Augmentation"));
     augmentationPanelLayout.setHorizontalGroup(
-      augmentationPanelLayout.createSequentialGroup()
-      .addGroup(
-        augmentationPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.TRAILING)
-        .addComponent(rotationLabel).addComponent(mirroringLabel)
-        .addComponent(deformationGridLabel)
-        .addComponent(deformationMagnitudeLabel)
-        .addComponent(valueAugmentationLabel)
-      )
-      .addGroup(
-        augmentationPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.LEADING)
+        augmentationPanelLayout.createSequentialGroup()
         .addGroup(
-          augmentationPanelLayout.createSequentialGroup()
-          .addComponent(rotationDimLabels[0]).addComponent(_minAngles[0])
-          .addComponent(rotationDashLabels[0]).addComponent(_maxAngles[0])
-          .addComponent(rotationDimLabels[1]).addComponent(_minAngles[1])
-          .addComponent(rotationDashLabels[1]).addComponent(_maxAngles[1])
-          .addComponent(rotationDimLabels[2]).addComponent(_minAngles[2])
-          .addComponent(rotationDashLabels[2]).addComponent(_maxAngles[2])
-        )
-        .addComponent(_mirroring)
+            augmentationPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.TRAILING)
+            .addComponent(rotationLabel).addComponent(mirroringLabel)
+            .addComponent(deformationGridLabel)
+            .addComponent(deformationMagnitudeLabel)
+            .addComponent(valueAugmentationLabel)
+                  )
         .addGroup(
-          augmentationPanelLayout.createSequentialGroup()
-          .addComponent(deformationGridDimLabels[0])
-          .addComponent(_deformationGrid[0])
-          .addComponent(deformationGridDimLabels[1])
-          .addComponent(_deformationGrid[1])
-          .addComponent(deformationGridDimLabels[2])
-          .addComponent(_deformationGrid[2])
-        )
-        .addGroup(
-          augmentationPanelLayout.createSequentialGroup()
-          .addComponent(deformationMagnitudeDimLabels[0])
-          .addComponent(_deformationMagnitude[0])
-          .addComponent(deformationMagnitudeDimLabels[1])
-          .addComponent(_deformationMagnitude[1])
-          .addComponent(deformationMagnitudeDimLabels[2])
-          .addComponent(_deformationMagnitude[2])
-        )
-        .addGroup(
-          augmentationPanelLayout.createSequentialGroup()
-          .addComponent(minValueLabel).addComponent(_minValueRange[0])
-          .addComponent(minValueDash).addComponent(_minValueRange[1])
-          .addComponent(slopeLabel).addComponent(_slopeRange[0])
-          .addComponent(slopeDash).addComponent(_slopeRange[1])
-          .addComponent(maxValueLabel).addComponent(_maxValueRange[0])
-          .addComponent(maxValueDash).addComponent(_maxValueRange[1])
-        )
-      )
-    );
+            augmentationPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.LEADING)
+            .addGroup(
+                augmentationPanelLayout.createSequentialGroup()
+                .addComponent(rotationDimLabels[0]).addComponent(_minAngles[0])
+                .addComponent(rotationDashLabels[0]).addComponent(_maxAngles[0])
+                .addComponent(rotationDimLabels[1]).addComponent(_minAngles[1])
+                .addComponent(rotationDashLabels[1]).addComponent(_maxAngles[1])
+                .addComponent(rotationDimLabels[2]).addComponent(_minAngles[2])
+                .addComponent(rotationDashLabels[2]).addComponent(_maxAngles[2])
+                      )
+            .addComponent(_mirroring)
+            .addGroup(
+                augmentationPanelLayout.createSequentialGroup()
+                .addComponent(deformationGridDimLabels[0])
+                .addComponent(_deformationGrid[0])
+                .addComponent(deformationGridDimLabels[1])
+                .addComponent(_deformationGrid[1])
+                .addComponent(deformationGridDimLabels[2])
+                .addComponent(_deformationGrid[2])
+                      )
+            .addGroup(
+                augmentationPanelLayout.createSequentialGroup()
+                .addComponent(deformationMagnitudeDimLabels[0])
+                .addComponent(_deformationMagnitude[0])
+                .addComponent(deformationMagnitudeDimLabels[1])
+                .addComponent(_deformationMagnitude[1])
+                .addComponent(deformationMagnitudeDimLabels[2])
+                .addComponent(_deformationMagnitude[2])
+                      )
+            .addGroup(
+                augmentationPanelLayout.createSequentialGroup()
+                .addComponent(minValueLabel).addComponent(_minValueRange[0])
+                .addComponent(minValueDash).addComponent(_minValueRange[1])
+                .addComponent(slopeLabel).addComponent(_slopeRange[0])
+                .addComponent(slopeDash).addComponent(_slopeRange[1])
+                .addComponent(maxValueLabel).addComponent(_maxValueRange[0])
+                .addComponent(maxValueDash).addComponent(_maxValueRange[1])
+                      )
+                  )
+                                               );
     augmentationPanelLayout.setVerticalGroup(
-      augmentationPanelLayout.createSequentialGroup()
-      .addGroup(
-        augmentationPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(rotationLabel)
-        .addComponent(rotationDimLabels[0]).addComponent(_minAngles[0])
-        .addComponent(rotationDashLabels[0]).addComponent(_maxAngles[0])
-        .addComponent(rotationDimLabels[1]).addComponent(_minAngles[1])
-        .addComponent(rotationDashLabels[1]).addComponent(_maxAngles[1])
-        .addComponent(rotationDimLabels[2]).addComponent(_minAngles[2])
-        .addComponent(rotationDashLabels[2]).addComponent(_maxAngles[2])
-      )
-      .addGroup(
-        augmentationPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(mirroringLabel).addComponent(_mirroring)
-      )
-      .addGroup(
-        augmentationPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(deformationGridLabel)
-        .addComponent(deformationGridDimLabels[0])
-        .addComponent(_deformationGrid[0])
-        .addComponent(deformationGridDimLabels[1])
-        .addComponent(_deformationGrid[1])
-        .addComponent(deformationGridDimLabels[2])
-        .addComponent(_deformationGrid[2])
-      )
-      .addGroup(
-        augmentationPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(deformationMagnitudeLabel)
-        .addComponent(deformationMagnitudeDimLabels[0])
-        .addComponent(_deformationMagnitude[0])
-        .addComponent(deformationMagnitudeDimLabels[1])
-        .addComponent(_deformationMagnitude[1])
-        .addComponent(deformationMagnitudeDimLabels[2])
-        .addComponent(_deformationMagnitude[2])
-      )
-      .addGroup(
-        augmentationPanelLayout.createParallelGroup(
-          GroupLayout.Alignment.BASELINE)
-        .addComponent(valueAugmentationLabel)
-        .addComponent(minValueLabel).addComponent(_minValueRange[0])
-        .addComponent(minValueDash).addComponent(_minValueRange[1])
-        .addComponent(slopeLabel).addComponent(_slopeRange[0])
-        .addComponent(slopeDash).addComponent(_slopeRange[1])
-        .addComponent(maxValueLabel).addComponent(_maxValueRange[0])
-        .addComponent(maxValueDash).addComponent(_maxValueRange[1])
-      )
-    );
+        augmentationPanelLayout.createSequentialGroup()
+        .addGroup(
+            augmentationPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(rotationLabel)
+            .addComponent(rotationDimLabels[0]).addComponent(_minAngles[0])
+            .addComponent(rotationDashLabels[0]).addComponent(_maxAngles[0])
+            .addComponent(rotationDimLabels[1]).addComponent(_minAngles[1])
+            .addComponent(rotationDashLabels[1]).addComponent(_maxAngles[1])
+            .addComponent(rotationDimLabels[2]).addComponent(_minAngles[2])
+            .addComponent(rotationDashLabels[2]).addComponent(_maxAngles[2])
+                  )
+        .addGroup(
+            augmentationPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(mirroringLabel).addComponent(_mirroring)
+                  )
+        .addGroup(
+            augmentationPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(deformationGridLabel)
+            .addComponent(deformationGridDimLabels[0])
+            .addComponent(_deformationGrid[0])
+            .addComponent(deformationGridDimLabels[1])
+            .addComponent(_deformationGrid[1])
+            .addComponent(deformationGridDimLabels[2])
+            .addComponent(_deformationGrid[2])
+                  )
+        .addGroup(
+            augmentationPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(deformationMagnitudeLabel)
+            .addComponent(deformationMagnitudeDimLabels[0])
+            .addComponent(_deformationMagnitude[0])
+            .addComponent(deformationMagnitudeDimLabels[1])
+            .addComponent(_deformationMagnitude[1])
+            .addComponent(deformationMagnitudeDimLabels[2])
+            .addComponent(_deformationMagnitude[2])
+                  )
+        .addGroup(
+            augmentationPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(valueAugmentationLabel)
+            .addComponent(minValueLabel).addComponent(_minValueRange[0])
+            .addComponent(minValueDash).addComponent(_minValueRange[1])
+            .addComponent(slopeLabel).addComponent(_slopeRange[0])
+            .addComponent(slopeDash).addComponent(_slopeRange[1])
+            .addComponent(maxValueLabel).addComponent(_maxValueRange[0])
+            .addComponent(maxValueDash).addComponent(_maxValueRange[1])
+                  )
+                                             );
 
     JPanel dialogPanel = new JPanel();
     dialogPanel.setLayout(new BoxLayout(dialogPanel, BoxLayout.Y_AXIS));
@@ -544,142 +681,159 @@ public class ModelDefinitionEditor implements PlugIn {
     dialogPanel.add(preprocessingPanel);
     dialogPanel.add(augmentationPanel);
 
-    _dimension.addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          boolean is3D = ((int)_dimension.getModel().getValue() == 3);
-          levelDimLabels[2].setVisible(is3D);
-          _levels[2].setVisible(is3D);
-          elSizeDimLabels[2].setVisible(is3D);
-          _elementSizeUm[2].setVisible(is3D);
-          for (int d = 1; d < 3; ++d) {
-            rotationDimLabels[d].setVisible(is3D);
-            _minAngles[d].setVisible(is3D);
-            rotationDashLabels[d].setVisible(is3D);
-            _maxAngles[d].setVisible(is3D);
+    fileChooseButton.addActionListener(
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            JFileChooser f = new JFileChooser(new File("."));
+            f.setDialogTitle("Select folder and filename");
+            f.setMultiSelectionEnabled(false);
+            f.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+            f.setFileFilter(
+                new FileNameExtensionFilter("HDF5 files", "h5", "H5"));
+            int res = f.showDialog(_parametersDialog, "Select");
+            if (res != JFileChooser.APPROVE_OPTION) return;
+            _filename.setText(f.getSelectedFile().getAbsolutePath());
           }
-          deformationGridDimLabels[2].setVisible(is3D);
-          _deformationGrid[2].setVisible(is3D);
-          deformationMagnitudeDimLabels[2].setVisible(is3D);
-          _deformationMagnitude[2].setVisible(is3D);
         }
-      }
-    );
+                                       );
+
+    _dimension.addChangeListener(
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            boolean is3D = ((int)_dimension.getModel().getValue() == 3);
+            levelDimLabels[2].setVisible(is3D);
+            _levels[2].setVisible(is3D);
+            elSizeDimLabels[2].setVisible(is3D);
+            _elementSizeUm[2].setVisible(is3D);
+            for (int d = 1; d < 3; ++d) {
+              rotationDimLabels[d].setVisible(is3D);
+              _minAngles[d].setVisible(is3D);
+              rotationDashLabels[d].setVisible(is3D);
+              _maxAngles[d].setVisible(is3D);
+            }
+            deformationGridDimLabels[2].setVisible(is3D);
+            _deformationGrid[2].setVisible(is3D);
+            deformationMagnitudeDimLabels[2].setVisible(is3D);
+            _deformationMagnitude[2].setVisible(is3D);
+          }
+        }
+                                 );
 
     _minAngles[0].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_maxAngles[0].getModel()).setMinimum(
-            (Double)_minAngles[0].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_maxAngles[0].getModel()).setMinimum(
+                (Double)_minAngles[0].getModel().getValue());
+          }
         }
-      }
-    );
+                                    );
     _maxAngles[0].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_minAngles[0].getModel()).setMaximum(
-            (Double)_maxAngles[0].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_minAngles[0].getModel()).setMaximum(
+                (Double)_maxAngles[0].getModel().getValue());
+          }
         }
-      }
-    );
+                                    );
     _minAngles[1].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_maxAngles[1].getModel()).setMinimum(
-            (Double)_minAngles[1].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_maxAngles[1].getModel()).setMinimum(
+                (Double)_minAngles[1].getModel().getValue());
+          }
         }
-      }
-    );
+                                    );
     _maxAngles[1].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_minAngles[1].getModel()).setMaximum(
-            (Double)_maxAngles[1].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_minAngles[1].getModel()).setMaximum(
+                (Double)_maxAngles[1].getModel().getValue());
+          }
         }
-      }
-    );
+                                    );
     _minAngles[2].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_maxAngles[2].getModel()).setMinimum(
-            (Double)_minAngles[2].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_maxAngles[2].getModel()).setMinimum(
+                (Double)_minAngles[2].getModel().getValue());
+          }
         }
-      }
-    );
+                                    );
     _maxAngles[2].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_minAngles[2].getModel()).setMaximum(
-            (Double)_maxAngles[2].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_minAngles[2].getModel()).setMaximum(
+                (Double)_maxAngles[2].getModel().getValue());
+          }
         }
-      }
-    );
+                                    );
 
     _minValueRange[0].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_minValueRange[1].getModel()).setMinimum(
-            (Double)_minValueRange[0].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_minValueRange[1].getModel()).setMinimum(
+                (Double)_minValueRange[0].getModel().getValue());
+          }
         }
-      }
-    );
+                                        );
     _minValueRange[1].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_minValueRange[0].getModel()).setMaximum(
-            (Double)_minValueRange[1].getModel().getValue());
-          ((SpinnerNumberModel)_maxValueRange[0].getModel()).setMinimum(
-            (Double)_minValueRange[1].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_minValueRange[0].getModel()).setMaximum(
+                (Double)_minValueRange[1].getModel().getValue());
+            ((SpinnerNumberModel)_maxValueRange[0].getModel()).setMinimum(
+                (Double)_minValueRange[1].getModel().getValue());
+          }
         }
-      }
-    );
+                                        );
     _slopeRange[0].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_slopeRange[1].getModel()).setMinimum(
-            (Double)_slopeRange[0].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_slopeRange[1].getModel()).setMinimum(
+                (Double)_slopeRange[0].getModel().getValue());
+          }
         }
-      }
-    );
+                                     );
     _slopeRange[1].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_slopeRange[0].getModel()).setMaximum(
-            (Double)_slopeRange[1].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_slopeRange[0].getModel()).setMaximum(
+                (Double)_slopeRange[1].getModel().getValue());
+          }
         }
-      }
-    );
+                                     );
     _maxValueRange[0].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_minValueRange[1].getModel()).setMaximum(
-            (Double)_maxValueRange[0].getModel().getValue());
-          ((SpinnerNumberModel)_maxValueRange[1].getModel()).setMinimum(
-            (Double)_maxValueRange[0].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_minValueRange[1].getModel()).setMaximum(
+                (Double)_maxValueRange[0].getModel().getValue());
+            ((SpinnerNumberModel)_maxValueRange[1].getModel()).setMinimum(
+                (Double)_maxValueRange[0].getModel().getValue());
+          }
         }
-      }
-    );
+                                        );
     _maxValueRange[1].addChangeListener(
-      new ChangeListener() {
-        @Override
-        public void stateChanged(ChangeEvent e) {
-          ((SpinnerNumberModel)_maxValueRange[0].getModel()).setMaximum(
-            (Double)_maxValueRange[1].getModel().getValue());
+        new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            ((SpinnerNumberModel)_maxValueRange[0].getModel()).setMaximum(
+                (Double)_maxValueRange[1].getModel().getValue());
+          }
         }
-      }
-    );
+                                        );
 
     _parametersDialog.add(dialogPanel, BorderLayout.CENTER);
 
@@ -691,25 +845,25 @@ public class ModelDefinitionEditor implements PlugIn {
     okCancelPanel.add(cancelButton);
 
     okButton.addActionListener(
-      new ActionListener() {
-        @Override
-        public void actionPerformed(ActionEvent e) {
-          // When accepted the dialog is only hidden. Don't
-          // dispose it here, because isDisplayable() is used
-          // to find out that OK was pressed!
-          _parametersDialog.setVisible(false);
-        }});
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            // When accepted the dialog is only hidden. Don't
+            // dispose it here, because isDisplayable() is used
+            // to find out that OK was pressed!
+            _parametersDialog.setVisible(false);
+          }});
 
     cancelButton.addActionListener(
-      new ActionListener() {
-        @Override
-        public void actionPerformed(ActionEvent e) {
-          // When cancelled the dialog is disposed (which is
-          // also done when the dialog is closed). It must be
-          // disposed here, because isDisplayable() is used
-          // to find out that the Dialog was cancelled!
-          _parametersDialog.dispose();
-        }});
+        new ActionListener() {
+          @Override
+          public void actionPerformed(ActionEvent e) {
+            // When cancelled the dialog is disposed (which is
+            // also done when the dialog is closed). It must be
+            // disposed here, because isDisplayable() is used
+            // to find out that the Dialog was cancelled!
+            _parametersDialog.dispose();
+          }});
 
     _parametersDialog.add(okCancelPanel, BorderLayout.SOUTH);
     _parametersDialog.getRootPane().setDefaultButton(okButton);
@@ -760,13 +914,13 @@ public class ModelDefinitionEditor implements PlugIn {
     }
     model.setElementSizeUm(elSize);
     model.borderWeightFactor =
-      ((Double)_borderWeightFactor.getModel().getValue()).floatValue();
+        ((Double)_borderWeightFactor.getModel().getValue()).floatValue();
     model.borderWeightSigmaPx =
-      ((Double)_borderWeightSigmaPx.getModel().getValue()).floatValue();
+        ((Double)_borderWeightSigmaPx.getModel().getValue()).floatValue();
     model.foregroundBackgroundRatio =
-      ((Double)_foregroundBackgroundRatio.getModel().getValue()).floatValue();
+        ((Double)_foregroundBackgroundRatio.getModel().getValue()).floatValue();
     model.sigma1Px = ((Double)_borderSmoothnessSigmaPx.getModel()
-      .getValue()).floatValue();
+                      .getValue()).floatValue();
 
     // set modelPrototxt and solverPrototxt
     int[] shape = model.getMinimumInputShape();
@@ -921,7 +1075,7 @@ public class ModelDefinitionEditor implements PlugIn {
           model.modelPrototxt += " stride: " + poolShape[d];
       model.modelPrototxt += " } }\n\n";
     }
-    
+
     // Lowest level
     {
       int l = maxDepth;
@@ -958,7 +1112,7 @@ public class ModelDefinitionEditor implements PlugIn {
       model.modelPrototxt +=
           "layer { bottom: 'd" + l + "c'                 " +
           "top: 'd" + l + "c'   name: 'relu_d" + l + "c'          " +
-          "type: 'ReLU' relu_param { negative_slope: 0.1 } }\n";      
+          "type: 'ReLU' relu_param { negative_slope: 0.1 } }\n";
       if (l > 0) {
         model.modelPrototxt +=
             "layer { bottom: 'd" + l + "c'                 " +
@@ -1017,7 +1171,7 @@ public class ModelDefinitionEditor implements PlugIn {
       model.modelPrototxt +=
           "layer { bottom: 'u" + l + "d'                 " +
           "top: 'u" + l + "d'   name: 'relu_u" + l + "d'          " +
-          "type: 'ReLU' relu_param { negative_slope: 0.1 } }\n";      
+          "type: 'ReLU' relu_param { negative_slope: 0.1 } }\n";
       if (l > 0) {
         model.modelPrototxt +=
             "layer { bottom: 'u" + l + "d'                 " +
@@ -1037,7 +1191,7 @@ public class ModelDefinitionEditor implements PlugIn {
             "type: 'ReLU' relu_param { negative_slope: 0.1 } }\n";
       }
     }
-    
+
     // Mapping to number of classes
     if (maxDepth > 0)
         model.modelPrototxt +=
@@ -1087,16 +1241,77 @@ public class ModelDefinitionEditor implements PlugIn {
         "type: 'Adam'\n" +
         "solver_mode:   GPU\n" +
         "debug_info:    0\n";
-    
+
+    Prefs.set("unet.newModel.id", model.id);
+    Prefs.set("unet.newModel.name", model.name);
+    Prefs.set("unet.newModel.description", model.description);
+    Prefs.set("unet.newModel.filename", model.file.getAbsolutePath());
+    Prefs.set("unet.newModel.dimension", nDims);
+    Prefs.set("unet.newModel.levelsX",
+              (int)_levels[0].getModel().getValue());
+    Prefs.set("unet.newModel.levelsY",
+              (int)_levels[1].getModel().getValue());
+    Prefs.set("unet.newModel.levelsZ",
+              (int)_levels[2].getModel().getValue());
+    Prefs.set("unet.newModel.nChannels", nChannels);
+    Prefs.set("unet.newModel.elSizeX",
+              (Double)_elementSizeUm[0].getModel().getValue());
+    Prefs.set("unet.newModel.elSizeY",
+              (Double)_elementSizeUm[1].getModel().getValue());
+    Prefs.set("unet.newModel.elSizeZ",
+              (Double)_elementSizeUm[2].getModel().getValue());
+    Prefs.set("unet.newModel.borderWeightFactor", model.borderWeightFactor);
+    Prefs.set("unet.newModel.borderWeightSigmaPx", model.borderWeightSigmaPx);
+    Prefs.set("unet.newModel.foregroundBackgroundRatio",
+              model.foregroundBackgroundRatio);
+    Prefs.set("unet.newModel.borderSmoothnessSigmaPx", model.sigma1Px);
+    Prefs.set("unet.newModel.minAnglesPhi",
+              (double)_minAngles[0].getModel().getValue());
+    Prefs.set("unet.newModel.minAnglesTheta",
+              (double)_minAngles[1].getModel().getValue());
+    Prefs.set("unet.newModel.minAnglesPsi",
+              (double)_minAngles[2].getModel().getValue());
+    Prefs.set("unet.newModel.maxAnglesPhi",
+              (double)_maxAngles[0].getModel().getValue());
+    Prefs.set("unet.newModel.maxAnglesTheta",
+              (double)_maxAngles[1].getModel().getValue());
+    Prefs.set("unet.newModel.maxAnglesPsi",
+              (double)_maxAngles[2].getModel().getValue());
+    Prefs.set("unet.newModel.mirroring", _mirroring.isSelected());
+    Prefs.set("unet.newModel.deformationGridX",
+              (int)_deformationGrid[0].getModel().getValue());
+    Prefs.set("unet.newModel.deformationGridY",
+              (int)_deformationGrid[1].getModel().getValue());
+    Prefs.set("unet.newModel.deformationGridZ",
+              (int)_deformationGrid[2].getModel().getValue());
+    Prefs.set("unet.newModel.deformationMagnitudeX",
+              (int)_deformationMagnitude[0].getModel().getValue());
+    Prefs.set("unet.newModel.deformationMagnitudeY",
+              (int)_deformationMagnitude[1].getModel().getValue());
+    Prefs.set("unet.newModel.deformationMagnitudeZ",
+              (int)_deformationMagnitude[2].getModel().getValue());
+    Prefs.set("unet.newModel.minValueRangeStart",
+              (double)_minValueRange[0].getModel().getValue());
+    Prefs.set("unet.newModel.minValueRangeEnd",
+              (double)_minValueRange[1].getModel().getValue());
+    Prefs.set("unet.newModel.maxValueRangeStart",
+              (double)_maxValueRange[0].getModel().getValue());
+    Prefs.set("unet.newModel.maxValueRangeEnd",
+              (double)_maxValueRange[1].getModel().getValue());
+    Prefs.set("unet.newModel.slopeStart",
+              (double)_slopeRange[0].getModel().getValue());
+    Prefs.set("unet.newModel.slopeEnd",
+              (double)_slopeRange[1].getModel().getValue());
+
     try {
       model.save();
       IJ.showMessage("Model has been saved to " + model.file.getAbsolutePath());
     }
     catch (HDF5Exception|IOException e) {
       IJ.log("Could not save model to " + model.file.getAbsolutePath() +
-      ".\n" + e.getMessage());
+             ".\n" + e.getMessage());
       IJ.error("Could not save model to " + model.file.getAbsolutePath() +
-      ".\n" + e.getMessage());
+               ".\n" + e.getMessage());
     }
   }
 
