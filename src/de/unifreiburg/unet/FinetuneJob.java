@@ -1823,15 +1823,13 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
               }
             }
             else {
-              String roiName = roi.getName();
-              if (roiName.matches(
-                      "([0-9]+-)*[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
-                  continue;
-              String className = roiName.replaceFirst(
-                  "^([0-9]+-)*(.*)(#[0-9]+)?(-[0-9]+)*$", "$2");
-              if (classNames.contains(className)) continue;
-              classNames.add(className);
-              if (labelsAreClasses) IJ.log("  Adding class " + className);
+              TrainingSample.RoiLabel roiLabel =
+                  TrainingSample.parseRoiName(roi.getName());
+              if (roiLabel.isIgnore()) continue;
+              if (classNames.contains(roiLabel.className)) continue;
+              classNames.add(roiLabel.className);
+              if (labelsAreClasses)
+                  IJ.log("  Adding class " + roiLabel.className);
             }
           }
         }
@@ -1872,19 +1870,17 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
               }
             }
             else {
-              String roiName = roi.getName();
-              if (roiName.matches(
-                      "([0-9]+-)*[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
-                  continue;
-              String className = roiName.replaceFirst(
-                  "^([0-9]+-)*(.*)(#[0-9]+)?(-[0-9]+)*$", "$2");
-              if (classNames.contains(className)) continue;
-              classNames.add(className);
+              TrainingSample.RoiLabel roiLabel =
+                  TrainingSample.parseRoiName(roi.getName());
+              if (roiLabel.isIgnore()) continue;
+              if (classNames.contains(roiLabel.className)) continue;
+              classNames.add(roiLabel.className);
               if (labelsAreClasses) {
-                IJ.log("  Adding class " + className);
+                IJ.log("  Adding class " + roiLabel.className);
                 showMessage(
                     "WARNING: Training set does not contain instances of" +
-                    "class " + className + ". This class will not be learnt!");
+                    "class " + roiLabel.className +
+                    ". This class will not be learnt!");
               }
             }
           }

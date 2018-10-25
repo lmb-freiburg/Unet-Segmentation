@@ -1293,8 +1293,8 @@ public class TrainingSample
           RoiPosition p = getROIPosition(roi, Ds, scaleZ);
           if (p.z != z + 1 || p.t != t + 1) continue;
 
-          RoiLabel rl = parseROIName(roi.getName());
-          if (rl.className.toLowerCase().equals("ignore")) ipClass.setValue(0);
+          RoiLabel rl = parseRoiName(roi.getName());
+          if (rl.isIgnore()) ipClass.setValue(0);
           else {
             int label = 1;
             if (C > 1) {
@@ -1377,7 +1377,7 @@ public class TrainingSample
         RoiPosition pos = getROIPosition(roi, Ds, scaleZ);
         if (pos.t != t + 1) continue;
         int label = 1;
-        RoiLabel rl = parseROIName(roi.getName());
+        RoiLabel rl = parseRoiName(roi.getName());
         if (C > 1) {
           while (label < model.classNames.length &&
                  !rl.className.equals(model.classNames[label])) ++label;
@@ -1661,15 +1661,19 @@ public class TrainingSample
     return p;
   }
 
-  private static class RoiLabel {
+  public static class RoiLabel {
     public String className = "Foreground";
     public int instance = -1;
+    public boolean isIgnore() {
+      return className.toLowerCase().equals("ignore");
+    }
+
   }
 
-  private static RoiLabel parseROIName(String roiName) {
+  public static RoiLabel parseRoiName(String roiName) {
     if (roiName == null) return new RoiLabel();
-    // Remove trailing clutter
-    String tmp = roiName.replaceFirst("(-[0-9]+)*$", "");
+    // Remove leading and trailing clutter
+    String tmp = roiName.replaceFirst("([0-9]+-)*(.*)(-[0-9]+)*$", "$2");
     String[] comps = roiName.split("#");
     RoiLabel res = new RoiLabel();
     res.className = comps[0];
