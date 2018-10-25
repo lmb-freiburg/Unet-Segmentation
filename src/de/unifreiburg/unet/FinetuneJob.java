@@ -1824,10 +1824,11 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             }
             else {
               String roiName = roi.getName();
-              if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
+              if (roiName.matches(
+                      "([0-9]+-)*[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
                   continue;
               String className = roiName.replaceFirst(
-                  "(#[0-9]+)?(-[0-9]+)*$", "");
+                  "^([0-9]+-)*(.*)(#[0-9]+)?(-[0-9]+)*$", "$2");
               if (classNames.contains(className)) continue;
               classNames.add(className);
               if (labelsAreClasses) IJ.log("  Adding class " + className);
@@ -1872,10 +1873,11 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             }
             else {
               String roiName = roi.getName();
-              if (roiName.matches("[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
+              if (roiName.matches(
+                      "([0-9]+-)*[iI][gG][nN][oO][rR][eE](-[0-9]+)*"))
                   continue;
               String className = roiName.replaceFirst(
-                  "(#[0-9]+)?(-[0-9]+)*$", "");
+                  "^([0-9]+-)*(.*)(#[0-9]+)?(-[0-9]+)*$", "$2");
               if (classNames.contains(className)) continue;
               classNames.add(className);
               if (labelsAreClasses) {
