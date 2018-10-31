@@ -1975,7 +1975,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
                     outfile, trainBlobFileNames[i]));
             _createdRemoteFiles.add(trainBlobFileNames[i]);
             for (int c = createdFiles.size() - 1; c >= 0; --c)
-                createdFiles.get(i).delete();
+                createdFiles.get(c).delete();
             progressMonitor().pop(); // Uploading image
             if (interrupted()) throw new InterruptedException();
           }
