@@ -365,7 +365,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
           cmd.add(caffe_unetBinary);
           cmd.add("check_model_and_weights_h5");
           cmd.add("-model");
-          cmd.add(model().file.getAbsolutePath());
+          cmd.add((sshSession() == null) ? model().file.getAbsolutePath() : model().remoteAbsolutePath);
           cmd.add("-weights");
           cmd.add(weightsFileName());
           cmd.add("-n_channels");
@@ -467,7 +467,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     cmd.add("-outfileH5");
     cmd.add(fileName);
     cmd.add("-model");
-    cmd.add(model().file.getAbsolutePath());
+    cmd.add((sshSession() == null) ? model().file.getAbsolutePath() : model().remoteAbsolutePath);
     cmd.add("-weights");
     cmd.add(weightsFileName());
     cmd.add("-iterations");
