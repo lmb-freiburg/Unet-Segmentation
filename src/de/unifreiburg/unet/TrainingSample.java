@@ -1294,7 +1294,10 @@ public class TrainingSample
           if (p.z != z + 1 || p.t != t + 1) continue;
 
           RoiLabel rl = parseRoiName(roi.getName());
-          if (rl.isIgnore()) ipClass.setValue(0);
+          if (rl.isIgnore()) {
+            ipClass.setValue(0);
+            ipClass.fill(roi);
+          }
           else {
             int label = 1;
             if (C > 1) {
@@ -1390,7 +1393,7 @@ public class TrainingSample
           int yRoi = (int)(p.getY() * (double)Hs / (double)H);
           int xRoi = (int)(p.getX() * (double)Ws / (double)W);
           for (int i = 0; i < dxLarge.length; ++i) {
-            int z = pos.z + dzLarge[i];
+            int z = pos.z + dzLarge[i] - 1;
             int y = yRoi + dyLarge[i];
             int x = xRoi + dxLarge[i];
             if (z < 0 || z >= Ds || y < 0 || y >= Hs || x < 0 || x >= Ws ||
@@ -1399,7 +1402,7 @@ public class TrainingSample
           }
           // Draw label and instance label
           for (int i = 0; i < dxSmall.length; ++i) {
-            int z = pos.z + dzSmall[i];
+            int z = pos.z + dzSmall[i] - 1;
             int y = yRoi + dySmall[i];
             int x = xRoi + dxSmall[i];
             if (z < 0 || z >= Ds || y < 0 || y >= Hs || x < 0 || x >= Ws)
