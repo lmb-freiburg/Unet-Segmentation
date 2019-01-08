@@ -273,6 +273,15 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
                 caffeGPUParameter();
             res = Tools.execute(cmd, sshSession(), progressMonitor());
 
+            if (res.exitStatus != 0) {
+              if (Tools.getCaffeError(res.cerr) > 0) {
+                showMessage("Model check failed:\n" +
+                            Tools.getCaffeErrorString(res.cerr));
+                return false;
+              }
+              IJ.log(Tools.getCaffeErrorString(res.cerr));
+            }
+
             if (res.exitStatus == 0 || weightsUploaded) break;
 
             if (!weightsUploaded) {
@@ -365,7 +374,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
           cmd.add(caffe_unetBinary);
           cmd.add("check_model_and_weights_h5");
           cmd.add("-model");
-          cmd.add((sshSession() == null) ? model().file.getAbsolutePath() : model().remoteAbsolutePath);
+          cmd.add((sshSession() == null) ? model().file.getAbsolutePath() :
+                  model().remoteAbsolutePath);
           cmd.add("-weights");
           cmd.add(weightsFileName());
           cmd.add("-n_channels");
@@ -467,7 +477,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     cmd.add("-outfileH5");
     cmd.add(fileName);
     cmd.add("-model");
-    cmd.add((sshSession() == null) ? model().file.getAbsolutePath() : model().remoteAbsolutePath);
+    cmd.add((sshSession() == null) ? model().file.getAbsolutePath() :
+            model().remoteAbsolutePath);
     cmd.add("-weights");
     cmd.add(weightsFileName());
     cmd.add("-iterations");
@@ -580,8 +591,9 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     if (exitStatus != 0) {
       IJ.log(errorMsg);
       throw new IOException(
-          "Error during segmentation: exit status " + exitStatus +
-          "\nSee log for further details");
+          "Error during segmentation: exit status " + exitStatus + "\n" +
+          Tools.getCaffeErrorString(errorMsg) + "\n" +
+          "See log for further details");
     }
   }
 

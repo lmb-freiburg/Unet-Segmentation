@@ -166,6 +166,43 @@ public class Tools {
     return -1;
   }
 
+  /***********************************************************************
+   * Parse the given caffe error stream output for specific error messages.
+   * If the type of error can be determined the corresponding error code
+   * otherwise -1 (unknown) is returned.
+   *
+   * \return The error code
+   *         -1 - unknown
+   *          1 - out of memory
+   *          2 - invalid device ordinal
+   *          3 - Insufficient compute capability
+   *
+   ***********************************************************************/
+  public static int getCaffeError(String error) {
+    if (error.contains("out of memory")) return 1;
+    if (error.contains("invalid device ordinal")) return 2;
+    if (error.contains("CUDNN_STATUS_ARCH_MISMATCH")) return 3;
+    return -1;
+  }
+
+  public static String getCaffeErrorString(String error) {
+    switch (getCaffeError(error)) {
+    case 1:
+      return "Not enough GPU memory available.";
+    case 2:
+      return "Requested GPU does not exist.";
+    case 3:
+      return "The compute capability of your GPU is too low.\n" +
+          "Please choose another GPU or rebuild caffe_unet for your GPU.";
+    default:
+      String[] errors = error.split("\n");
+      for (int i = 0; i < errors.length; ++i)
+          if (errors[i].contains("Check failed: error == cudaSuccess"))
+              return errors[i];
+    }
+    return "Unknown caffe error.";
+  }
+
   public static ProcessResult execute(
       Vector<String> command, ProgressMonitor pr)
       throws IOException, InterruptedException {

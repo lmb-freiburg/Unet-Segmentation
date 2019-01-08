@@ -652,6 +652,16 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
                 weightsFileName() + "\" -n_channels " + _nChannels + " " +
                 caffeGPUParameter();
             res = Tools.execute(cmd, sshSession(), progressMonitor());
+
+            if (res.exitStatus != 0) {
+              if (Tools.getCaffeError(res.cerr) > 0) {
+                showMessage("Model check failed:\n" +
+                            Tools.getCaffeErrorString(res.cerr));
+                return false;
+              }
+              IJ.log(Tools.getCaffeErrorString(res.cerr));
+            }
+
             if (weightsUploaded && res.exitStatus != 0) break;
             if (!weightsUploaded && res.exitStatus != 0) {
               Object[] options = {
@@ -1605,8 +1615,9 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     if (exitStatus != 0) {
       IJ.log(errorMsg);
       throw new IOException(
-          "Error during finetuning: exit status " + exitStatus +
-          "\nSee log for further details");
+          "Error during finetuning: exit status " + exitStatus + "\n" +
+          Tools.getCaffeErrorString(errorMsg) + "\n" +
+          "See log for further details");
     }
 
     if (sshSession() != null)
@@ -1618,7 +1629,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             _outweightsTextField.getText().split("/");
         File outfile = new File(
             ((_finetunedModel.file.getParentFile() != null) ?
-             (_finetunedModel.file.getParent() + "/") : "") +
+             (_finetunedModel.file.getParent() + File.separator) : "") +
             outweightsComponents[outweightsComponents.length - 1]);
         try {
           progressMonitor().pop();
