@@ -573,6 +573,15 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
                                  _validFileList.getModel()).get(i);
 
     for (ImagePlus imp : allImages) {
+      if ((model().nDims() == 2 && imp.getNSlices() > 1) ||
+          (model().nDims() == 3 && imp.getNSlices() == 1)) {
+        showMessage(
+            "Finetuning a " + model().nDims() + "-D model requires " +
+            model().nDims() + "-D images.\n" +
+            "Please check your hyperstack layout!");
+        return false;
+      }
+
       int nc = (imp.getType() == ImagePlus.COLOR_256 ||
                 imp.getType() == ImagePlus.COLOR_RGB) ? 3 :
           imp.getNChannels();
@@ -753,6 +762,14 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           }
           res = Tools.execute(cmd, progressMonitor());
           if (res.exitStatus != 0) {
+            int errCode = Tools.getCaffeError(res.cerr);
+            if (errCode != -1)
+            {
+              String errorMessage = Tools.getCaffeErrorString(res.cerr);
+              IJ.showMessage(errorMessage);
+              IJ.log(errorMessage);
+              return false;
+            }
             int selectedOption = JOptionPane.showConfirmDialog(
                 WindowManager.getActiveWindow(),
                 "No compatible pre-trained weights found at the given " +
