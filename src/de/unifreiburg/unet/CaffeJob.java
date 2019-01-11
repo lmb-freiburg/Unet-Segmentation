@@ -403,16 +403,23 @@ public abstract class CaffeJob extends Job {
 
     if (!super.checkParameters()) return false;
 
+    if (selectedGPUString().equals("none") &&
+        model().getCaffeTilingParameter().contains("gpu_mem_available_MB")) {
+      showMessage(
+          "The 'Memory (MB)' option can only be used in GPU mode.\n" +
+          "Please select a different tiling mode.");
+      return false;
+    }
+
     Prefs.set("unet.processfolder", processFolder());
     Prefs.set("unet.gpuId", selectedGPUString());
 
-    if (_hostConfiguration.useRemoteHost()) {
-      if (_hostConfiguration.hostname() == null) {
-        showMessage(
-            "No hostname specified\n" +
-            "Please enter the server name for remote processing.");
-        return false;
-      }
+    if (_hostConfiguration.useRemoteHost() &&
+        _hostConfiguration.hostname() == null) {
+      showMessage(
+          "No hostname specified\n" +
+          "Please enter the server name for remote processing.");
+      return false;
     }
 
     try {
