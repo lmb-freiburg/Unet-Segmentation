@@ -1301,6 +1301,9 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     sb.setLrPolicy("fixed");
     sb.setType("Adam");
     sb.setSnapshotFormat(Caffe.SolverParameter.SnapshotFormat.HDF5);
+    if (selectedGPUString().equals("none"))
+        sb.setSolverMode(Caffe.SolverParameter.SolverMode.CPU);
+    else sb.setSolverMode(Caffe.SolverParameter.SolverMode.GPU);
 
     if (validBlobFileNames.size() != 0) {
       sb.addTestIter(validBlobFileNames.size()).setTestInterval(
