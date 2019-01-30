@@ -239,182 +239,153 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     String caffe_unetBinary =
         Prefs.get("unet.caffe_unetBinary", "caffe_unet");
 
-    ProcessResult res = null;
-
+    Session session = null;
     try {
-      if (sshSession() != null) {
-
-        try {
-          model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
-          _createdRemoteFolders.addAll(
-              new SftpFileIO(sshSession(), progressMonitor()).put(
-                  model().file, model().remoteAbsolutePath));
-          _createdRemoteFiles.add(model().remoteAbsolutePath);
-          Prefs.set("unet.processfolder", processFolder());
-        }
-        catch (SftpException|JSchException e) {
-          showError("Model upload failed.\nDo you have sufficient " +
-                    "permissions to create the processing folder on " +
-                    "the remote host?", e);
-          return false;
-        }
-        catch (IOException e) {
-          showError("Model upload failed. Could not read model file.", e);
-          return false;
-        }
-
-        try {
-          boolean weightsUploaded = false;
-          do {
-            String cmd =
-                caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
-                model().remoteAbsolutePath + "\" -weights \"" +
-                weightsFileName() + "\" -n_channels " + nChannels + " " +
-                caffeGPUParameter();
-            res = Tools.execute(cmd, sshSession(), progressMonitor());
-
-            if (res.exitStatus != 0) {
-              if (Tools.getCaffeError(res.cerr) > 0) {
-                showMessage("Model check failed:\n" +
-                            Tools.getCaffeErrorString(res.cerr));
-                return false;
-              }
-              IJ.log(Tools.getCaffeErrorString(res.cerr));
-            }
-
-            if (res.exitStatus == 0 || weightsUploaded) break;
-
-            if (!weightsUploaded) {
-              int selectedOption = JOptionPane.showConfirmDialog(
-                  _imp.getWindow(), "No compatible weights found at the " +
-                  "given location on the backend server.\nDo you want " +
-                  "to upload weights from the local machine now?",
-                  "Upload weights?", JOptionPane.YES_NO_CANCEL_OPTION,
-                  JOptionPane.QUESTION_MESSAGE);
-              switch (selectedOption) {
-              case JOptionPane.YES_OPTION: {
-                File startFile =
-                    (model() == null ||
-                     model().file == null ||
-                     model().file.getParentFile() == null) ?
-                    new File(".") : model().file.getParentFile();
-                JFileChooser f = new JFileChooser(startFile);
-                f.setDialogTitle("Select trained U-Net weights");
-                f.setFileFilter(
-                    new FileNameExtensionFilter(
-                        "*.h5 or *.caffemodel",
-                        "h5", "H5", "caffemodel", "CAFFEMODEL"));
-                f.setMultiSelectionEnabled(false);
-                f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-                int res2 = f.showDialog(
-                    WindowManager.getActiveWindow(), "Select");
-                if (res2 != JFileChooser.APPROVE_OPTION)
-                    throw new InterruptedException("Aborted by user");
-                try {
-                  new SftpFileIO(sshSession(), progressMonitor()).put(
-                      f.getSelectedFile(), weightsFileName());
-                  weightsUploaded = true;
-                }
-                catch (SftpException e) {
-                  res.exitStatus = 3;
-                  res.shortErrorString =
-                      "Upload failed.\nDo you have sufficient " +
-                      "permissions to create a file at the given " +
-                      "backend server path?";
-                  res.cerr = e.getMessage();
-                  res.cause = e;
-                  break;
-                }
-                break;
-              }
-              case JOptionPane.NO_OPTION: {
-                res.exitStatus = 2;
-                res.shortErrorString = "Weight file selection required";
-                res.cerr = "Weight file " + weightsFileName() + " not found";
-                break;
-              }
-              case JOptionPane.CANCEL_OPTION:
-              case JOptionPane.CLOSED_OPTION:
-                throw new InterruptedException("Aborted by user");
-              }
-              if (res.exitStatus > 1) break;
-            }
-            else {
-              IJ.log(res.cerr);
-              res.shortErrorString = "Model/Weights check failed.";
-              res.cerr = "See log for further details";
-              break;
-            }
-          }
-          while (res.exitStatus != 0);
-        }
-        catch (JSchException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "SSH connection error";
-          res.cerr = e.getMessage();
-          res.cause = e;
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
-          res.cause = e;
-        }
-      }
-      else {
-        if (!new File(weightsFileName()).exists())
-        {
-          showMessage(
-              "The selected weight file does not exist.\n" +
-              "Please select a .caffemodel.h5 file matching your model.");
-          return false;
-        }
-        try {
-          Vector<String> cmd = new Vector<String>();
-          cmd.add(caffe_unetBinary);
-          cmd.add("check_model_and_weights_h5");
-          cmd.add("-model");
-          cmd.add((sshSession() == null) ? model().file.getAbsolutePath() :
-                  model().remoteAbsolutePath);
-          cmd.add("-weights");
-          cmd.add(weightsFileName());
-          cmd.add("-n_channels");
-          cmd.add(new Integer(nChannels).toString());
-          if (!caffeGPUParameter().equals("")) {
-            cmd.add(caffeGPUParameter().split(" ")[0]);
-            cmd.add(caffeGPUParameter().split(" ")[1]);
-          }
-          res = Tools.execute(cmd, progressMonitor());
-        }
-        catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
-          res.cause = e;
-        }
-      }
-      if (res.exitStatus != 0) {
-        // User decided to change weight file, so don't bother him with
-        // additional message boxes
-        if (res.exitStatus == 2) return false;
-        IJ.log(res.cerr);
-        showError(
-            "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
-        return false;
-      }
-
-      Prefs.set("unet.segmentation.keepOriginal",
-                _keepOriginalCheckBox.isSelected());
-      Prefs.set("unet.segmentation.outputScores",
-                _outputScoresCheckBox.isSelected());
-      Prefs.set("unet.segmentation.outputSoftmaxScores",
-                _outputSoftmaxScoresCheckBox.isSelected());
+      session = sshSession();
     }
     catch (JSchException e) {
       showError("SSH connection failed", e);
       return false;
     }
+    
+    if (session != null) {
 
+      try {
+        model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
+        _createdRemoteFolders.addAll(
+            new SftpFileIO(session, progressMonitor()).put(
+                model().file, model().remoteAbsolutePath));
+        _createdRemoteFiles.add(model().remoteAbsolutePath);
+        Prefs.set("unet.processfolder", processFolder());
+      }
+      catch (SftpException|JSchException e) {
+        showError("Model upload failed.\nDo you have sufficient " +
+                  "permissions to create the processing folder on " +
+                  "the remote host?", e);
+        return false;
+      }
+      catch (IOException e) {
+        showError("Model upload failed. Could not read model file.", e);
+        return false;
+      }
+      
+      try {
+        
+        String cmd =
+            caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
+            model().remoteAbsolutePath + "\" -weights \"" +
+            weightsFileName() + "\" -n_channels " + nChannels + " " +
+            caffeGPUParameter();
+        
+        ProcessResult res = Tools.execute(cmd, session, progressMonitor()); 
+        if (res.exitStatus != 0) {
+          if (Tools.getCaffeError(res.cerr) > 0) {
+            showMessage(
+                "Model check failed:\n" + Tools.getCaffeErrorString(res.cerr));
+            return false;
+          }
+          IJ.log(Tools.getCaffeErrorString(res.cerr));
+
+          int selectedOption = JOptionPane.showConfirmDialog(
+              _imp.getWindow(), "No compatible weights found at the " +
+              "given location on the backend server.\nDo you want " +
+              "to upload weights from the local machine now?",
+              "Upload weights?", JOptionPane.YES_NO_CANCEL_OPTION,
+              JOptionPane.QUESTION_MESSAGE);
+          switch (selectedOption) {
+          case JOptionPane.YES_OPTION: {
+            File startFile = (model() == null || model().file == null ||
+                              model().file.getParentFile() == null) ?
+                new File(".") : model().file.getParentFile();
+            JFileChooser f = new JFileChooser(startFile);
+            f.setDialogTitle("Select trained U-Net weights");
+            f.setFileFilter(
+                new FileNameExtensionFilter(
+                    "*.h5 or *.caffemodel",
+                    "h5", "H5", "caffemodel", "CAFFEMODEL"));
+            f.setMultiSelectionEnabled(false);
+            f.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            int res2 = f.showDialog(WindowManager.getActiveWindow(), "Select");
+            if (res2 != JFileChooser.APPROVE_OPTION)
+                throw new InterruptedException("Aborted by user");
+            try {
+              new SftpFileIO(sshSession(), progressMonitor()).put(
+                  f.getSelectedFile(), weightsFileName());
+            }
+            catch (SftpException e) {
+              showError("Upload failed.\nDo you have sufficient " +
+                        "permissions to create a file at the given " +
+                        "backend server path?", e);
+              return false;
+            }
+            res = Tools.execute(cmd, session, progressMonitor()); 
+            if (res.exitStatus != 0) {
+              showMessage("Model check failed:\n" +
+                          Tools.getCaffeErrorString(res.cerr));
+              IJ.log(Tools.getCaffeErrorString(res.cerr));
+              return false;
+            }
+            break;
+          }
+          case JOptionPane.NO_OPTION:
+            return false;
+          case JOptionPane.CANCEL_OPTION:
+          case JOptionPane.CLOSED_OPTION:
+            throw new InterruptedException("Aborted by user");
+          }
+        }
+      }
+      catch (JSchException e) {
+        showError("SSH Connection error", e);
+        return false;
+      }
+      catch (IOException e) {
+        showError("Input/Output Error", e);
+        return false;
+      }
+    }
+    else {
+      
+      if (!new File(weightsFileName()).exists()) {
+        showMessage(
+            "The selected weight file does not exist.\n" +
+            "Please select a .caffemodel.h5 file matching your model.");
+        return false;
+      }
+      try {
+        Vector<String> cmd = new Vector<String>();
+        cmd.add(caffe_unetBinary);
+        cmd.add("check_model_and_weights_h5");
+        cmd.add("-model");
+        cmd.add(model().file.getAbsolutePath());
+        cmd.add("-weights");
+        cmd.add(weightsFileName());
+        cmd.add("-n_channels");
+        cmd.add(new Integer(nChannels).toString());
+        if (!caffeGPUParameter().equals("")) {
+          cmd.add(caffeGPUParameter().split(" ")[0]);
+          cmd.add(caffeGPUParameter().split(" ")[1]);
+        }
+        ProcessResult res = Tools.execute(cmd, progressMonitor());
+        if (res.exitStatus != 0) {
+          showError("Model/Weight check failed:\n" + res.shortErrorString,
+                    res.cause);
+          return false;
+        }
+      }
+      catch (IOException e) {
+        showError("Input/Output Error", e);
+        return false;
+      }
+    }
+    
+    Prefs.set("unet.segmentation.keepOriginal",
+              _keepOriginalCheckBox.isSelected());
+    Prefs.set("unet.segmentation.outputScores",
+              _outputScoresCheckBox.isSelected());
+    Prefs.set("unet.segmentation.outputSoftmaxScores",
+              _outputSoftmaxScoresCheckBox.isSelected());
+    
     return true;
   }
 
