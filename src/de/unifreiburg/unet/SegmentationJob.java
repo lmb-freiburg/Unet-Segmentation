@@ -163,11 +163,16 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
                 loadSegmentationToImagePlus();
                 if (Recorder.record) {
                   Recorder.setCommand(null);
+                  // ImageJ macros treat backslash characters as escape
+                  // characters, therefore, replace all backslash characters
+                  // by slash characters to make the call platform-independent
                   String command =
                       "call('de.unifreiburg.unet.SegmentationJob." +
                       "processHyperStack', " +
-                      "'modelFilename=" + model().file.getAbsolutePath() +
-                      ",weightsFilename=" + weightsFileName() +
+                      "'modelFilename=" +
+                      model().file.getAbsolutePath().replace("\\", "/") +
+                      ",weightsFilename=" +
+                      weightsFileName().replace("\\", "/") +
                       "," + model().getTilingParameterString() +
                       ",gpuId=" + selectedGPUString() +
                       "," + hostConfiguration().getMacroParameterString() +
@@ -247,7 +252,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       showError("SSH connection failed", e);
       return false;
     }
-    
+
     if (session != null) {
 
       try {
@@ -268,16 +273,16 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         showError("Model upload failed. Could not read model file.", e);
         return false;
       }
-      
+
       try {
-        
+
         String cmd =
             caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
             model().remoteAbsolutePath + "\" -weights \"" +
             weightsFileName() + "\" -n_channels " + nChannels + " " +
             caffeGPUParameter();
-        
-        ProcessResult res = Tools.execute(cmd, session, progressMonitor()); 
+
+        ProcessResult res = Tools.execute(cmd, session, progressMonitor());
         if (res.exitStatus != 0) {
           if (Tools.getCaffeError(res.cerr) > 0) {
             showMessage(
@@ -318,7 +323,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
                         "backend server path?", e);
               return false;
             }
-            res = Tools.execute(cmd, session, progressMonitor()); 
+            res = Tools.execute(cmd, session, progressMonitor());
             if (res.exitStatus != 0) {
               showMessage("Model check failed:\n" +
                           Tools.getCaffeErrorString(res.cerr));
@@ -345,7 +350,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       }
     }
     else {
-      
+
       if (!new File(weightsFileName()).exists()) {
         showMessage(
             "The selected weight file does not exist.\n" +
@@ -378,14 +383,14 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
         return false;
       }
     }
-    
+
     Prefs.set("unet.segmentation.keepOriginal",
               _keepOriginalCheckBox.isSelected());
     Prefs.set("unet.segmentation.outputScores",
               _outputScoresCheckBox.isSelected());
     Prefs.set("unet.segmentation.outputSoftmaxScores",
               _outputSoftmaxScoresCheckBox.isSelected());
-    
+
     return true;
   }
 
@@ -448,7 +453,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     cmd.add("-outfileH5");
     cmd.add(fileName);
     cmd.add("-model");
-    cmd.add((sshSession() == null) ? model().file.getAbsolutePath() :
+    cmd.add((sshSession() == null) ?
+            model().file.getAbsolutePath() :
             model().remoteAbsolutePath);
     cmd.add("-weights");
     cmd.add(weightsFileName());
