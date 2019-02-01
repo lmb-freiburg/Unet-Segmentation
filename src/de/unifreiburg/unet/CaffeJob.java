@@ -403,6 +403,26 @@ public abstract class CaffeJob extends Job {
 
     if (!super.checkParameters()) return false;
 
+    if (!weightsFileName().isEmpty() &&
+        !weightsFileName().endsWith(".caffemodel.h5")) {
+      int selectedOption = JOptionPane.showConfirmDialog(
+          WindowManager.getActiveWindow(),
+          "The selected weight file does not end in .caffemodel.h5.\n" +
+          "Are you sure that it contains pretrained model weights?",
+          "Unusual weight file name",
+          JOptionPane.YES_NO_CANCEL_OPTION,
+          JOptionPane.QUESTION_MESSAGE);
+      switch (selectedOption) {
+      case JOptionPane.YES_OPTION:
+        break;
+      case JOptionPane.NO_OPTION:
+        return false;
+      case JOptionPane.CANCEL_OPTION:
+      case JOptionPane.CLOSED_OPTION:
+        throw new InterruptedException("Aborted by user");
+      }
+    }
+
     if (selectedGPUString().equals("none") &&
         model().getCaffeTilingParameter().contains("gpu_mem_available_MB")) {
       showMessage(

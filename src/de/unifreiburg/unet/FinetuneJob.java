@@ -627,125 +627,128 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     String caffe_unetBinary =
         Prefs.get("unet.caffe_unetBinary", "caffe_unet");
 
-    ProcessResult res = null;
+    Session session = null;
+    try {
+      session = sshSession();
+    }
+    catch (JSchException e) {
+      showError("SSH connection failed", e);
+      return false;
+    }
 
-    try
-    {
-      if (sshSession() != null) {
+    if (weightsFileName().isEmpty()) _trainFromScratch = true;
+
+    if (session != null) {
+
+      try {
+        model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
+        _createdRemoteFolders.addAll(
+            new SftpFileIO(sshSession(), progressMonitor()).put(
+                model().file, model().remoteAbsolutePath));
+        _createdRemoteFiles.add(model().remoteAbsolutePath);
+        Prefs.set("unet.processfolder", processFolder());
+      }
+      catch (SftpException|JSchException e) {
+        showError("Model upload failed.\nDo you have sufficient " +
+                  "permissions to create the processing folder on " +
+                  "the remote host?", e);
+        return false;
+      }
+      catch (IOException e) {
+        showError("Model upload failed. Could not read model file.", e);
+        return false;
+      }
+
+      if (!_trainFromScratch) {
 
         try {
-          model().remoteAbsolutePath = processFolder() + id() + ".modeldef.h5";
-          _createdRemoteFolders.addAll(
-              new SftpFileIO(sshSession(), progressMonitor()).put(
-                  model().file, model().remoteAbsolutePath));
-          _createdRemoteFiles.add(model().remoteAbsolutePath);
-          Prefs.set("unet.processfolder", processFolder());
-        }
-        catch (SftpException|JSchException e) {
-          showError("Model upload failed.\nDo you have sufficient " +
-                    "permissions to create the processing folder on " +
-                    "the remote host?", e);
-          return false;
-        }
-        catch (IOException e) {
-          showError("Model upload failed. Could not read model file.", e);
-          return false;
-        }
 
-        try {
-          boolean weightsUploaded = false;
-          do {
-            String cmd =
-                caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
-                model().remoteAbsolutePath + "\" -weights \"" +
-                weightsFileName() + "\" -n_channels " + _nChannels + " " +
-                caffeGPUParameter();
-            res = Tools.execute(cmd, sshSession(), progressMonitor());
+          String cmd =
+            caffe_unetBinary + " check_model_and_weights_h5 -model \"" +
+            model().remoteAbsolutePath + "\" -weights \"" +
+            weightsFileName() + "\" -n_channels " + _nChannels + " " +
+            caffeGPUParameter();
 
-            if (res.exitStatus != 0) {
-              if (Tools.getCaffeError(res.cerr) > 0) {
-                showMessage("Model check failed:\n" +
-                            Tools.getCaffeErrorString(res.cerr));
+          ProcessResult res = Tools.execute(cmd, session, progressMonitor());
+          if (res.exitStatus != 0) {
+            if (Tools.getCaffeError(res.cerr) > 0) {
+              showMessage("Model check failed:\n" +
+                          Tools.getCaffeErrorString(res.cerr));
+              return false;
+            }
+            IJ.log(Tools.getCaffeErrorString(res.cerr));
+
+            Object[] options = {
+                "Train from scratch", "Upload weights", "Cancel" };
+            int selectedOption = JOptionPane.showOptionDialog(
+                WindowManager.getActiveWindow(),
+                "No compatible pre-trained weights found at the given " +
+                "location on the server.\n" +
+                "Please select whether you want to train from scratch or " +
+                "upload weights.", "No weights found",
+                JOptionPane.YES_NO_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null, options, options[0]);
+            switch (selectedOption) {
+            case JOptionPane.YES_OPTION:
+              _trainFromScratch = true;
+              break;
+            case JOptionPane.NO_OPTION: {
+              File startFile =
+                  (model() == null || model().file == null ||
+                   model().file.getParentFile() == null) ?
+                  new File(".") : model().file.getParentFile();
+              JFileChooser f = new JFileChooser(startFile);
+              f.setDialogTitle("Select trained U-Net weights");
+              f.setFileFilter(
+                  new FileNameExtensionFilter(
+                      "*.h5 or *.caffemodel",
+                      "h5", "H5", "caffemodel", "CAFFEMODEL"));
+              f.setMultiSelectionEnabled(false);
+              f.setFileSelectionMode(JFileChooser.FILES_ONLY);
+              int res2 = f.showDialog(
+                  WindowManager.getActiveWindow(), "Select");
+              if (res2 != JFileChooser.APPROVE_OPTION)
+                  throw new InterruptedException("Aborted by user");
+              try {
+                new SftpFileIO(sshSession(), progressMonitor()).put(
+                    f.getSelectedFile(), weightsFileName());
+              }
+              catch (SftpException e) {
+                showError("Upload failed.\nDo you have sufficient " +
+                          "permissions to create a file at the given " +
+                          "backend server path?", e);
                 return false;
               }
-              IJ.log(Tools.getCaffeErrorString(res.cerr));
+              res = Tools.execute(cmd, session, progressMonitor());
+              if (res.exitStatus != 0) {
+                showMessage("Model check failed:\n" +
+                            Tools.getCaffeErrorString(res.cerr));
+                IJ.log(Tools.getCaffeErrorString(res.cerr));
+                return false;
+              }
+              break;
             }
-
-            if (weightsUploaded && res.exitStatus != 0) break;
-            if (!weightsUploaded && res.exitStatus != 0) {
-              Object[] options = {
-                  "Train from scratch", "Upload weights", "Cancel" };
-              int selectedOption = JOptionPane.showOptionDialog(
-                  WindowManager.getActiveWindow(),
-                  "No compatible pre-trained weights found at the given " +
-                  "location on the server.\n" +
-                  "Please select whether you want to train from scratch or " +
-                  "upload weights.", "No weights found",
-                  JOptionPane.YES_NO_CANCEL_OPTION,
-                  JOptionPane.QUESTION_MESSAGE,
-                  null, options, options[0]);
-              switch (selectedOption) {
-              case JOptionPane.YES_OPTION:
-                _trainFromScratch = true;
-                res.exitStatus = 0;
-                break;
-              case JOptionPane.NO_OPTION: {
-                File startFile =
-                    (model() == null ||
-                     model().file == null ||
-                     model().file.getParentFile() == null) ?
-                    new File(".") : model().file.getParentFile();
-                JFileChooser f = new JFileChooser(startFile);
-                f.setDialogTitle("Select trained U-Net weights");
-                f.setFileFilter(
-                    new FileNameExtensionFilter(
-                        "*.h5 or *.caffemodel",
-                        "h5", "H5", "caffemodel", "CAFFEMODEL"));
-                f.setMultiSelectionEnabled(false);
-                f.setFileSelectionMode(JFileChooser.FILES_ONLY);
-                int res2 = f.showDialog(
-                    WindowManager.getActiveWindow(), "Select");
-                if (res2 != JFileChooser.APPROVE_OPTION)
-                    throw new InterruptedException("Aborted by user");
-                try {
-                  new SftpFileIO(sshSession(), progressMonitor()).put(
-                      f.getSelectedFile(), weightsFileName());
-                  weightsUploaded = true;
-                }
-                catch (SftpException e) {
-                  res.exitStatus = 3;
-                  res.shortErrorString =
-                      "Upload failed.\nDo you have sufficient " +
-                      "permissions to create a file at the given " +
-                      "backend server path?";
-                  res.cerr = e.getMessage();
-                  res.cause = e;
-                  break;
-                }
-                break;
-              }
-              case JOptionPane.CANCEL_OPTION:
-              case JOptionPane.CLOSED_OPTION:
-                throw new InterruptedException("Aborted by user");
-              }
+            case JOptionPane.CANCEL_OPTION:
+            case JOptionPane.CLOSED_OPTION:
+              throw new InterruptedException("Aborted by user");
             }
           }
-          while (res.exitStatus != 0);
         }
         catch (JSchException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "SSH connection error";
-          res.cerr = e.getMessage();
-          res.cause = e;
+          showError("SSH Connection error", e);
+          return false;
         }
         catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
-          res.cause = e;
+          showError("Input/Output Error", e);
+          return false;
         }
       }
-      else {
+    }
+    else {
+
+      if (!_trainFromScratch) {
+
         try {
           Vector<String> cmd = new Vector<String>();
           cmd.add(caffe_unetBinary);
@@ -760,7 +763,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             cmd.add(caffeGPUParameter().split(" ")[0]);
             cmd.add(caffeGPUParameter().split(" ")[1]);
           }
-          res = Tools.execute(cmd, progressMonitor());
+          ProcessResult res = Tools.execute(cmd, progressMonitor());
           if (res.exitStatus != 0) {
             int errCode = Tools.getCaffeError(res.cerr);
             if (errCode != -1)
@@ -780,13 +783,9 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
             switch (selectedOption) {
             case JOptionPane.YES_OPTION:
               _trainFromScratch = true;
-              res.exitStatus = 0;
               break;
             case JOptionPane.NO_OPTION:
-              res.exitStatus = 2;
-              res.shortErrorString = "Weight file selection required";
-              res.cerr = "Weight file " + weightsFileName() + " not found";
-              break;
+              return false;
             case JOptionPane.CANCEL_OPTION:
             case JOptionPane.CLOSED_OPTION:
               throw new InterruptedException("Aborted by user");
@@ -794,48 +793,34 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
           }
         }
         catch (IOException e) {
-          res.exitStatus = 1;
-          res.shortErrorString = "Input/Output error";
-          res.cerr = e.getMessage();
-          res.cause = e;
+          showError("Input/Output Error", e);
+          return false;
         }
       }
-      if (res.exitStatus != 0) {
-        // User decided to change weight file, so don't bother him with
-        // additional message boxes
-        if (res.exitStatus == 2) return false;
-        showError(
-            "Model/Weight check failed:\n" + res.shortErrorString, res.cause);
-        return false;
-      }
-
-      Prefs.set("unet.finetuning.base_learning_rate",
-                (Double)_learningRateTextField.getValue());
-      Prefs.set("unet.finetuning.iterations",
-                (Integer)_iterationsSpinner.getValue());
-      Prefs.set("unet.finetuning.validation_step",
-                (Integer)_validationStepSpinner.getValue());
-      Prefs.set("unet.finetuning.downloadWeights",
-                _downloadWeightsCheckBox.isSelected());
-      Prefs.set("unet.finetuning." + model().id + ".modelName",
-                _modelNameTextField.getText());
-      Prefs.set("unet.finetuning." + model().id + ".outweights",
-                _outweightsTextField.getText());
-      Prefs.set("unet.finetuning." + model().id + ".modeldef",
-                _outModeldefTextField.getText());
-      Prefs.set("unet.finetuning.labelsAreClasses",
-                _labelsAreClassesCheckBox.isSelected());
-
-      _finetunedModel = model().duplicate();
-      _finetunedModel.id += "-" + id();
-      _finetunedModel.file = new File(_outModeldefTextField.getText());
-      _finetunedModel.name = _modelNameTextField.getText();
-      _finetunedModel.weightFile = _outweightsTextField.getText();
     }
-    catch (JSchException e) {
-      showError("SSH connection failed", e);
-      return false;
-    }
+
+    Prefs.set("unet.finetuning.base_learning_rate",
+              (Double)_learningRateTextField.getValue());
+    Prefs.set("unet.finetuning.iterations",
+              (Integer)_iterationsSpinner.getValue());
+    Prefs.set("unet.finetuning.validation_step",
+              (Integer)_validationStepSpinner.getValue());
+    Prefs.set("unet.finetuning.downloadWeights",
+              _downloadWeightsCheckBox.isSelected());
+    Prefs.set("unet.finetuning." + model().id + ".modelName",
+              _modelNameTextField.getText());
+    Prefs.set("unet.finetuning." + model().id + ".outweights",
+              _outweightsTextField.getText());
+    Prefs.set("unet.finetuning." + model().id + ".modeldef",
+              _outModeldefTextField.getText());
+    Prefs.set("unet.finetuning.labelsAreClasses",
+              _labelsAreClassesCheckBox.isSelected());
+
+    _finetunedModel = model().duplicate();
+    _finetunedModel.id += "-" + id();
+    _finetunedModel.file = new File(_outModeldefTextField.getText());
+    _finetunedModel.name = _modelNameTextField.getText();
+    _finetunedModel.weightFile = _outweightsTextField.getText();
 
     return true;
   }
@@ -991,7 +976,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         plot.setColor(Color.black);
         String legendString = "Training\nValidation";
         plot.addLegend(legendString);
-        if (_lossPlotWindow == null) {
+        if (_lossPlotWindow == null || _lossPlotWindow.getPlot() == null) {
           plot.setLimits(0.0, (double)(_xTrain.length - 1), 0.0, Double.NaN);
           _lossPlotWindow = plot.show();
         }
@@ -1023,7 +1008,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         }
         plot.setColor(Color.black);
         plot.addLegend(legendString);
-        if (_iouPlotWindow == null) {
+        if (_iouPlotWindow == null || _iouPlotWindow.getPlot() == null) {
           plot.setLimits(0.0, (double)(_xTrain.length - 1), 0.0, 1.0);
           _iouPlotWindow = plot.show();
         }
@@ -1055,7 +1040,8 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         }
         plot.setColor(Color.black);
         plot.addLegend(legendString);
-        if (_f1DetectionPlotWindow == null) {
+        if (_f1DetectionPlotWindow == null ||
+            _f1DetectionPlotWindow.getPlot() == null) {
           plot.setLimits(0.0, (double)(_xTrain.length - 1), 0.0, 1.0);
           _f1DetectionPlotWindow = plot.show();
         }
@@ -1087,7 +1073,8 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         }
         plot.setColor(Color.black);
         plot.addLegend(legendString);
-        if (_f1SegmentationPlotWindow == null) {
+        if (_f1SegmentationPlotWindow == null ||
+            _f1SegmentationPlotWindow.getPlot() == null) {
           plot.setLimits(0.0, (double)(_xTrain.length - 1), 0.0, 1.0);
           _f1SegmentationPlotWindow = plot.show();
         }

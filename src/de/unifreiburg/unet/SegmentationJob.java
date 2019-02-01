@@ -237,6 +237,13 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
 
     if (!super.checkParameters()) return false;
 
+    if (weightsFileName().isEmpty()) {
+      showMessage(
+          "Please provide a weights file containing the trained network " +
+          "weights.");
+      return false;
+    }
+
     int nChannels =
         (_imp.getType() == ImagePlus.COLOR_256 ||
          _imp.getType() == ImagePlus.COLOR_RGB) ? 3 : _imp.getNChannels();
