@@ -176,6 +176,22 @@ public class ModelDefinition {
     }
   }
 
+  public void setElementSizeUm(String elSizeString)
+      throws NumberFormatException {
+    String[] elSizeTokens = elSizeString.split("x");
+    double[] elSize = new double[elSizeTokens.length];
+    for (int d = 0; d < elSize.length; ++d)
+        elSize[d] = Double.parseDouble(elSizeTokens[d]);
+    this.setElementSizeUm(elSize);
+  }
+
+  public String getElementSizeUmString() {
+    double[] elSize = this.elementSizeUm();
+    String elSizeString = new Double(elSize[0]).toString();
+    for (int d = 1; d < elSize.length; ++d) elSizeString += "x" + elSize[d];
+    return elSizeString;
+  }
+
   public void setElementSizeUm(double[] elSize) {
     if (elSize == null || elSize.length < 2 || elSize.length > 3) return;
 

@@ -1821,7 +1821,6 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
         int maxClassLabel = 0;
         Vector<String> classNames = new Vector<String>();
-        classNames.add("Background");
         for (Object o : ((DefaultListModel<ImagePlus>)
                          _trainFileList.getModel()).toArray()) {
           ImagePlus imp = (ImagePlus)o;
@@ -1905,7 +1904,7 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
         }
 
         boolean imagesContainMaskAnnotations = (maxClassLabel > 0);
-        boolean imagesContainRoiAnnotations = (classNames.size() > 1);
+        boolean imagesContainRoiAnnotations = (classNames.size() > 0);
 
         // If we have no valid annotations of any type, give up
         if (!imagesContainMaskAnnotations && !imagesContainRoiAnnotations) {
@@ -1928,15 +1927,16 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
 
         if (labelsAreClasses) {
           if (imagesContainRoiAnnotations) {
-            _finetunedModel.classNames = new String[classNames.size()];
+            _finetunedModel.classNames = new String[classNames.size() + 1];
+            _finetunedModel.classNames[0] = "Background";
             for (int i = 0; i < classNames.size(); ++i)
-                _finetunedModel.classNames[i] = classNames.get(i);
+                _finetunedModel.classNames[i + 1] = classNames.get(i);
           }
           else {
-            _finetunedModel.classNames = new String[maxClassLabel + 1];
+            _finetunedModel.classNames = new String[maxClassLabel];
             _finetunedModel.classNames[0] = "Background";
-            for (int i = 2; i <= maxClassLabel; ++i)
-                _finetunedModel.classNames[i] = "Class " + (i - 1);
+            for (int i = 1; i < maxClassLabel; ++i)
+                _finetunedModel.classNames[i] = "Class " + i;
           }
         }
         else _finetunedModel.classNames = new String[] {

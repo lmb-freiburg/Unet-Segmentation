@@ -53,6 +53,7 @@ public class MaskExtractor implements PlugIn {
     ImagePlus labels = IJ.createHyperStack(
         imp.getTitle() + " - labels", imp.getWidth(), imp.getHeight(), 1,
         imp.getNSlices(), imp.getNFrames(), 16);
+    labels.setCalibration(imp.getCalibration());
     for (Roi roi : ov.toArray()) {
       if (!(roi instanceof ImageRoi)) continue;
       int tRoi = 1;
@@ -68,7 +69,7 @@ public class MaskExtractor implements PlugIn {
         if (roi.getZPosition() != 0) zRoi = roi.getZPosition();
       }
       labels.getStack().setProcessor(
-          ((ImageRoi)roi).getProcessor().duplicate(),
+          ((ImageRoi)roi).getProcessor().convertToShort(false),
           labels.getStackIndex(1, zRoi, tRoi));
     }
     return labels;

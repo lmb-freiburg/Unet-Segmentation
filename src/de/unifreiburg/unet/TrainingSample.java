@@ -1003,7 +1003,7 @@ public class TrainingSample
 
   private void createLabelsAndWeightBlobsFromMasks(
       ModelDefinition model, boolean labelsAreClasses, ProgressMonitor pr)
-      throws InterruptedException {
+      throws BlobException, InterruptedException {
 
     double[] elementSizeUm = new double[model.nDims()];
     for (int d = 0; d < model.nDims(); ++d)
@@ -1040,14 +1040,15 @@ public class TrainingSample
           pr.init(D);
         }
         ImagePlus tmp = IJ.createHyperStack(
-            "binarylabels", W, H, model.classNames.length - 2, D, 1, 8);
+            "binarylabels", W, H, model.classNames.length - 1, D, 1, 8);
+        tmp.setCalibration(_imp.getCalibration());
         int idx = 0;
         for (int z = 0; z < D; ++z) {
           ImageProcessor ipSrc = impLabels.getStack().getProcessor(
               impLabels.getStackIndex(1, z + 1, t + 1));
           ImageProcessor[] ipDest =
-              new ImageProcessor[model.classNames.length - 2];
-          for (int c = 0; c < model.classNames.length - 2; ++c) {
+              new ImageProcessor[model.classNames.length - 1];
+          for (int c = 0; c < model.classNames.length - 1; ++c) {
             ipDest[c] = tmp.getStack().getProcessor(
                 tmp.getStackIndex(c + 1, z + 1, t + 1));
             ipDest[c].setValue(0);
@@ -1058,6 +1059,10 @@ public class TrainingSample
               int label = (int)ipSrc.getf(x, y);
               classlabelsData[idx] = label;
               if (label < 2) continue;
+              if (label - 1 > model.classNames.length - 1)
+                  throw new BlobException(
+                      "Class label " + label + " out of bounds for " +
+                      (model.classNames.length - 1) + "-class model.");
               ipDest[label - 2].setf(x, y, 255.0f);
             }
           }
@@ -1300,7 +1305,7 @@ public class TrainingSample
           }
           else {
             int label = 1;
-            if (C > 1) {
+            if (labelsAreClasses) {
               while (label < model.classNames.length &&
                      !rl.className.equals(model.classNames[label])) ++label;
               if (label == model.classNames.length)
