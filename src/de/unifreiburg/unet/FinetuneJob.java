@@ -61,6 +61,7 @@ import javax.swing.JLabel;
 import javax.swing.JButton;
 import javax.swing.JTextField;
 import javax.swing.JFormattedTextField;
+import javax.swing.text.DefaultFormatter;
 import javax.swing.text.NumberFormatter;
 import javax.swing.JList;
 import javax.swing.DefaultListModel;
@@ -364,6 +365,8 @@ public class FinetuneJob extends CaffeJob implements PlugIn {
     _fromImageButton.setToolTipText(
         "Use native image element size for finetuning");
     JLabel learningRateLabel = new JLabel("Learning rate:");
+    ((DefaultFormatter)_learningRateTextField.getFormatter()).setValueClass(
+        Double.class);
     _learningRateTextField.setValue(
         (Double)Prefs.get("unet.finetuning.base_learning_rate", 1e-4));
     _learningRateTextField.setToolTipText(
