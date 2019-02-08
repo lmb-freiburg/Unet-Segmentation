@@ -126,9 +126,10 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
 
     String[] parameterStrings = params.split(",");
     Map<String,String> parameters = new HashMap<String,String>();
-    for (int i = 0; i < parameterStrings.length; i++)
-        parameters.put(parameterStrings[i].split("=")[0],
-                       parameterStrings[i].split("=")[1]);
+    for (int i = 0; i < parameterStrings.length; i++) {
+      String[] param = parameterStrings[i].split("=");
+      parameters.put(param[0], (param.length > 1) ? param[1] : "");
+    }
     ModelDefinition model = new ModelDefinition(job);
     model.load(new File(parameters.get("modelFilename")));
     job.setModel(model);
