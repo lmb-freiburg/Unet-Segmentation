@@ -7,8 +7,13 @@ project(Unet_Segmentation Java)
 
 set(CMAKE_JAVA_COMPILE_FLAGS "-Xlint:unchecked" "-deprecation")
 
-find_program(FIJI_BIN ImageJ-linux64 DOC "The Fiji binary")
-find_program(PROTOBUF_COMPILER protoc DOC "Google Protobuf compiler")
+if (WIN32)
+  find_program(FIJI_BIN ImageJ-win64.exe DOC "The Fiji binary")
+  find_program(PROTOBUF_COMPILER protoc.exe DOC "Google Protobuf compiler")
+else ()
+  find_program(FIJI_BIN ImageJ-linux64 DOC "The Fiji binary")
+  find_program(PROTOBUF_COMPILER protoc DOC "Google Protobuf compiler")
+endif (WIN32)
 get_filename_component(FIJI_DIR ${FIJI_BIN} DIRECTORY)
 
 # Get current version of ij.jar
@@ -32,9 +37,15 @@ get_filename_component(JSCH_JAR_FILENAME ${JSCH_JAR_ABSPATH} NAME)
 string(REGEX REPLACE "[.]jar.*" "" JSCH_JAR_BASENAME ${JSCH_JAR_FILENAME})
 find_jar(JSCH_JAR "${JSCH_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the Java Secure Shell library jsch-<version>.jar")
 
-set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROJECT_SOURCE_DIR}/protobuf-java-3.3.1.jar)
+# Get current version of protobuf-java.jar
+execute_process(COMMAND find ${FIJI_DIR}/jars -name "protobuf-java-*.jar" OUTPUT_VARIABLE PROTOBUF_JAVA_JAR_ABSPATH)
+get_filename_component(PROTOBUF_JAVA_JAR_FILENAME ${PROTOBUF_JAVA_JAR_ABSPATH} NAME)
+string(REGEX REPLACE "[.]jar.*" "" PROTOBUF_JAVA_JAR_BASENAME ${PROTOBUF_JAVA_JAR_FILENAME})
+find_jar(PROTOBUF_JAVA_JAR "${PROTOBUF_JAVA_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the google protobuf library protobuf_java-<version>.jar")
 
-add_jar(Unet_Segmentation
+set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROTOBUF_JAVA_JAR})
+
+set(Unet_Segmentation_SRCS
   src/de/unifreiburg/unet/JobManager.java
   src/de/unifreiburg/unet/JobManagerPlugin.java
   src/de/unifreiburg/unet/JobTableModel.java
@@ -91,10 +102,13 @@ add_jar(Unet_Segmentation
   src/de/unifreiburg/unet/SoftmaxWithLossLayer.java
   src/de/unifreiburg/unet/SplitLayer.java
   src/de/unifreiburg/unet/URLOpener.java
-  caffe/Caffe.java
+  caffe/Caffe.java)
+
+add_jar(Unet_Segmentation
+  ${Unet_Segmentation_SRCS}
   caffe/caffe.proto COPYING.txt plugins.config
   test/TestNetworkAnalyzer.java
-  resources/README.html INCLUDE_JARS protobuf-java-3.3.1.jar)
+  resources/README.html)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)
 
@@ -111,8 +125,7 @@ add_custom_command(OUTPUT ${PROJECT_SOURCE_DIR}/caffe/Caffe.java
 install_jar(Unet_Segmentation ${CMAKE_INSTALL_PREFIX})
 
 create_javadoc(doc
-  PACKAGES de.unifreiburg.unet caffe
-  SOURCEPATH "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src"
+  FILES ${Unet_Segmentation_SRCS}
   CLASSPATH ${CMAKE_JAVA_INCLUDE_PATH}
   INSTALLPATH "${CMAKE_BINARY_DIR}"
   WINDOWTITLE "U-Net Segmentation"
