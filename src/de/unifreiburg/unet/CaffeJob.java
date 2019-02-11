@@ -442,8 +442,9 @@ public abstract class CaffeJob extends Job {
       return false;
     }
 
+    Session session = null;
     try {
-      sshSession();
+      session = sshSession();
     }
     catch (JSchException e) {
       showError("Could not connect to " + _hostConfiguration.hostname() +
@@ -451,143 +452,147 @@ public abstract class CaffeJob extends Job {
       return false;
     }
 
-    try
-    {
-      if (sshSession() != null) {
+    // Check for file creating access rights
+    if (session != null) {
+      // Check whether temporary files can be written to the local tmp folder
+      // and then uploaded to the remote process folder
+      try {
+        File tmpFile = File.createTempFile(id(), null);
+        SftpFileIO sftp = new SftpFileIO(session, progressMonitor());
+        _createdRemoteFolders.addAll(
+            sftp.put(tmpFile, processFolder() + tmpFile.getName()));
+        sftp.removeFile(processFolder() + tmpFile.getName());
+        tmpFile.delete();
+      }
+      catch (IOException e) {
+        showError(
+            "Cannot create files in the temporary folder of your " +
+            "local file system.\n" +
+            "Check write permissions and avaliable disk space.", e);
+        return false;
+      }
+      catch (SftpException e) {
+        showError("File upload to " + processFolder() + " failed.\n" +
+                  "Please select a folder with write permissions.", e);
+        return false;
+      }
+      catch (JSchException e) {
+        showError("File upload to " + processFolder() + " failed.\n" +
+                  "SSH connection error.", e);
+        return false;
+      }
+    }
+    else {
+      // Check whether files can be written to the local process folder
+      try {
+        File tmpFile = new File(processFolder() + id() + ".tmp");
+        tmpFile.createNewFile();
+        tmpFile.delete();
+      }
+      catch (IOException e) {
+        showError("Cannot write to " + processFolder() + ".\n" +
+                  "Check write permissions and avaliable disk space.", e);
+        return false;
+      }
+    }
+
+    // Check whether caffe_unet binary exists and is executable
+    ProcessResult res = null;
+    String caffeUnetBinaryPath =
+        Prefs.get("unet.caffe_unetBinary", "caffe_unet");
+    do {
+      if (session == null) {
         try {
-          File tmpFile = File.createTempFile(id(), null);
-          SftpFileIO sftp = new SftpFileIO(sshSession(), progressMonitor());
-          _createdRemoteFolders.addAll(
-              sftp.put(tmpFile, processFolder() + tmpFile.getName()));
-          sftp.removeFile(processFolder() + tmpFile.getName());
-          tmpFile.delete();
+          Vector<String> cmd = new Vector<String>();
+          cmd.add(caffeUnetBinaryPath);
+          res = Tools.execute(cmd, progressMonitor());
         }
         catch (IOException e) {
-          showError(
-              "Cannot create files in the temporary folder of your " +
-              "local file system.\n" +
-              "Check write permissions and avaliable disk space.", e);
-          return false;
-        }
-        catch (SftpException e) {
-          showError("File upload to " + processFolder() + " failed.\n" +
-                    "Please select a folder with write permissions.", e);
-          return false;
+          res = new ProcessResult();
+          res.exitStatus = 1;
+          res.cause = e;
         }
       }
       else {
         try {
-          File tmpFile = new File(processFolder() + id() + ".tmp");
-          tmpFile.createNewFile();
-          tmpFile.delete();
+          String cmd = caffeUnetBinaryPath;
+          res = Tools.execute(cmd, session, progressMonitor());
+        }
+        catch (JSchException e) {
+          res.exitStatus = 1;
+          res.cause = e;
         }
         catch (IOException e) {
-          showError("Cannot write to " + processFolder() + ".\n" +
-                    "Check write permissions and avaliable disk space.", e);
-          return false;
+          res.exitStatus = 1;
+          res.cause = e;
         }
       }
-
-      // Check whether caffe binary exists and is executable
-      ProcessResult res = null;
-      String caffeBinaryPath = Prefs.get("unet.caffeBinary", "caffe");
-      String caffeBaseDir = caffeBinaryPath.replaceFirst("[^/]*$", "");
-      while (res == null)
-      {
-        if (sshSession() == null) {
-          try {
-            Vector<String> cmd = new Vector<String>();
-            cmd.add(caffeBinaryPath);
-            res = Tools.execute(cmd, progressMonitor());
-          }
-          catch (IOException e) {
-            res = new ProcessResult();
-            res.exitStatus = 1;
-            res.cause = e;
-          }
-        }
-        else {
-          try {
-            String cmd = caffeBinaryPath;
-            res = Tools.execute(cmd, sshSession(), progressMonitor());
-          }
-          catch (JSchException e) {
-            res.exitStatus = 1;
-            res.cause = e;
-          }
-          catch (IOException e) {
-            res.exitStatus = 1;
-            res.cause = e;
-          }
-        }
-        if (res.exitStatus != 0) {
-          IJ.log("caffe not found");
-          if (res.cause != null) IJ.log("Error message: " + res.cause);
-          String caffePath = JOptionPane.showInputDialog(
-              WindowManager.getActiveWindow(), "caffe was not found.\n" +
-              "Please specify your caffe binary\n",
-              Prefs.get("unet.caffeBinary", caffeBaseDir + "caffe"));
-          if (caffePath == null)
-              throw new InterruptedException("Dialog canceled");
-          if (caffePath.equals(""))
-              Prefs.set("unet.caffeBinary", caffeBaseDir + "caffe");
-          else Prefs.set("unet.caffeBinary", caffePath);
-          res = null;
-        }
-      }
-
-      // Check whether caffe_unet binary exists and is executable
-      res = null;
-      while (res == null)
-      {
-        if (sshSession() == null) {
-          try {
-            Vector<String> cmd = new Vector<String>();
-            cmd.add(Prefs.get(
-                        "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-            res = Tools.execute(cmd, progressMonitor());
-          }
-          catch (IOException e) {
-            res = new ProcessResult();
-            res.exitStatus = 1;
-            res.cause = e;
-          }
-        }
-        else {
-          try {
-            String cmd = Prefs.get(
-                "unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
-            res = Tools.execute(cmd, sshSession(), progressMonitor());
-          }
-          catch (JSchException e) {
-            res.exitStatus = 1;
-            res.cause = e;
-          }
-          catch (IOException e) {
-            res.exitStatus = 1;
-            res.cause = e;
-          }
-        }
-        if (res.exitStatus != 0) {
-          IJ.log("caffe_unet not found");
-          if (res.cause != null) IJ.log("Error message: " + res.cause);
-          String caffePath = JOptionPane.showInputDialog(
-              WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
-              "Please specify your caffe_unet binary\n",
-              Prefs.get("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet"));
-          if (caffePath == null)
-              throw new InterruptedException("Dialog canceled");
-          if (caffePath.equals(""))
-              Prefs.set("unet.caffe_unetBinary", caffeBaseDir + "caffe_unet");
-          else Prefs.set("unet.caffe_unetBinary", caffePath);
-          res = null;
-        }
+      if (res.exitStatus != 0) {
+        IJ.log("caffe_unet not found");
+        if (res.cause != null) IJ.log("Error message: " + res.cause);
+        caffeUnetBinaryPath = JOptionPane.showInputDialog(
+            WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
+            "Please specify your caffe_unet binary\n", caffeUnetBinaryPath);
+        if (caffeUnetBinaryPath == null)
+            throw new InterruptedException("Dialog canceled");
+        if (caffeUnetBinaryPath == "") caffeUnetBinaryPath = "caffe_unet";
+        res = null;
       }
     }
-    catch (JSchException e) {
-      showError("SSH connection failed", e);
-      return false;
+    while (res == null);
+
+    Prefs.set("unet.caffe_unetBinary", caffeUnetBinaryPath);
+    IJ.log("Setting caffe_unet binary path to " + caffeUnetBinaryPath);
+    String caffeUnetBaseDir = caffeUnetBinaryPath.replaceFirst("[^/]*$", "");
+
+    // Check whether caffe binary exists and is executable
+    String caffeBinaryPath =
+        Prefs.get("unet.caffeBinary", caffeUnetBaseDir + "caffe");
+    if (caffeBinaryPath.equals("caffe"))
+        caffeBinaryPath = caffeUnetBaseDir + "caffe";
+    IJ.log("Searching for " + caffeBinaryPath);
+    do {
+      if (session == null) {
+        try {
+          Vector<String> cmd = new Vector<String>();
+          cmd.add(caffeBinaryPath);
+          res = Tools.execute(cmd, progressMonitor());
+        }
+        catch (IOException e) {
+          res = new ProcessResult();
+          res.exitStatus = 1;
+          res.cause = e;
+        }
+      }
+      else {
+        try {
+          String cmd = caffeBinaryPath;
+          res = Tools.execute(cmd, session, progressMonitor());
+        }
+        catch (JSchException e) {
+          res.exitStatus = 1;
+          res.cause = e;
+        }
+        catch (IOException e) {
+          res.exitStatus = 1;
+          res.cause = e;
+        }
+      }
+      if (res.exitStatus != 0) {
+        IJ.log("caffe not found");
+        if (res.cause != null) IJ.log("Error message: " + res.cause);
+        caffeBinaryPath = JOptionPane.showInputDialog(
+            WindowManager.getActiveWindow(), "caffe was not found.\n" +
+            "Please specify your caffe binary\n", caffeBinaryPath);
+        if (caffeBinaryPath == null)
+            throw new InterruptedException("Dialog canceled");
+        if (caffeBinaryPath == "") caffeBinaryPath = "caffe";
+        res = null;
+      }
     }
+    while (res == null);
+
+    Prefs.set("unet.caffeBinary", caffeBinaryPath);
 
     return true;
   }
