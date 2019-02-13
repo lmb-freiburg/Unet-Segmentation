@@ -500,6 +500,7 @@ public abstract class CaffeJob extends Job {
     ProcessResult res = null;
     String caffeUnetBinaryPath =
         Prefs.get("unet.caffe_unetBinary", "caffe_unet");
+    if (caffeUnetBinaryPath.isEmpty()) caffeUnetBinaryPath = "caffe_unet";
     do {
       if (session == null) {
         try {
@@ -548,7 +549,7 @@ public abstract class CaffeJob extends Job {
     // Check whether caffe binary exists and is executable
     String caffeBinaryPath =
         Prefs.get("unet.caffeBinary", caffeUnetBaseDir + "caffe");
-    if (caffeBinaryPath.equals("caffe"))
+    if (caffeBinaryPath.isEmpty() || caffeBinaryPath.equals("caffe"))
         caffeBinaryPath = caffeUnetBaseDir + "caffe";
     IJ.log("Searching for " + caffeBinaryPath);
     do {
