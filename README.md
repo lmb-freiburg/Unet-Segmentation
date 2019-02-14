@@ -11,7 +11,7 @@ The plugin requires connection to a Linux workstation (can be the local computer
 ## U-Net Segmentation backend caffe_unet (binaries, source, docker)
 
 Obtain the U-Net segmentation backend (caffe_unet) binaries and corresponding caffe source patch from the [project page](https://lmb.informatik.uni-freiburg.de/resources/opensource/unet).
-Please also check our [caffe-unet-docker](https://hithub.com/lmb-freiburg/caffe-unet-docker) repository.
+Please also check our [caffe-unet-docker](https://github.com/lmb-freiburg/caffe-unet-docker) repository.
 
 ## Build from source
 
