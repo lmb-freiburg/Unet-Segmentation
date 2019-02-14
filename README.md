@@ -3,12 +3,19 @@
 This is the source of the U-Net Segmentation plugin for Fiji.
 You can obtain the latest stable version directly from the Fiji updater via update site "U-Net Segmentation".
 
-Please see https://lmb.informatik.uni-freiburg.de/resources/opensource/unet for more details.
-Also check our Fiji update site https://sites.imagej.net/Falk/plugins/
+For more details check our [project page](https://lmb.informatik.uni-freiburg.de/resources/opensource/unet).
+Binary releases are available on our [Fiji update site](https://sites.imagej.net/Falk/plugins/)
+
+The plugin requires connection to a Linux workstation (can be the local computer) running a special variant of caffe (caffe_unet).
+
+## U-Net Segmentation backend caffe_unet (binaries, source, docker)
+
+Obtain the U-Net segmentation backend (caffe_unet) binaries and corresponding caffe source patch from the [project page](https://lmb.informatik.uni-freiburg.de/resources/opensource/unet).
+Please also check our [caffe-unet-docker](https://hithub.com/lmb-freiburg/caffe-unet-docker) repository.
 
 ## Build from source
 
-I recommend to use Linux for building from source, in theory building on Windows should work, but it is not tested.
+We recommend to use Linux for building from source, in theory building on Windows should work, but it is not tested.
 
 ### Prerequisites:
 - cmake
@@ -35,4 +42,3 @@ cd /home/user/Unet-Segmentation/build
 cmake -DCMAKE_INSTALL_PREFIX=/home/user/Fiji.app/plugins -DFIJI_BIN=/home/user/Fiji.app/ImageJ-linux64  ..
 make install
 ```
-
