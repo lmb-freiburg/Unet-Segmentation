@@ -168,12 +168,10 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
                   // by slash characters to make the call platform-independent
                   String command =
                       "call('de.unifreiburg.unet.SegmentationJob." +
-                      "processHyperStack', " +
-                      "'modelFilename=" +
-                      model().file.getAbsolutePath().replace("\\", "/") +
+                      "processHyperStack', '" +
+                      model().getMacroParameterString() +
                       ",weightsFilename=" +
                       weightsFileName().replace("\\", "/") +
-                      "," + model().getTilingParameterString() +
                       ",gpuId=" + selectedGPUString() +
                       "," + hostConfiguration().getMacroParameterString() +
                       ",processFolder=" + processFolder() +
@@ -596,11 +594,8 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
       String[] param = parameterStrings[i].split("=");
       parameters.put(param[0], (param.length > 1) ? param[1] : "");
     }
-    ModelDefinition model = new ModelDefinition(job);
-    model.load(new File(parameters.get("modelFilename")));
-    job.setModel(model);
+    job.setModel(new ModelDefinition(job, parameters));
     job.setWeightsFileName(parameters.get("weightsFilename"));
-    job.model().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
     try
     {

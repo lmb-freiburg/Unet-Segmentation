@@ -77,10 +77,10 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
                   Recorder.setCommand(null);
                   String command =
                       "call('de.unifreiburg.unet.DetectionJob." +
-                      "processHyperStack', " +
-                      "'modelFilename=" + model().file.getAbsolutePath() +
-                      ",weightsFilename=" + weightsFileName() +
-                      "," + model().getTilingParameterString() +
+                      "processHyperStack', '" +
+                      model().getMacroParameterString() +
+                      ",weightsFilename=" +
+                      weightsFileName().replace("\\", "/") +
                       ",gpuId=" + selectedGPUString() +
                       "," + hostConfiguration().getMacroParameterString() +
                       ",processFolder=" + processFolder() +
@@ -101,15 +101,8 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
               finishJob();
             }
           };
-      finishThread.start();
-      if (!isInteractive()) {
-        try {
-          finishThread.join();
-        }
-        catch (InterruptedException e) {
-          abort();
-        }
-      }
+      if (isInteractive()) finishThread.start();
+      else finishThread.run();
     }
     catch (IllegalThreadStateException e) {}
   }
@@ -130,11 +123,8 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
       String[] param = parameterStrings[i].split("=");
       parameters.put(param[0], (param.length > 1) ? param[1] : "");
     }
-    ModelDefinition model = new ModelDefinition(job);
-    model.load(new File(parameters.get("modelFilename")));
-    job.setModel(model);
+    job.setModel(new ModelDefinition(job, parameters));
     job.setWeightsFileName(parameters.get("weightsFilename"));
-    job.model().setFromTilingParameterString(parameterStrings[2]);
     job.setGPUString(parameters.get("gpuId"));
     try
     {
@@ -155,9 +145,8 @@ public class DetectionJob extends SegmentationJob implements PlugIn {
         Boolean.valueOf(parameters.get("outputSoftmaxScores")));
     job.setInteractive(false);
 
-    job.start();
-    // Block until segmentation is finished
-    job.join();
+    // Run blocking on current thread
+    job.run();
   }
 
 };

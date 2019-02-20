@@ -39,6 +39,7 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Map;
 
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
@@ -66,6 +67,8 @@ import caffe.Caffe;
 import com.google.protobuf.TextFormat;
 import com.google.protobuf.TextFormat.ParseException;
 
+// All arrays involving dimensions are ordered [z],y,x but shown in
+// oppsite order in the GUI!
 public class ModelDefinition {
 
   private Job _job = null;
@@ -89,10 +92,13 @@ public class ModelDefinition {
   public int[] padInput = null;
   public int[] padOutput = null;
   public int[][] memoryMap = null;
-  public float borderWeightFactor = 50.0f;
-  public float borderWeightSigmaPx = 6.0f;
-  public float foregroundBackgroundRatio = 0.1f;
-  public float sigma1Px = 10.0f;
+  public float borderWeightFactor =
+      (float)Prefs.get("unet.borderWeightFactor", 50.0f);
+  public float borderWeightSigmaPx =
+      (float)Prefs.get("unet.borderWeightSigmaPx", 6.0f);
+  public float foregroundBackgroundRatio =
+      (float)Prefs.get("unet.foregroundBackgroundRatio", 0.1f);
+  public float sigma1Px = (float)Prefs.get("unet.sigma1Px", 10.0f);
   public String[] classNames = null;
 
   public String weightFile = null;
@@ -109,26 +115,168 @@ public class ModelDefinition {
   private static final String MEMORY = "Memory (MB):";
 
   private JSpinner _nTilesSpinner = null;
-  private ChangeListener _nTilesChangeListener = null;
-  private JSpinner _shapeXSpinner = null;
-  private JSpinner _shapeYSpinner = null;
-  private JSpinner _shapeZSpinner = null;
-  private ChangeListener _shapeChangeUpdateGridAndNTilesListener = null;
-  private ChangeListener _shapeChangeUpdateMemoryListener = null;
-  private JSpinner _gridXSpinner = null;
-  private JSpinner _gridYSpinner = null;
-  private JSpinner _gridZSpinner = null;
-  private ChangeListener _gridChangeListener = null;
+  private final ChangeListener _nTilesChangeListener = new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+              if (!(_job instanceof SegmentationJob) ||
+                  (_gridSpinners == null && _shapeSpinners == null)) return;
+              ImagePlus imp = ((SegmentationJob)_job).image();
+
+              int[] scaledShape = getScaledShape(imp);
+              if (scaledShape == null) return;
+
+              int[] outTileShape = new int[_nDims];
+              int nTilesWanted = (Integer)_nTilesSpinner.getValue();
+              int nTiles = 1;
+              for (int d = 0; d < _nDims; ++d) {
+                outTileShape[d] = _minOutTileShape[d];
+                nTiles *= (int)Math.ceil(
+                    (double)scaledShape[d] / (double)outTileShape[d]);
+              }
+              int currentDim = 0;
+              while (nTiles > nTilesWanted) {
+                while (outTileShape[currentDim] >= scaledShape[currentDim])
+                    currentDim = (currentDim + 1) % _nDims;
+                outTileShape[currentDim] += downsampleFactor[currentDim];
+                nTiles = 1;
+                for (int d = 0; d < _nDims; ++d)
+                    nTiles *= (int)Math.ceil(
+                        (double)scaledShape[d] / (double)outTileShape[d]);
+                currentDim = (currentDim + 1) % _nDims;
+              }
+
+              // Update tile grid spinners
+              for (int d = 0; d < _nDims; ++d) {
+                if (_gridSpinners != null && d < _gridSpinners.length &&
+                    _gridSpinners[d] != null) {
+                  _gridSpinners[d].removeChangeListener(_gridChangeListener);
+                  _gridSpinners[d].setValue(
+                      (int)Math.ceil((double)scaledShape[d] /
+                                     (double)outTileShape[d]));
+                  _gridSpinners[d].addChangeListener(_gridChangeListener);
+                }
+              }
+
+              // Update tile shape spinners, this triggers recomputation of
+              // memory consumption
+              for (int d = 0; d < _nDims; ++d) {
+                if (_shapeSpinners != null && d < _shapeSpinners.length &&
+                    _shapeSpinners[d] != null) {
+                  _shapeSpinners[d].removeChangeListener(
+                      _shapeChangeUpdateGridAndNTilesListener);
+                  _shapeSpinners[d].setValue(outTileShape[d]);
+                  _shapeSpinners[d].addChangeListener(
+                      _shapeChangeUpdateGridAndNTilesListener);
+                }
+              }
+            }
+          };
+
+  private JSpinner[] _shapeSpinners = null;
+  private final ChangeListener _shapeChangeUpdateGridAndNTilesListener =
+      new ChangeListener() {
+        @Override
+        public void stateChanged(ChangeEvent e) {
+          if (!(_job instanceof SegmentationJob) ||
+              (_gridSpinners == null && _nTilesSpinner == null)) return;
+          ImagePlus imp = ((SegmentationJob)_job).image();
+          int[] scaledShape = getScaledShape(imp);
+          int[] tileShape = getTileShape();
+          if (scaledShape == null) return;
+          int nTiles = 1;
+          for (int d = 0; d < _nDims; ++d) {
+            int grid = (int)Math.ceil(
+                (double)scaledShape[d] / (double)tileShape[d]);
+            nTiles *= grid;
+            if (_gridSpinners != null && d < _gridSpinners.length &&
+                _gridSpinners[d] != null) {
+              _gridSpinners[d].removeChangeListener(_gridChangeListener);
+              _gridSpinners[d].setValue(grid);
+              _gridSpinners[d].addChangeListener(_gridChangeListener);
+            }
+          }
+          if (_nTilesSpinner != null) {
+            _nTilesSpinner.removeChangeListener(_nTilesChangeListener);
+            _nTilesSpinner.setValue(nTiles);
+            _nTilesSpinner.addChangeListener(_nTilesChangeListener);
+          }
+        }
+      };
+
+  private final ChangeListener _shapeChangeUpdateMemoryListener =
+      new ChangeListener() {
+        @Override
+        public void stateChanged(ChangeEvent e) {
+          if (_job instanceof SegmentationJob) {
+            long mem = computeMemoryConsumptionInTestPhase(false);
+            if (mem != -1) {
+              long memCuDNN = computeMemoryConsumptionInTestPhase(true);
+              _memoryRequiredPanel.setText(
+                  " No cuDNN: " + mem / 1024 / 1024 + " MB     cuDNN: " +
+                  memCuDNN / 1024 / 1024 + " MB");
+            }
+          }
+          else if (_job instanceof FinetuneJob) {
+            long mem = computeMemoryConsumptionInTrainPhase(false);
+            if (mem != -1) {
+              long memCuDNN = computeMemoryConsumptionInTrainPhase(true);
+              _memoryRequiredPanel.setText(
+                  " No cuDNN: " + mem / 1024 / 1024 + " MB     cuDNN: " +
+                  memCuDNN / 1024 / 1024 + " MB");
+            }
+          }
+        }
+      };
+
+  private JSpinner[] _gridSpinners = null;
+  private final ChangeListener _gridChangeListener = new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            if (_job instanceof SegmentationJob) {
+              ImagePlus imp = ((SegmentationJob)_job).image();
+              int[] scaledShape = getScaledShape(imp);
+              if (scaledShape == null) return;
+              int[] outTileShape = new int[_nDims];
+              int nTiles = 1;
+              for (int d = 0; d < _nDims; ++d) {
+                outTileShape[d] = Math.max(
+                    (int)Math.ceil(
+                        (double)(
+                            ((int)Math.ceil(
+                                (double)scaledShape[d] /
+                                ((Integer)_gridSpinners[d].getValue())
+                                .doubleValue())) - _minOutTileShape[d]) /
+                        (double)downsampleFactor[d]) * downsampleFactor[d] +
+                    _minOutTileShape[d], _minOutTileShape[d]);
+                if (_shapeSpinners[d] != null) {
+                  _shapeSpinners[d].removeChangeListener(
+                      _shapeChangeUpdateGridAndNTilesListener);
+                  _shapeSpinners[d].setValue(outTileShape[d]);
+                  _shapeSpinners[d].addChangeListener(
+                      _shapeChangeUpdateGridAndNTilesListener);
+                }
+                nTiles *= (Integer)_gridSpinners[d].getValue();
+              }
+              if (_nTilesSpinner != null) {
+                _nTilesSpinner.removeChangeListener(_nTilesChangeListener);
+                _nTilesSpinner.setValue(nTiles);
+                _nTilesSpinner.addChangeListener(_nTilesChangeListener);
+              }
+            }
+          }
+        };
+
   private JSpinner _gpuMemSpinner = null;
 
   private final JPanel _elementSizeUmPanel = new JPanel(
       new FlowLayout(FlowLayout.LEFT, 0, 0));
-  private final JSpinner _elSizeXSpinner = new JSpinner(
-      new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01));
-  private final JSpinner _elSizeYSpinner = new JSpinner(
-      new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01));
-  private final JSpinner _elSizeZSpinner = new JSpinner(
-      new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01));
+  private final JSpinner[] _elSizeSpinners = new JSpinner[] {
+      new JSpinner(
+          new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01)),
+      new JSpinner(
+          new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01)),
+      new JSpinner(
+          new SpinnerNumberModel(1.0, 0.0000001, 1000000.0, 0.01)) };
 
   public ModelDefinition() {
     this(null);
@@ -151,12 +299,46 @@ public class ModelDefinition {
     _elementSizeUmPanel.setBorder(
         BorderFactory.createEmptyBorder(0, 0, 0, 0));
     ((FlowLayout)_elementSizeUmPanel.getLayout()).setAlignOnBaseline(true);
-    ((JSpinner.NumberEditor)_elSizeXSpinner.getEditor())
-      .getFormat().applyPattern("######0.0######");
-    ((JSpinner.NumberEditor)_elSizeYSpinner.getEditor())
-      .getFormat().applyPattern("######0.0######");
-    ((JSpinner.NumberEditor)_elSizeZSpinner.getEditor())
-      .getFormat().applyPattern("######0.0######");
+    for (int d = 0; d < 3; ++d)
+        ((JSpinner.NumberEditor)_elSizeSpinners[d].getEditor())
+            .getFormat().applyPattern("######0.0######");
+  }
+
+  public ModelDefinition(Job job, Map<String,String> parameters)
+      throws HDF5Exception {
+
+    this(job);
+
+    if (parameters == null || !parameters.containsKey("modelFilename")) return;
+
+    file = new File(parameters.get("modelFilename"));
+    load();
+
+    if (parameters.containsKey(SHAPE)) {
+      _tileModeSelector.setSelectedItem(SHAPE);
+      String[] st = parameters.get(SHAPE).split("x");
+      for (int d = 0; d < _nDims && d < st.length; ++d)
+          _shapeSpinners[_nDims - d - 1].setValue(Integer.valueOf(st[d]));
+    }
+
+    if (_nDims == 2) {
+      if (parameters.containsKey(NTILES)) {
+        _tileModeSelector.setSelectedItem(NTILES);
+        _nTilesSpinner.setValue(Integer.valueOf(parameters.get(NTILES)));
+      }
+
+      if (parameters.containsKey(GRID)) {
+        _tileModeSelector.setSelectedItem(GRID);
+        String[] st = parameters.get(GRID).split("x");
+        for (int d = 0; d < _nDims && d < st.length; ++d)
+            _gridSpinners[_nDims - d - 1].setValue(Integer.valueOf(st[d]));
+      }
+
+      if (parameters.containsKey(MEMORY) && _gpuMemSpinner != null) {
+        _tileModeSelector.setSelectedItem(MEMORY);
+        _gpuMemSpinner.setValue(Integer.valueOf(parameters.get(MEMORY)));
+      }
+    }
   }
 
   private void _initGUIElements() {
@@ -174,6 +356,16 @@ public class ModelDefinition {
           (String)Prefs.get("unet." + id + ".tilingOption",
                             (String)_tileModeSelector.getSelectedItem()));
     }
+    if (_tileModeSelector.getSelectedItem().equals(SHAPE)) {
+      _shapeChangeUpdateGridAndNTilesListener.stateChanged(
+          new ChangeEvent(_shapeSpinners[0]));
+      _shapeChangeUpdateMemoryListener.stateChanged(
+          new ChangeEvent(_shapeSpinners[0]));
+    }
+    if (_tileModeSelector.getSelectedItem().equals(GRID))
+        _gridChangeListener.stateChanged(new ChangeEvent(_gridSpinners[0]));
+    if (_tileModeSelector.getSelectedItem().equals(NTILES))
+        _nTilesChangeListener.stateChanged(new ChangeEvent(_nTilesSpinner));
   }
 
   public void setElementSizeUm(String elSizeString)
@@ -196,44 +388,37 @@ public class ModelDefinition {
     if (elSize == null || elSize.length < 2 || elSize.length > 3) return;
 
     // Model dimension is not set ==> Panel must be initialized
-    if (_nDims == -1) {
+    if (!isValid()) {
       _nDims = elSize.length;
       _elementSizeUmPanel.removeAll();
       _elementSizeUmPanel.add(new JLabel(" x: "));
-      _elementSizeUmPanel.add(_elSizeXSpinner);
+      _elementSizeUmPanel.add(_elSizeSpinners[_nDims - 1]);
       _elementSizeUmPanel.add(new JLabel(" y: "));
-      _elementSizeUmPanel.add(_elSizeYSpinner);
+      _elementSizeUmPanel.add(_elSizeSpinners[_nDims - 2]);
       if (_nDims == 3) {
         _elementSizeUmPanel.add(new JLabel(" z: "));
-        _elementSizeUmPanel.add(_elSizeZSpinner);
+        _elementSizeUmPanel.add(_elSizeSpinners[_nDims - 3]);
       }
     }
 
     // Case 1: _nDims and given element size dimension match ==> update
     if (elSize.length == _nDims) {
-      if (_nDims == 2) {
-        _elSizeXSpinner.setValue((double)elSize[1]);
-        _elSizeYSpinner.setValue((double)elSize[0]);
-      }
-      else {
-        _elSizeXSpinner.setValue((double)elSize[2]);
-        _elSizeYSpinner.setValue((double)elSize[1]);
-        _elSizeZSpinner.setValue((double)elSize[0]);
-      }
+      for (int d = 0; d < _nDims; ++d)
+          _elSizeSpinners[d].setValue((double)elSize[d]);
       return;
     }
 
-    // Case 2: _nDims == 2 & elSize.length = 3 ==> update spatial dimensions
+    // Case 2: _nDims == 2 && elSize.length == 3 ==> update spatial dimensions
     if (elSize.length == 3 && _nDims == 2) {
-      _elSizeXSpinner.setValue((double)elSize[2]);
-      _elSizeYSpinner.setValue((double)elSize[1]);
+      for (int d = 0; d < _nDims; ++d)
+          _elSizeSpinners[d].setValue((double)elSize[d + 1]);
       return;
     }
 
-    // Case 3: _nDims == 3 & elSize.length = 2 ==> update spatial dimensions
+    // Case 3: _nDims == 3 && elSize.length == 2 ==> update spatial dimensions
     if (elSize.length == 2 && _nDims == 3) {
-      _elSizeXSpinner.setValue((double)elSize[1]);
-      _elSizeYSpinner.setValue((double)elSize[0]);
+      for (int d = 0; d < elSize.length; ++d)
+          _elSizeSpinners[d + 1].setValue((double)elSize[d]);
       return;
     }
   }
@@ -241,15 +426,8 @@ public class ModelDefinition {
   public double[] elementSizeUm() {
     if (!isValid()) return null;
     double[] res = new double[_nDims];
-    if (_nDims == 2) {
-      res[0] = ((Double)_elSizeYSpinner.getValue()).doubleValue();
-      res[1] = ((Double)_elSizeXSpinner.getValue()).doubleValue();
-    }
-    else {
-      res[0] = ((Double)_elSizeZSpinner.getValue()).doubleValue();
-      res[1] = ((Double)_elSizeYSpinner.getValue()).doubleValue();
-      res[2] = ((Double)_elSizeXSpinner.getValue()).doubleValue();
-    }
+    for (int d = 0; d < _nDims; ++d)
+        res[d] = ((Double)_elSizeSpinners[d].getValue()).doubleValue();
     return res;
   }
 
@@ -295,23 +473,22 @@ public class ModelDefinition {
           dup.classNames[i] = classNames[i];
     }
     dup.weightFile = weightFile;
+
+    // This creates and initializes all required GUI elements
     dup._initGUIElements();
+
     if (_nTilesSpinner != null)
         dup._nTilesSpinner.setValue((Integer)_nTilesSpinner.getValue());
-    if (_shapeXSpinner != null)
-        dup._shapeXSpinner.setValue((Integer)_shapeXSpinner.getValue());
-    if (_shapeYSpinner != null)
-        dup._shapeYSpinner.setValue((Integer)_shapeYSpinner.getValue());
-    if (_shapeZSpinner != null)
-        dup._shapeZSpinner.setValue((Integer)_shapeZSpinner.getValue());
-    if (_gridXSpinner != null)
-        dup._gridXSpinner.setValue((Integer)_gridXSpinner.getValue());
-    if (_gridYSpinner != null)
-        dup._gridYSpinner.setValue((Integer)_gridYSpinner.getValue());
-    if (_gridZSpinner != null)
-        dup._gridZSpinner.setValue((Integer)_gridZSpinner.getValue());
     if (_gpuMemSpinner != null)
         dup._gpuMemSpinner.setValue((Integer)_gpuMemSpinner.getValue());
+    for (int d = 0; d < _nDims; ++d) {
+      if (_gridSpinners != null && d < _gridSpinners.length &&
+          _gridSpinners[d] != null)
+          dup._gridSpinners[d].setValue((Integer)_gridSpinners[d].getValue());
+      if (_shapeSpinners != null && d < _shapeSpinners.length &&
+          _shapeSpinners[d] != null)
+          dup._shapeSpinners[d].setValue((Integer)_shapeSpinners[d].getValue());
+    }
     dup._tileModeSelector.setSelectedItem(_tileModeSelector.getSelectedItem());
     return dup;
   }
@@ -326,11 +503,14 @@ public class ModelDefinition {
     try {
       inputDatasetName = reader.string().read("/unet_param/input_dataset_name");
     }
-    catch (HDF5Exception e) {}
+    catch (HDF5Exception e) {
+      inputDatasetName = "data";
+    }
     solverPrototxt = reader.string().read("/solver_prototxt");
     modelPrototxt = reader.string().read("/model_prototxt");
     padding = reader.string().read("/unet_param/padding");
     normalizationType = reader.int32().read("/unet_param/normalization_type");
+    _nDims = -1;
     setElementSizeUm(reader.float64().readArray("/unet_param/element_size_um"));
     downsampleFactor = reader.int32().readArray("/unet_param/downsampleFactor");
     padInput = reader.int32().readArray("/unet_param/padInput");
@@ -345,12 +525,20 @@ public class ModelDefinition {
       sigma1Px = reader.float32().read(
           "/unet_param/pixelwise_loss_weights/sigma1Px");
     }
-    catch (HDF5Exception e) {}
+    catch (HDF5Exception e) {
+      borderWeightFactor = (float)Prefs.get("unet.borderWeightFactor", 50.0f);
+      borderWeightSigmaPx = (float)Prefs.get("unet.borderWeightSigmaPx", 6.0f);
+      foregroundBackgroundRatio =
+          (float)Prefs.get("unet.foregroundBackgroundRatio", 0.1f);
+      sigma1Px = (float)Prefs.get("unet.sigma1Px", 10.0f);
+    }
 
     try {
       classNames = reader.string().readArray("/unet_param/classNames");
     }
-    catch (HDF5Exception e) {}
+    catch (HDF5Exception e) {
+      classNames = null;
+    }
 
     try {
       memoryMap = reader.int32().readMatrix(
@@ -449,6 +637,38 @@ public class ModelDefinition {
     return res;
   }
 
+  private JSpinner getShapeSpinner(int dim, String prefsPrefix) {
+    if (_shapeSpinners != null && _shapeSpinners.length == _nDims &&
+        _shapeSpinners[dim] != null) return _shapeSpinners[dim];
+
+    if (_shapeSpinners == null || _shapeSpinners.length != _nDims)
+        _shapeSpinners = new JSpinner[_nDims];
+
+    int dsFactor = downsampleFactor[dim];
+    final int minValue =
+        (_job != null && _job instanceof SegmentationJob) ?
+        _minOutTileShape[dim] : getInputTileShape(_minOutTileShape)[dim];
+    _shapeSpinners[dim] = new JSpinner(
+        new SpinnerNumberModel(
+            minValue, minValue, (int)Integer.MAX_VALUE, dsFactor));
+    _shapeSpinners[dim].addChangeListener(new ChangeListener() {
+          @Override
+          public void stateChanged(ChangeEvent e) {
+            int value = (Integer)_shapeSpinners[dim].getValue();
+            int nextValidSize = Math.max(
+                (int)Math.floor((value - minValue) / dsFactor) *
+                dsFactor + minValue, minValue);
+            if (nextValidSize == value) return;
+            _shapeSpinners[dim].setValue(nextValidSize);
+          }
+        });
+    _shapeSpinners[dim].setValue(
+        (int)Prefs.get(
+            prefsPrefix + id + ".tileShape_" + String.valueOf(dim),
+            minValue + 10 * dsFactor));
+    return _shapeSpinners[dim];
+  }
+
   private void createTileShapeCard() {
     JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
     panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
@@ -458,365 +678,87 @@ public class ModelDefinition {
         "unet.finetuning." : "unet.segmentation.";
 
     panel.add(new JLabel(" x: "));
-    {
-      int dsFactor = downsampleFactor[_nDims - 1];
-      final int minValue =
-          (_job != null && _job instanceof SegmentationJob) ?
-          _minOutTileShape[_nDims - 1] :
-          getInputTileShape(_minOutTileShape)[_nDims - 1];
-      _shapeXSpinner = new JSpinner(
-          new SpinnerNumberModel(
-              minValue, minValue, (int)Integer.MAX_VALUE, dsFactor));
-      _shapeXSpinner.addChangeListener(new ChangeListener() {
-            @Override
-            public void stateChanged(ChangeEvent e) {
-              int value = (Integer)_shapeXSpinner.getValue();
-              int nextValidSize = Math.max(
-                  (int)Math.floor((value - minValue) / dsFactor) *
-                  dsFactor + minValue, minValue);
-              if (nextValidSize == value) return;
-              _shapeXSpinner.setValue(nextValidSize);
-            }
-          });
-      _shapeXSpinner.setValue(
-          (int)Prefs.get(
-              prefsPrefix + id + ".tileShapeX", minValue + 10 * dsFactor));
-    }
-    panel.add(_shapeXSpinner);
-
+    panel.add(getShapeSpinner(_nDims - 1, prefsPrefix));
     panel.add(new JLabel(" y: "));
-    {
-      int dsFactor = downsampleFactor[_nDims - 2];
-      final int minValue =
-          (_job != null && _job instanceof SegmentationJob) ?
-          _minOutTileShape[_nDims - 2] :
-          getInputTileShape(_minOutTileShape)[_nDims - 2];
-      _shapeYSpinner = new JSpinner(
-          new SpinnerNumberModel(
-              minValue, minValue, (int)Integer.MAX_VALUE, dsFactor));
-      _shapeYSpinner.addChangeListener(new ChangeListener() {
-            @Override
-            public void stateChanged(ChangeEvent e) {
-              int value = (Integer)_shapeYSpinner.getValue();
-              int nextValidSize = Math.max(
-                  (int)Math.floor((value - minValue) / dsFactor) *
-                  dsFactor + minValue, minValue);
-              if (nextValidSize == value) return;
-              _shapeYSpinner.setValue(nextValidSize);
-            }
-          });
-      _shapeYSpinner.setValue(
-          (int)Prefs.get(
-              prefsPrefix + id + ".tileShapeY", minValue + 10 * dsFactor));
-    }
-    panel.add(_shapeYSpinner);
-
+    panel.add(getShapeSpinner(_nDims - 2, prefsPrefix));
     if (_nDims == 3) {
       panel.add(new JLabel(" z: "));
-      int dsFactor = downsampleFactor[_nDims - 3];
-      final int minValue =
-          (_job != null && _job instanceof SegmentationJob) ?
-          _minOutTileShape[_nDims - 3] :
-          getInputTileShape(_minOutTileShape)[_nDims - 3];
-      _shapeZSpinner = new JSpinner(
-          new SpinnerNumberModel(
-              minValue, minValue, (int)Integer.MAX_VALUE, dsFactor));
-      _shapeZSpinner.addChangeListener(new ChangeListener() {
-            @Override
-            public void stateChanged(ChangeEvent e) {
-              int value = (Integer)_shapeZSpinner.getValue();
-              int nextValidSize = Math.max(
-                  (int)Math.floor((value - minValue) / dsFactor) *
-                  dsFactor + minValue, minValue);
-              if (nextValidSize == value) return;
-              _shapeZSpinner.setValue(nextValidSize);
-            }
-          });
-      _shapeZSpinner.setValue(
-          (int)Prefs.get(
-              prefsPrefix + id + ".tileShapeZ", minValue + 10 * dsFactor));
-      panel.add(_shapeZSpinner);
+      panel.add(getShapeSpinner(_nDims - 3, prefsPrefix));
     }
 
-    _shapeChangeUpdateGridAndNTilesListener = new ChangeListener() {
-          @Override
-          public void stateChanged(ChangeEvent e) {
-            if (_job instanceof SegmentationJob) {
-              ImagePlus imp = ((SegmentationJob)_job).image();
-              int[] scaledShape = getScaledShape(imp);
-              int[] tileShape = getTileShape();
-              if (scaledShape == null) return;
-              int nTiles = 1;
-              int[] grid = new int[_nDims];
-              for (int d = 0; d < _nDims; ++d) {
-                grid[d] = (int)Math.ceil(
-                    (double)scaledShape[d] / (double)tileShape[d]);
-                nTiles *= grid[d];
-              }
-
-              if (_gridXSpinner != null) {
-                _gridXSpinner.removeChangeListener(_gridChangeListener);
-                _gridXSpinner.setValue(grid[_nDims - 1]);
-                _gridXSpinner.addChangeListener(_gridChangeListener);
-              }
-              if (_gridYSpinner != null) {
-                _gridYSpinner.removeChangeListener(_gridChangeListener);
-                _gridYSpinner.setValue(grid[_nDims - 2]);
-                _gridYSpinner.addChangeListener(_gridChangeListener);
-              }
-              if (_nDims == 3 && _gridZSpinner != null) {
-                _gridZSpinner.removeChangeListener(_gridChangeListener);
-                _gridZSpinner.setValue(grid[0]);
-                _gridZSpinner.addChangeListener(_gridChangeListener);
-              }
-              if (_nTilesSpinner != null) {
-                _nTilesSpinner.removeChangeListener(_nTilesChangeListener);
-                _nTilesSpinner.setValue(nTiles);
-                _nTilesSpinner.addChangeListener(_nTilesChangeListener);
-              }
-            }
-          }
-        };
-
-    _shapeChangeUpdateMemoryListener = new ChangeListener() {
-          @Override
-          public void stateChanged(ChangeEvent e) {
-            if (_job instanceof SegmentationJob) {
-              long mem = computeMemoryConsumptionInTestPhase(false);
-              if (mem != -1) {
-                long memCuDNN = computeMemoryConsumptionInTestPhase(true);
-                _memoryRequiredPanel.setText(
-                    " No cuDNN: " + mem / 1024 / 1024 + " MB     cuDNN: " +
-                    memCuDNN / 1024 / 1024 + " MB");
-              }
-            }
-            else if (_job instanceof FinetuneJob) {
-              long mem = computeMemoryConsumptionInTrainPhase(false);
-              if (mem != -1) {
-                long memCuDNN = computeMemoryConsumptionInTrainPhase(true);
-                _memoryRequiredPanel.setText(
-                    " No cuDNN: " + mem / 1024 / 1024 + " MB     cuDNN: " +
-                    memCuDNN / 1024 / 1024 + " MB");
-              }
-            }
-          }
-        };
-
-    _shapeXSpinner.addChangeListener(_shapeChangeUpdateGridAndNTilesListener);
-    _shapeXSpinner.addChangeListener(_shapeChangeUpdateMemoryListener);
-    _shapeYSpinner.addChangeListener(_shapeChangeUpdateGridAndNTilesListener);
-    _shapeYSpinner.addChangeListener(_shapeChangeUpdateMemoryListener);
-    if (_nDims == 3) {
-      _shapeZSpinner.addChangeListener(_shapeChangeUpdateGridAndNTilesListener);
-      _shapeZSpinner.addChangeListener(_shapeChangeUpdateMemoryListener);
+    for (int d = 0; d < _nDims; ++d) {
+      if (!Arrays.asList(_shapeSpinners[d].getChangeListeners()).contains(
+              _shapeChangeUpdateGridAndNTilesListener))
+          _shapeSpinners[d].addChangeListener(
+              _shapeChangeUpdateGridAndNTilesListener);
+      if (!Arrays.asList(_shapeSpinners[d].getChangeListeners()).contains(
+              _shapeChangeUpdateMemoryListener))
+          _shapeSpinners[d].addChangeListener(_shapeChangeUpdateMemoryListener);
     }
-
-    // Trigger update of related tiling panels and memory display
-    _shapeChangeUpdateGridAndNTilesListener.stateChanged(
-        new ChangeEvent(_shapeXSpinner));
-    _shapeChangeUpdateMemoryListener.stateChanged(
-        new ChangeEvent(_shapeXSpinner));
 
     _tileModePanel.add(panel, SHAPE);
     _tileModeSelector.addItem(SHAPE);
   }
 
   private void createNTilesCard() {
-    _nTilesSpinner = new JSpinner(
-        new SpinnerNumberModel(
-            (int)Prefs.get("unet." + id + ".nTiles", 1), 1,
-            (int)Integer.MAX_VALUE, 1));
-
-    _nTilesChangeListener = new ChangeListener() {
-          @Override
-          public void stateChanged(ChangeEvent e) {
-            if (!(_job instanceof SegmentationJob)) return;
-            ImagePlus imp = ((SegmentationJob)_job).image();
-
-            int[] scaledShape = getScaledShape(imp);
-            if (scaledShape == null) return;
-
-            int[] outTileShape = new int[_nDims];
-            int nTilesWanted = (Integer)_nTilesSpinner.getValue();
-            int nTiles = 1;
-            for (int d = 0; d < _nDims; ++d) {
-              outTileShape[d] = _minOutTileShape[d];
-              nTiles *= (int)Math.ceil(
-                  (double)scaledShape[d] / (double)outTileShape[d]);
-            }
-            int currentDim = 0;
-            while (nTiles > nTilesWanted) {
-              while (outTileShape[currentDim] >= scaledShape[currentDim])
-                  currentDim = (currentDim + 1) % _nDims;
-              outTileShape[currentDim] += downsampleFactor[currentDim];
-              nTiles = 1;
-              for (int d = 0; d < _nDims; ++d)
-                  nTiles *= (int)Math.ceil(
-                      (double)scaledShape[d] / (double)outTileShape[d]);
-              currentDim = (currentDim + 1) % _nDims;
-            }
-
-            // Update tile grid spinners
-            if (_gridXSpinner != null) {
-              _gridXSpinner.removeChangeListener(_gridChangeListener);
-              _gridXSpinner.setValue(
-                  (int)Math.ceil((double)scaledShape[_nDims - 1] /
-                                 (double)outTileShape[_nDims - 1]));
-              _gridXSpinner.addChangeListener(_gridChangeListener);
-            }
-            if (_gridYSpinner != null) {
-              _gridYSpinner.removeChangeListener(_gridChangeListener);
-              _gridYSpinner.setValue(
-                  (int)Math.ceil((double)scaledShape[_nDims - 2] /
-                                 (double)outTileShape[_nDims - 2]));
-              _gridYSpinner.addChangeListener(_gridChangeListener);
-            }
-            if (_nDims == 3 && _gridZSpinner != null) {
-              _gridZSpinner.removeChangeListener(_gridChangeListener);
-              _gridZSpinner.setValue(
-                  (int)Math.ceil((double)scaledShape[0] /
-                                 (double)outTileShape[0]));
-              _gridZSpinner.addChangeListener(_gridChangeListener);
-            }
-
-            // Update tile shape spinners, this triggers recomputation of
-            // memory consumption
-            if (_shapeXSpinner != null) {
-              _shapeXSpinner.removeChangeListener(
-                  _shapeChangeUpdateGridAndNTilesListener);
-              _shapeXSpinner.setValue(outTileShape[_nDims - 1]);
-              _shapeXSpinner.addChangeListener(
-                  _shapeChangeUpdateGridAndNTilesListener);
-            }
-            if (_shapeYSpinner != null) {
-              _shapeYSpinner.removeChangeListener(
-                  _shapeChangeUpdateGridAndNTilesListener);
-              _shapeYSpinner.setValue(outTileShape[_nDims - 2]);
-              _shapeYSpinner.addChangeListener(
-                  _shapeChangeUpdateGridAndNTilesListener);
-            }
-            if (_nDims == 3 && _shapeZSpinner != null) {
-              _shapeZSpinner.removeChangeListener(
-                  _shapeChangeUpdateGridAndNTilesListener);
-              _shapeZSpinner.setValue(outTileShape[0]);
-              _shapeZSpinner.addChangeListener(
-                  _shapeChangeUpdateGridAndNTilesListener);
-            }
-          }
-        };
-
-    _nTilesSpinner.addChangeListener(_nTilesChangeListener);
-
-    // Trigger update of related tiling panels and memory display
-    _nTilesChangeListener.stateChanged(new ChangeEvent(_nTilesSpinner));
-
+    if (_nTilesSpinner == null) {
+      _nTilesSpinner = new JSpinner(
+          new SpinnerNumberModel(
+              (int)Prefs.get("unet." + id + ".nTiles", 1), 1,
+              (int)Integer.MAX_VALUE, 1));
+      _nTilesSpinner.addChangeListener(_nTilesChangeListener);
+    }
     _tileModePanel.add(_nTilesSpinner, NTILES);
     _tileModeSelector.addItem(NTILES);
+  }
+
+  private JSpinner getGridSpinner(int dim) {
+    if (_gridSpinners != null && _gridSpinners.length == _nDims &&
+        _gridSpinners[dim] != null) return _gridSpinners[dim];
+
+    if (_gridSpinners == null || _gridSpinners.length != _nDims)
+        _gridSpinners = new JSpinner[_nDims];
+
+    _gridSpinners[dim] = new JSpinner(
+        new SpinnerNumberModel(
+            (int)Prefs.get(
+                "unet." + id + ".tileGrid_" + String.valueOf(dim), 5), 1,
+            (int)Integer.MAX_VALUE, 1));
+    return _gridSpinners[dim];
   }
 
   private void createTileGridCard() {
     JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
     panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
     ((FlowLayout)panel.getLayout()).setAlignOnBaseline(true);
+
+    if (_gridSpinners == null || _gridSpinners.length != _nDims)
+        _gridSpinners = new JSpinner[_nDims];
+
     panel.add(new JLabel(" x: "));
-    _gridXSpinner = new JSpinner(
-        new SpinnerNumberModel(
-            (int)Prefs.get("unet." + id + ".tileGridX", 5), 1,
-            (int)Integer.MAX_VALUE, 1));
-    panel.add(_gridXSpinner);
+    panel.add(getGridSpinner(_nDims - 1));
     panel.add(new JLabel(" y: "));
-    _gridYSpinner = new JSpinner(
-        new SpinnerNumberModel(
-            (int)Prefs.get("unet." + id + ".tileGridY", 5), 1,
-            (int)Integer.MAX_VALUE, 1));
-    panel.add(_gridYSpinner);
+    panel.add(getGridSpinner(_nDims - 2));
     if (_nDims == 3) {
       panel.add(new JLabel(" z: "));
-      _gridZSpinner = new JSpinner(
-          new SpinnerNumberModel(
-              (int)Prefs.get("unet." + id + ".tileGridZ", 5), 1,
-              (int)Integer.MAX_VALUE, 1));
-      panel.add(_gridZSpinner);
+      panel.add(getGridSpinner(_nDims - 3));
     }
 
-    _gridChangeListener = new ChangeListener() {
-          @Override
-          public void stateChanged(ChangeEvent e) {
-            if (_job instanceof SegmentationJob) {
-              ImagePlus imp = ((SegmentationJob)_job).image();
-              int[] scaledShape = getScaledShape(imp);
-              if (scaledShape == null) return;
-              int[] outTileShape = new int[_nDims];
-              outTileShape[_nDims - 1] = (int)Math.ceil(
-                  (double)scaledShape[_nDims - 1] /
-                  ((Integer)_gridXSpinner.getValue()).doubleValue());
-              outTileShape[_nDims - 2] = (int)Math.ceil(
-                  (double)scaledShape[_nDims - 2] /
-                  ((Integer)_gridYSpinner.getValue()).doubleValue());
-              if (_nDims == 3) {
-                outTileShape[0] = (int)Math.ceil(
-                    (double)scaledShape[0] /
-                    ((Integer)_gridZSpinner.getValue()).doubleValue());
-              }
-              int nTiles =
-                  (Integer)_gridXSpinner.getValue() *
-                  (Integer)_gridYSpinner.getValue() *
-                  ((_nDims == 3) ?
-                   ((Integer)_gridZSpinner.getValue()).intValue() : 1);
-              for (int d = 0; d < _nDims; ++d) {
-                outTileShape[d] =
-                    Math.max(
-                        (int)Math.ceil(
-                            (double)(outTileShape[d] - _minOutTileShape[d]) /
-                            (double)downsampleFactor[d]) * downsampleFactor[d] +
-                        _minOutTileShape[d], _minOutTileShape[d]);
-              }
-
-              if (_shapeXSpinner != null) {
-                _shapeXSpinner.removeChangeListener(
-                    _shapeChangeUpdateGridAndNTilesListener);
-                _shapeXSpinner.setValue(outTileShape[_nDims - 1]);
-                _shapeXSpinner.addChangeListener(
-                    _shapeChangeUpdateGridAndNTilesListener);
-              }
-              if (_shapeYSpinner != null) {
-                _shapeYSpinner.removeChangeListener(
-                    _shapeChangeUpdateGridAndNTilesListener);
-                _shapeYSpinner.setValue(outTileShape[_nDims - 2]);
-                _shapeYSpinner.addChangeListener(
-                    _shapeChangeUpdateGridAndNTilesListener);
-              }
-              if (_nDims == 3 && _shapeZSpinner != null) {
-                _shapeZSpinner.removeChangeListener(
-                    _shapeChangeUpdateGridAndNTilesListener);
-                _shapeZSpinner.setValue(outTileShape[0]);
-                _shapeZSpinner.addChangeListener(
-                    _shapeChangeUpdateGridAndNTilesListener);
-              }
-              if (_nTilesSpinner != null) {
-                _nTilesSpinner.removeChangeListener(_nTilesChangeListener);
-                _nTilesSpinner.setValue(nTiles);
-                _nTilesSpinner.addChangeListener(_nTilesChangeListener);
-              }
-            }
-          }
-        };
-    _gridXSpinner.addChangeListener(_gridChangeListener);
-    _gridYSpinner.addChangeListener(_gridChangeListener);
-    if (_nDims == 3) _gridZSpinner.addChangeListener(_gridChangeListener);
-
-    // Trigger update of related tiling panels and memory display
-    _gridChangeListener.stateChanged(new ChangeEvent(_gridXSpinner));
+    for (int d = 0; d < _nDims; ++d)
+        if (!Arrays.asList(_gridSpinners[d].getChangeListeners()).contains(
+                _gridChangeListener))
+            _gridSpinners[d].addChangeListener(_gridChangeListener);
 
     _tileModePanel.add(panel, GRID);
     _tileModeSelector.addItem(GRID);
   }
 
   private void createMemoryCard() {
-    _gpuMemSpinner = new JSpinner(
-        new SpinnerNumberModel(
-            (int)Prefs.get("unet." + id + ".GPUMemoryMB", 1000), 1,
-            (int)Integer.MAX_VALUE, 1));
+    if (_gpuMemSpinner == null)
+        _gpuMemSpinner = new JSpinner(
+            new SpinnerNumberModel(
+                (int)Prefs.get("unet." + id + ".GPUMemoryMB", 1000), 1,
+                (int)Integer.MAX_VALUE, 1));
     _tileModePanel.add(_gpuMemSpinner, MEMORY);
     _tileModeSelector.addItem(MEMORY);
   }
@@ -955,114 +897,62 @@ public class ModelDefinition {
     _initGUIElements();
   }
 
-  public void setFromTilingParameterString(String tilingParameter) {
-    String[] arg = tilingParameter.split("=");
-    if (arg[0].equals(NTILES)) {
-      _tileModeSelector.setSelectedItem(NTILES);
-      _nTilesSpinner.setValue(Integer.valueOf(arg[1]));
-      return;
-    }
-    if (arg[0].equals(GRID)) {
-      _tileModeSelector.setSelectedItem(GRID);
-      String[] st = arg[1].split("x");
-      if (st.length > 0) _gridXSpinner.setValue(Integer.valueOf(st[0]));
-      else _gridXSpinner.setValue(1);
-      if (st.length > 1) _gridYSpinner.setValue(Integer.valueOf(st[1]));
-      else _gridYSpinner.setValue(1);
-      if (_nDims == 3) {
-        if (st.length > 2) _gridZSpinner.setValue(Integer.valueOf(st[2]));
-        else _gridZSpinner.setValue(1);
-      }
-      return;
-    }
-    if (arg[0].equals(SHAPE)) {
-      _tileModeSelector.setSelectedItem(SHAPE);
-      String[] st = arg[1].split("x");
-      if (st.length > 0) _shapeXSpinner.setValue(Integer.valueOf(st[0]));
-      else _shapeXSpinner.setValue(
-          (Integer)(
-              (SpinnerNumberModel)_shapeXSpinner.getModel()).getMinimum());
-      if (st.length > 1) _shapeYSpinner.setValue(Integer.valueOf(st[1]));
-      else _shapeYSpinner.setValue(
-          (Integer)(
-              (SpinnerNumberModel)_shapeYSpinner.getModel()).getMinimum());
-      if (_nDims == 3) {
-        if (st.length > 2)
-            _shapeZSpinner.setValue(Integer.valueOf(st[2]));
-        else _shapeZSpinner.setValue(
-            (Integer)(
-                (SpinnerNumberModel)_shapeXSpinner.getModel()).getMinimum());
-      }
-      return;
-    }
-    if (arg[0].equals(MEMORY)) {
-      _tileModeSelector.setSelectedItem(MEMORY);
-      _gpuMemSpinner.setValue(Integer.valueOf(arg[1]));
-      return;
-    }
-  }
-
-  public String getTilingParameterString() {
+  public String getMacroParameterString() {
+    if (file == null) return "";
+    String res = "modelFilename=" + file.getAbsolutePath().replace("\\", "/");
     if (((String)_tileModeSelector.getSelectedItem()).equals(NTILES))
-        return NTILES + "=" + (Integer)_nTilesSpinner.getValue();
+        res += "," + NTILES + "=" + (Integer)_nTilesSpinner.getValue();
     if (((String)_tileModeSelector.getSelectedItem()).equals(GRID))
-        return GRID + "=" + (Integer)_gridXSpinner.getValue() + "x" +
-            (Integer)_gridYSpinner.getValue() +
+        res += "," + GRID + "=" +
+            (Integer)_gridSpinners[_nDims - 1].getValue() +
+            "x" + (Integer)_gridSpinners[_nDims - 2].getValue() +
             ((_nDims == 3) ?
-             ("x" + (Integer)_gridZSpinner.getValue()) : "");
+             ("x" + (Integer)_gridSpinners[_nDims - 3].getValue()) : "");
     if (((String)_tileModeSelector.getSelectedItem()).equals(SHAPE))
-        return SHAPE + "=" + (Integer)_shapeXSpinner.getValue() + "x" +
-            (Integer)_shapeYSpinner.getValue() +
+        res += "," + SHAPE + "=" +
+            (Integer)_shapeSpinners[_nDims - 1].getValue() + "x" +
+            (Integer)_shapeSpinners[_nDims - 2].getValue() +
             ((_nDims == 3) ?
-             ("x" + (Integer)_shapeZSpinner.getValue()) : "");
+             ("x" + (Integer)_shapeSpinners[_nDims - 3].getValue()) : "");
     if (((String)_tileModeSelector.getSelectedItem()).equals(MEMORY))
-        return MEMORY + "=" + (Integer)_gpuMemSpinner.getValue();
-    throw new UnsupportedOperationException(
-        "Cannot handle unknown tiling mode '" +
-        (String)_tileModeSelector.getSelectedItem() + "'");
+        res += "," + MEMORY + "=" + (Integer)_gpuMemSpinner.getValue();
+    return res;
   }
 
-  public String getCaffeTilingParameter() throws UnsupportedOperationException {
+  public String getCaffeTilingParameter() {
     if (((String)_tileModeSelector.getSelectedItem()).equals(NTILES))
         return "-n_tiles " + (Integer)_nTilesSpinner.getValue();
-    if (((String)_tileModeSelector.getSelectedItem()).equals(GRID))
-        return "-n_tiles " +
-            ((_nDims == 3) ?
-             ((Integer)_gridZSpinner.getValue() + "x") : "") +
-            (Integer)_gridYSpinner.getValue() + "x" +
-            (Integer)_gridXSpinner.getValue();
-    if (((String)_tileModeSelector.getSelectedItem()).equals(SHAPE))
-        return "-tile_size " +
-            ((_nDims == 3) ?
-             ((Integer)_shapeZSpinner.getValue() + "x") : "") +
-            (Integer)_shapeYSpinner.getValue() + "x" +
-            (Integer)_shapeXSpinner.getValue();
+    if (((String)_tileModeSelector.getSelectedItem()).equals(GRID)) {
+      String res = "-n_tiles ";
+      for (int d = 0; d < _nDims - 1; ++d)
+          res += (Integer)_gridSpinners[d].getValue() + "x";
+      res += (Integer)_gridSpinners[_nDims - 1].getValue();
+      return res;
+    }
+    if (((String)_tileModeSelector.getSelectedItem()).equals(SHAPE)) {
+      String res = "-tile_size ";
+      for (int d = 0; d < _nDims - 1; ++d)
+          res += (Integer)_shapeSpinners[d].getValue() + "x";
+      res += (Integer)_shapeSpinners[_nDims - 1].getValue();
+      return res;
+    }
     if (((String)_tileModeSelector.getSelectedItem()).equals(MEMORY))
         return "-gpu_mem_available_MB " +
             (Integer)_gpuMemSpinner.getValue();
-    throw new UnsupportedOperationException(
-        "Cannot handle unknown tiling mode '" +
-        (String)_tileModeSelector.getSelectedItem() + "'");
+    return "";
   }
 
   public String getProtobufTileShapeString() {
     return ((_nDims == 3) ?
-            ("nz: " + (Integer)_shapeZSpinner.getValue()) + " " : "") +
-        "ny: " + (Integer)_shapeYSpinner.getValue() +
-        " nx: " + (Integer)_shapeXSpinner.getValue();
+            ("nz: " + (Integer)_shapeSpinners[0].getValue()) + " " : "") +
+        "ny: " + (Integer)_shapeSpinners[_nDims - 2].getValue() +
+        " nx: " + (Integer)_shapeSpinners[_nDims - 1].getValue();
   }
 
   public int[] getTileShape() {
     int[] res = new int[_nDims];
-    if (_nDims == 3) {
-      res[0] = (Integer)_shapeZSpinner.getValue();
-      res[1] = (Integer)_shapeYSpinner.getValue();
-      res[2] = (Integer)_shapeXSpinner.getValue();
-    }
-    else {
-      res[0] = (Integer)_shapeYSpinner.getValue();
-      res[1] = (Integer)_shapeXSpinner.getValue();
-    }
+    for (int d = 0; d < _nDims; ++d)
+        res[d] = (Integer)_shapeSpinners[d].getValue();
     return res;
   }
 
@@ -1078,26 +968,26 @@ public class ModelDefinition {
     }
 
     if (((String)_tileModeSelector.getSelectedItem()).equals(GRID)) {
-      Prefs.set("unet." + id + ".tileGridX",
-                (Integer)_gridXSpinner.getValue());
-      Prefs.set("unet." + id + ".tileGridY",
-                (Integer)_gridYSpinner.getValue());
+      Prefs.set("unet." + id + ".tileGrid_" + String.valueOf(_nDims - 1),
+                (Integer)_gridSpinners[_nDims - 1].getValue());
+      Prefs.set("unet." + id + ".tileGrid_" + String.valueOf(_nDims - 2),
+                (Integer)_gridSpinners[_nDims - 2].getValue());
       if (_nDims == 3)
-          Prefs.set("unet." + id + ".tileGridZ",
-                    (Integer)_gridZSpinner.getValue());
+          Prefs.set("unet." + id + ".tileGrid_0",
+                    (Integer)_gridSpinners[0].getValue());
       return;
     }
 
     String prefsPrefix = (_job != null && _job instanceof FinetuneJob) ?
         "unet.finetuning." : "unet.segmentation.";
     if (((String)_tileModeSelector.getSelectedItem()).equals(SHAPE)) {
-      Prefs.set(prefsPrefix + id + ".tileShapeX",
-                (Integer)_shapeXSpinner.getValue());
-      Prefs.set(prefsPrefix + id + ".tileShapeY",
-                (Integer)_shapeYSpinner.getValue());
+      Prefs.set(prefsPrefix + id + ".tileShape_" + String.valueOf(_nDims - 1),
+                (Integer)_shapeSpinners[_nDims - 1].getValue());
+      Prefs.set(prefsPrefix + id + ".tileShape_" + String.valueOf(_nDims - 2),
+                (Integer)_shapeSpinners[_nDims - 2].getValue());
       if (_nDims == 3)
-          Prefs.set(prefsPrefix + id + ".tileShapeZ",
-                    (Integer)_shapeZSpinner.getValue());
+          Prefs.set(prefsPrefix + id + ".tileShape_0",
+                    (Integer)_shapeSpinners[0].getValue());
       return;
     }
 
@@ -1106,20 +996,17 @@ public class ModelDefinition {
                 (Integer)_gpuMemSpinner.getValue());
       return;
     }
-
-    throw new UnsupportedOperationException(
-        "Cannot handle unknown tiling mode '" +
-        (String)_tileModeSelector.getSelectedItem() + "'");
   }
 
   public void updateMemoryConsumptionDisplay() {
-    _shapeChangeUpdateMemoryListener.stateChanged(
-      new ChangeEvent(_shapeXSpinner));
+    if (_shapeSpinners != null && _shapeSpinners.length > 0 &&
+        _shapeSpinners[0] != null)
+        _shapeChangeUpdateMemoryListener.stateChanged(
+            new ChangeEvent(_shapeSpinners[0]));
   }
 
   public long computeMemoryConsumptionInTestPhase(boolean cuDNN) {
-    if (_job == null || !(_job instanceof SegmentationJob ||
-                          _job instanceof DetectionJob)) return -1;
+    if (_job == null || !(_job instanceof SegmentationJob)) return -1;
     try {
       ImagePlus imp = ((SegmentationJob)_job).image();
       Caffe.NetParameter.Builder netParamBuilder =
