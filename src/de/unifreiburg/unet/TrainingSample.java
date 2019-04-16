@@ -1170,7 +1170,7 @@ public class TrainingSample
         (model.nDims() == 3) ?
         getRawElementSizeUm()[0] / model.elementSizeUm()[0] : 1.0;
 
-    int diskRadiusPx = 2;
+    int diskRadiusPx = model.diskRadiusPx;
 
     // Generate small and large disks/spheres for PointRoi rendering
     Vector<Integer> dxVec = new Vector<Integer>();

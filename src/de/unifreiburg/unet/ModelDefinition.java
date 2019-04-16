@@ -92,6 +92,7 @@ public class ModelDefinition {
   public int[] padInput = null;
   public int[] padOutput = null;
   public int[][] memoryMap = null;
+  public int diskRadiusPx = 2;
   public float borderWeightFactor =
       (float)Prefs.get("unet.borderWeightFactor", 50.0f);
   public float borderWeightSigmaPx =
@@ -463,6 +464,7 @@ public class ModelDefinition {
       for (int r = 0; r < memoryMap.length; r++)
           dup.memoryMap[r] = Arrays.copyOf(memoryMap[r], memoryMap[r].length);
     }
+    dup.diskRadiusPx = diskRadiusPx;
     dup.borderWeightFactor = borderWeightFactor;
     dup.borderWeightSigmaPx = borderWeightSigmaPx;
     dup.foregroundBackgroundRatio = foregroundBackgroundRatio;
@@ -531,6 +533,12 @@ public class ModelDefinition {
       foregroundBackgroundRatio =
           (float)Prefs.get("unet.foregroundBackgroundRatio", 0.1f);
       sigma1Px = (float)Prefs.get("unet.sigma1Px", 10.0f);
+    }
+    try {
+      diskRadiusPx = reader.int32().read("/unet_param/diskRadiusPx");
+    }
+    catch (HDF5Exception e) {
+      diskRadiusPx = 2;
     }
 
     try {
@@ -816,6 +824,7 @@ public class ModelDefinition {
         foregroundBackgroundRatio);
     writer.float32().write(
         "/unet_param/pixelwise_loss_weights/sigma1Px", sigma1Px);
+    writer.int32().write("/unet_param/diskRadiusPx", diskRadiusPx);
     if (classNames != null)
         writer.string().writeArray("/unet_param/classNames", classNames);
     if (memoryMap != null && memoryMap.length == 2)
@@ -1123,6 +1132,7 @@ public class ModelDefinition {
     }
     else res += "N/A\n";
     res +=
+        "  diskRadiusPx = " + diskRadiusPx + "\n" +
         "  borderWeightFactor = " + borderWeightFactor + "\n" +
         "  borderWeightSigmaPx = " + borderWeightSigmaPx + "\n" +
         "  foregroundBackgroundRatio = " + foregroundBackgroundRatio + "\n" +

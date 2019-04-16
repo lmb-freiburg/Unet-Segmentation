@@ -116,6 +116,9 @@ public class ModelDefinitionEditor implements PlugIn {
               (double)Prefs.get("unet.newModel.elSizeZ", 1.0),
               0.0000001, 1000000.0, 0.01))
   };
+  private final JSpinner _diskRadiusPx = new JSpinner(
+      new SpinnerNumberModel(
+          (int)Prefs.get("unet.newModel.diskRadiusPx", 2), 0, 100, 1));
   private final JSpinner _borderWeightFactor = new JSpinner(
       new SpinnerNumberModel(
           (double)Prefs.get("unet.newModel.borderWeightFactor", 50.0),
@@ -230,8 +233,9 @@ public class ModelDefinitionEditor implements PlugIn {
 
     // General information
     JLabel fileLabel = new JLabel("Filename:");
-    _filename.setToolTipText("Output file to save the model to. We " +
-                             "recommend to use the composite extension .modeldef.h5");
+    _filename.setToolTipText(
+        "Output file to save the model to. We " +
+        "recommend to use the composite extension .modeldef.h5");
     JButton fileChooseButton =
         (UIManager.get("FileView.directoryIcon") instanceof Icon) ? new JButton(
             (Icon)UIManager.get("FileView.directoryIcon")) : new JButton("...");
@@ -271,43 +275,34 @@ public class ModelDefinitionEditor implements PlugIn {
             generalInfoPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.TRAILING)
             .addComponent(fileLabel).addComponent(idLabel)
-            .addComponent(nameLabel).addComponent(descriptionLabel)
-                  )
+            .addComponent(nameLabel).addComponent(descriptionLabel))
         .addGroup(
             generalInfoPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.LEADING)
             .addGroup(
                 generalInfoPanelLayout.createSequentialGroup()
-                .addComponent(_filename).addComponent(fileChooseButton)
-                      )
+                .addComponent(_filename).addComponent(fileChooseButton))
             .addComponent(_id).addComponent(_name)
-            .addComponent(_description)
-                  )
-                                              );
+            .addComponent(_description)));
     generalInfoPanelLayout.setVerticalGroup(
         generalInfoPanelLayout.createSequentialGroup()
         .addGroup(
             generalInfoPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
             .addComponent(fileLabel).addComponent(_filename)
-            .addComponent(fileChooseButton)
-                  )
+            .addComponent(fileChooseButton))
         .addGroup(
             generalInfoPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
-            .addComponent(idLabel).addComponent(_id)
-                  )
+            .addComponent(idLabel).addComponent(_id))
         .addGroup(
             generalInfoPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
-            .addComponent(nameLabel).addComponent(_name)
-                  )
+            .addComponent(nameLabel).addComponent(_name))
         .addGroup(
             generalInfoPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
-            .addComponent(descriptionLabel).addComponent(_description)
-                  )
-                                            );
+            .addComponent(descriptionLabel).addComponent(_description)));
 
     // Architecture (goes to prototxt)
     JLabel dimensionLabel = new JLabel("Dimensionality:");
@@ -336,8 +331,7 @@ public class ModelDefinitionEditor implements PlugIn {
             architecturePanelLayout.createParallelGroup(
                 GroupLayout.Alignment.TRAILING)
             .addComponent(dimensionLabel).addComponent(levelsLabel)
-            .addComponent(nChannelsLabel)
-                  )
+            .addComponent(nChannelsLabel))
         .addGroup(
             architecturePanelLayout.createParallelGroup(
                 GroupLayout.Alignment.LEADING)
@@ -346,32 +340,25 @@ public class ModelDefinitionEditor implements PlugIn {
                 architecturePanelLayout.createSequentialGroup()
                 .addComponent(levelDimLabels[0]).addComponent(_levels[0])
                 .addComponent(levelDimLabels[1]).addComponent(_levels[1])
-                .addComponent(levelDimLabels[2]).addComponent(_levels[2])
-                      )
-            .addComponent(_nChannels)
-                  )
-                                               );
+                .addComponent(levelDimLabels[2]).addComponent(_levels[2]))
+            .addComponent(_nChannels)));
     architecturePanelLayout.setVerticalGroup(
         architecturePanelLayout.createSequentialGroup()
         .addGroup(
             architecturePanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
-            .addComponent(dimensionLabel).addComponent(_dimension)
-                  )
+            .addComponent(dimensionLabel).addComponent(_dimension))
         .addGroup(
             architecturePanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
             .addComponent(levelsLabel)
             .addComponent(levelDimLabels[0]).addComponent(_levels[0])
             .addComponent(levelDimLabels[1]).addComponent(_levels[1])
-            .addComponent(levelDimLabels[2]).addComponent(_levels[2])
-                  )
+            .addComponent(levelDimLabels[2]).addComponent(_levels[2]))
         .addGroup(
             architecturePanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
-            .addComponent(nChannelsLabel).addComponent(_nChannels)
-                  )
-                                             );
+            .addComponent(nChannelsLabel).addComponent(_nChannels)));
 
     // Data pre-processing (goes to attributes)
     JLabel elSizeLabel = new JLabel("Element Size [\u00b5m]:");
@@ -386,6 +373,8 @@ public class ModelDefinitionEditor implements PlugIn {
         "Resize input images to given pixel height");
     _elementSizeUm[2].setToolTipText(
         "Resize input images to given voxel depth");
+    JLabel diskRadiusPxLabel = new JLabel("Detection disk radius [px]:");
+    _diskRadiusPx.setToolTipText("Radius of detection disks in pixels.");
     JLabel borderWeightFactorLabel = new JLabel("Ridge weight:");
     ((JSpinner.NumberEditor)_borderWeightFactor.getEditor())
         .getFormat().applyPattern("######0.0######");
@@ -421,11 +410,12 @@ public class ModelDefinitionEditor implements PlugIn {
         .addGroup(
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.TRAILING)
-            .addComponent(elSizeLabel).addComponent(borderWeightFactorLabel)
+            .addComponent(elSizeLabel)
+            .addComponent(diskRadiusPxLabel)
+            .addComponent(borderWeightFactorLabel)
             .addComponent(borderWeightSigmaPxLabel)
             .addComponent(foregroundBackgroundRatioLabel)
-            .addComponent(borderSmoothnessSigmaPxLabel)
-                  )
+            .addComponent(borderSmoothnessSigmaPxLabel))
         .addGroup(
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.LEADING)
@@ -436,14 +426,12 @@ public class ModelDefinitionEditor implements PlugIn {
                 .addComponent(elSizeDimLabels[1])
                 .addComponent(_elementSizeUm[1])
                 .addComponent(elSizeDimLabels[2])
-                .addComponent(_elementSizeUm[2])
-                      )
+                .addComponent(_elementSizeUm[2]))
+            .addComponent(_diskRadiusPx)
             .addComponent(_borderWeightFactor)
             .addComponent(_borderWeightSigmaPx)
             .addComponent(_foregroundBackgroundRatio)
-            .addComponent(_borderSmoothnessSigmaPx)
-                  )
-                                                );
+            .addComponent(_borderSmoothnessSigmaPx)));
     preprocessingPanelLayout.setVerticalGroup(
         preprocessingPanelLayout.createSequentialGroup()
         .addGroup(
@@ -452,33 +440,32 @@ public class ModelDefinitionEditor implements PlugIn {
             .addComponent(elSizeLabel)
             .addComponent(elSizeDimLabels[0]).addComponent(_elementSizeUm[0])
             .addComponent(elSizeDimLabels[1]).addComponent(_elementSizeUm[1])
-            .addComponent(elSizeDimLabels[2]).addComponent(_elementSizeUm[2])
-                  )
+            .addComponent(elSizeDimLabels[2]).addComponent(_elementSizeUm[2]))
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(diskRadiusPxLabel)
+            .addComponent(_diskRadiusPx))
         .addGroup(
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
             .addComponent(borderWeightFactorLabel)
-            .addComponent(_borderWeightFactor)
-                  )
+            .addComponent(_borderWeightFactor))
         .addGroup(
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
             .addComponent(borderWeightSigmaPxLabel)
-            .addComponent(_borderWeightSigmaPx)
-                  )
+            .addComponent(_borderWeightSigmaPx))
         .addGroup(
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
             .addComponent(foregroundBackgroundRatioLabel)
-            .addComponent(_foregroundBackgroundRatio)
-                  )
+            .addComponent(_foregroundBackgroundRatio))
         .addGroup(
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
             .addComponent(borderSmoothnessSigmaPxLabel)
-            .addComponent(_borderSmoothnessSigmaPx)
-                  )
-                                              );
+            .addComponent(_borderSmoothnessSigmaPx)));
 
     // Augmentation (goes to prototxt)
     JLabel rotationLabel = new JLabel("Rotation:");
@@ -913,6 +900,8 @@ public class ModelDefinitionEditor implements PlugIn {
       }
     }
     model.setElementSizeUm(elSize);
+    model.diskRadiusPx =
+        ((Integer)_diskRadiusPx.getModel().getValue()).intValue();
     model.borderWeightFactor =
         ((Double)_borderWeightFactor.getModel().getValue()).floatValue();
     model.borderWeightSigmaPx =
