@@ -55,6 +55,7 @@ import javax.swing.JTextField;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.UIManager;
 import javax.swing.Icon;
 import javax.swing.JFileChooser;
@@ -116,6 +117,13 @@ public class ModelDefinitionEditor implements PlugIn {
               (double)Prefs.get("unet.newModel.elSizeZ", 1.0),
               0.0000001, 1000000.0, 0.01))
   };
+  private final JComboBox<String> _normalizationMode = new JComboBox<String>(
+      new String[] {
+          "(0) -- No normalization",
+          "(1) -- [min, max] -> [0, 1] (per channel)",
+          "(2) -- [mean, stddev] -> [0, 1] (per channel)",
+          "(3) -- maximum vector norm -> 1 (across channels)",
+      });
   private final JSpinner _diskRadiusPx = new JSpinner(
       new SpinnerNumberModel(
           (int)Prefs.get("unet.newModel.diskRadiusPx", 2), 0, 100, 1));
@@ -373,6 +381,12 @@ public class ModelDefinitionEditor implements PlugIn {
         "Resize input images to given pixel height");
     _elementSizeUm[2].setToolTipText(
         "Resize input images to given voxel depth");
+    JLabel normalizationModeLabel = new JLabel("Normalization mode:");
+    _normalizationMode.setToolTipText(
+        "Image intensities are shifted and rescaled according to the " +
+        "selected normalization mode.");
+    _normalizationMode.setSelectedIndex(
+        (int)Prefs.get("unet.newModel.normalizationMode", 1));
     JLabel diskRadiusPxLabel = new JLabel("Detection disk radius [px]:");
     _diskRadiusPx.setToolTipText("Radius of detection disks in pixels.");
     JLabel borderWeightFactorLabel = new JLabel("Ridge weight:");
@@ -411,6 +425,7 @@ public class ModelDefinitionEditor implements PlugIn {
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.TRAILING)
             .addComponent(elSizeLabel)
+            .addComponent(normalizationModeLabel)
             .addComponent(diskRadiusPxLabel)
             .addComponent(borderWeightFactorLabel)
             .addComponent(borderWeightSigmaPxLabel)
@@ -427,6 +442,7 @@ public class ModelDefinitionEditor implements PlugIn {
                 .addComponent(_elementSizeUm[1])
                 .addComponent(elSizeDimLabels[2])
                 .addComponent(_elementSizeUm[2]))
+            .addComponent(_normalizationMode)
             .addComponent(_diskRadiusPx)
             .addComponent(_borderWeightFactor)
             .addComponent(_borderWeightSigmaPx)
@@ -441,6 +457,11 @@ public class ModelDefinitionEditor implements PlugIn {
             .addComponent(elSizeDimLabels[0]).addComponent(_elementSizeUm[0])
             .addComponent(elSizeDimLabels[1]).addComponent(_elementSizeUm[1])
             .addComponent(elSizeDimLabels[2]).addComponent(_elementSizeUm[2]))
+        .addGroup(
+            preprocessingPanelLayout.createParallelGroup(
+                GroupLayout.Alignment.BASELINE)
+            .addComponent(normalizationModeLabel)
+            .addComponent(_normalizationMode))
         .addGroup(
             preprocessingPanelLayout.createParallelGroup(
                 GroupLayout.Alignment.BASELINE)
@@ -900,6 +921,7 @@ public class ModelDefinitionEditor implements PlugIn {
       }
     }
     model.setElementSizeUm(elSize);
+    model.normalizationType = _normalizationMode.getSelectedIndex();
     model.diskRadiusPx =
         ((Integer)_diskRadiusPx.getModel().getValue()).intValue();
     model.borderWeightFactor =
@@ -1249,6 +1271,8 @@ public class ModelDefinitionEditor implements PlugIn {
               (Double)_elementSizeUm[1].getModel().getValue());
     Prefs.set("unet.newModel.elSizeZ",
               (Double)_elementSizeUm[2].getModel().getValue());
+    Prefs.set("unet.newModel.normalizationMode",
+              (int)_normalizationMode.getSelectedIndex());
     Prefs.set("unet.newModel.borderWeightFactor", model.borderWeightFactor);
     Prefs.set("unet.newModel.borderWeightSigmaPx", model.borderWeightSigmaPx);
     Prefs.set("unet.newModel.foregroundBackgroundRatio",
