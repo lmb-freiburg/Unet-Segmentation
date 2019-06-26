@@ -636,7 +636,7 @@ public class SegmentationJob extends CaffeJob implements PlugIn {
     try {
       progressMonitor().count("Segmentation", 0);
 
-      prepareParametersDialog();
+      if (isInteractive()) prepareParametersDialog();
       if (isInteractive() && !getParameters()) return;
 
       progressMonitor().push(
