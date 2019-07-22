@@ -525,7 +525,7 @@ public class HostConfigurationPanel extends JPanel {
     if (_sshSession != null) {
       res += ",hostname=" + hostname() + ",port=" + String.valueOf(port()) +
           ",username=" + username();
-      if (authRSAKey()) res += ",RSAKeyfile=" + rsaKeyFile();
+      if (authRSAKey()) res += ",RSAKeyfile=" + rsaKeyFile().replace("\\", "/");
     }
     return res;
   }
