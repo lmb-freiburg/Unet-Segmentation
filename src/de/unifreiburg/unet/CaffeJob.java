@@ -531,6 +531,7 @@ public abstract class CaffeJob extends Job {
       if (res.exitStatus != 0) {
         IJ.log("caffe_unet not found");
         if (res.cause != null) IJ.log("Error message: " + res.cause);
+        if (!res.cerr.isEmpty()) IJ.log(res.cerr);
         caffeUnetBinaryPath = JOptionPane.showInputDialog(
             WindowManager.getActiveWindow(), "caffe_unet was not found.\n" +
             "Please specify your caffe_unet binary\n", caffeUnetBinaryPath);
