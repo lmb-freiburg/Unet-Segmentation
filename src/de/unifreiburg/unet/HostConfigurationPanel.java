@@ -63,6 +63,8 @@ public class HostConfigurationPanel extends JPanel {
   private JPasswordField _passwordField = null;
   private JTextField _rsaKeyTextField = new JTextField(
       Prefs.get("unet.rsaKeyFilename", ""));
+  private JTextArea _startupCommandsTextArea = new JTextArea(
+      Prefs.get("unet.startupCommands", ""));
   private Session _sshSession = null;
 
   private JButton _weightsFileChooseButton = null;
@@ -155,6 +157,16 @@ public class HostConfigurationPanel extends JPanel {
         .addComponent(_rsaKeyTextField).addComponent(rsaKeyChooseButton));
     authParametersPanel.add(rsaKeyPanel, "RSA key:");
 
+    final JLabel startupCommandsLabel = new JLabel("Startup commands:");
+    _startupCommandsTextArea.setToolTipText(
+      "Put commands here that should be executed on the remote host " +
+      "before the actual caffe call.\n" +
+      "Each line will be interpreted as one command and sent verbatim " +
+      "to the remote host via ssh.\n" +
+      "Use this to setup required paths or activate virtual " +
+      "environments if necessary.\n" +
+      "If you don't know what this is all about, leave the field empty!");
+    
     GroupLayout layout = new GroupLayout(this);
     setLayout(layout);
     layout.setAutoCreateGaps(true);
@@ -185,7 +197,11 @@ public class HostConfigurationPanel extends JPanel {
             .addComponent(
                 authParametersPanel, GroupLayout.PREFERRED_SIZE,
                 GroupLayout.DEFAULT_SIZE,
-                Short.MAX_VALUE)));
+                Short.MAX_VALUE))
+        .addGroup(
+            layout.createSequentialGroup()
+            .addComponent(startupCommandsLabel)
+            .addComponent(_startupCommandsTextArea)));
     layout.setVerticalGroup(
         layout.createSequentialGroup()
         .addGroup(
@@ -207,7 +223,11 @@ public class HostConfigurationPanel extends JPanel {
             .addComponent(userLabel)
             .addComponent(_userTextField)
             .addComponent(_authMethodComboBox)
-            .addComponent(authParametersPanel)));
+            .addComponent(authParametersPanel))
+        .addGroup(
+            layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+            .addComponent(startupCommandsLabel)
+            .addComponent(_startupCommandsTextArea)));
 
     _useRemoteHostCheckBox.addChangeListener(new ChangeListener() {
           @Override
@@ -331,6 +351,10 @@ public class HostConfigurationPanel extends JPanel {
   public void setRsaKeyFile(String rsaKeyFile) {
     if (rsaKeyFile().equals(rsaKeyFile)) return;
     _rsaKeyTextField.setText(rsaKeyFile);
+  }
+
+  public String getStartupCommands() {
+    return _startupCommandsTextArea.getText();
   }
 
   public JButton weightsFileChooseButton() {
@@ -463,6 +487,22 @@ public class HostConfigurationPanel extends JPanel {
           Prefs.set("unet.rsaKeyFilename", rsaKeyFile());
     }
     else Prefs.set("unet.useRemoteHost", false);
+
+    // Execute startup commands
+    String[] startupCommands = getStartupCommands().split("\n");
+    for (String cmd : startupCommands) {
+      try {
+        ProcessResult res = Tools.execute(cmd, _sshSession, null);
+        if (res.exitStatus != 0) {
+          IJ.log("Error in startup commands: Command " + cmd + " returned exit code " + res.exitStatus);
+          IJ.log(res.cerr);
+        }
+      }
+      catch (IOException e) {
+          IJ.log("Error in startup commands: " + e);
+      }
+    }
+    Prefs.set("unet.startupCommands", getStartupCommands());
 
     return _sshSession;
   }
