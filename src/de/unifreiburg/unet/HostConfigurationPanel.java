@@ -357,6 +357,10 @@ public class HostConfigurationPanel extends JPanel {
     return _startupCommandsTextArea.getText();
   }
 
+  public void setStartupCommands(String startupCommands) {
+    _startupCommandsTextArea.setText(startupCommands);
+  }
+
   public JButton weightsFileChooseButton() {
     if (_weightsFileChooseButton == null) {
       if (UIManager.get("FileView.directoryIcon") instanceof Icon)
@@ -491,6 +495,7 @@ public class HostConfigurationPanel extends JPanel {
     // Execute startup commands
     String[] startupCommands = getStartupCommands().split("\n");
     for (String cmd : startupCommands) {
+      if (cmd == null || cmd.isEmpty()) continue;
       try {
         ProcessResult res = Tools.execute(cmd, _sshSession, null);
         if (res.exitStatus != 0) {
@@ -527,6 +532,10 @@ public class HostConfigurationPanel extends JPanel {
         setRsaKeyFile(parameters.get("RSAKeyfile"));
       }
       else setAuthMethod("Password:");
+      setStartupCommands(
+        parameters.containsKey("startupCommands") ?
+        parameters.get("startupCommands").replace("<LF>", "\n") :
+        Prefs.get("unet.startupCommands", ""));
     }
     return sshSession(null);
   }
@@ -546,6 +555,8 @@ public class HostConfigurationPanel extends JPanel {
           snapshotReader.string().getAttr("/HostConfiguration", "authMethod"));
       if (authRSAKey()) setRsaKeyFile(
           snapshotReader.string().getAttr("/HostConfiguration", "rsaKeyFile"));
+      setStartupCommands(
+        snapshotReader.string().getAttr("/Hostconfiguration", "startupCommands"));
     }
     return sshSession(null);
   }
@@ -566,6 +577,8 @@ public class HostConfigurationPanel extends JPanel {
       res += ",hostname=" + hostname() + ",port=" + String.valueOf(port()) +
           ",username=" + username();
       if (authRSAKey()) res += ",RSAKeyfile=" + rsaKeyFile().replace("\\", "/");
+      if (getStartupCommands() != null && !getStartupCommands().isEmpty())
+        res += ",startupCommands=" + getStartupCommands().replace("\n", "<LF>");
     }
     return res;
   }
@@ -584,6 +597,8 @@ public class HostConfigurationPanel extends JPanel {
         "/HostConfiguration", "authMethod", authMethod());
     if (authRSAKey()) writer.string().setAttr(
         "/HostConfiguration", "rsaKeyFile", rsaKeyFile());
+    writer.string().setAttr(
+        "/HostConfiguration", "startupCommands", getStartupCommands());
   }
 
 }
