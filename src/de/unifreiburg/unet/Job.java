@@ -66,7 +66,7 @@ import java.util.Vector;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.JSchException;
 
-import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
+import hdf.hdf5lib.exceptions.HDF5Exception;
 
 public abstract class Job extends Thread {
 

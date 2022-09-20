@@ -71,7 +71,7 @@ import com.jcraft.jsch.Session;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.SftpException;
 
-import ncsa.hdf.hdf5lib.exceptions.HDF5Exception;
+import hdf.hdf5lib.exceptions.HDF5Exception;
 
 public abstract class CaffeJob extends Job {
 
