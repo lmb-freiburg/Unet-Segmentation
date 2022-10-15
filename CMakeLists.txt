@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 3.19)
 
 find_package(Java REQUIRED)
 include(UseJava)
@@ -17,7 +17,7 @@ endif (WIN32)
 get_filename_component(FIJI_DIR ${FIJI_BIN} DIRECTORY)
 
 # Get current version of ij.jar
-execute_process(COMMAND find ${FIJI_DIR}/jars -name "ij-*.jar" OUTPUT_VARIABLE IJ_JAR_ABSPATH)
+file(GLOB IJ_JAR_ABSPATH ${FIJI_DIR}/jars/ij-*.jar)
 get_filename_component(IJ_JAR_FILENAME ${IJ_JAR_ABSPATH} NAME)
 string(REGEX REPLACE "[.]jar.*" "" IJ_JAR_BASENAME ${IJ_JAR_FILENAME})
 if ("${IJ_JAR_BASENAME}" STREQUAL "")
@@ -25,25 +25,29 @@ if ("${IJ_JAR_BASENAME}" STREQUAL "")
 endif ("${IJ_JAR_BASENAME}" STREQUAL "")
 find_jar(IJ_JAR "${IJ_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the ImageJ library ij-<version>.jar")
 
+# Get current version of cisd base.jar
+file(GLOB BASE_JAR_ABSPATH ${FIJI_DIR}/jars/base-*.jar)
+get_filename_component(BASE_JAR_FILENAME ${BASE_JAR_ABSPATH} NAME)
+string(REGEX REPLACE "[.]jar.*" "" BASE_JAR_BASENAME ${BASE_JAR_FILENAME})
+find_jar(BASE_JAR "${BASE_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the Java cisd base library base-<version>.jar")
+
 # Get current version of jhdf5.jar
-execute_process(COMMAND find ${FIJI_DIR}/jars -name "jhdf5-*.jar" OUTPUT_VARIABLE JHDF5_JAR_ABSPATH)
+file(GLOB JHDF5_JAR_ABSPATH ${FIJI_DIR}/jars/jhdf5-*.jar)
 get_filename_component(JHDF5_JAR_FILENAME ${JHDF5_JAR_ABSPATH} NAME)
 string(REGEX REPLACE "[.]jar.*" "" JHDF5_JAR_BASENAME ${JHDF5_JAR_FILENAME})
 find_jar(JHDF5_JAR "${JHDF5_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the Java Hdf5 library jhdf5-<version>.jar")
 
 # Get current version of jsch5.jar
-execute_process(COMMAND find ${FIJI_DIR}/jars -name "jsch-*.jar" OUTPUT_VARIABLE JSCH_JAR_ABSPATH)
+file(GLOB JSCH_JAR_ABSPATH ${FIJI_DIR}/jars/jsch-*.jar)
 get_filename_component(JSCH_JAR_FILENAME ${JSCH_JAR_ABSPATH} NAME)
 string(REGEX REPLACE "[.]jar.*" "" JSCH_JAR_BASENAME ${JSCH_JAR_FILENAME})
 find_jar(JSCH_JAR "${JSCH_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the Java Secure Shell library jsch-<version>.jar")
 
 # Get current version of protobuf-java.jar
-execute_process(COMMAND find ${FIJI_DIR}/jars -name "protobuf-java-*.jar" OUTPUT_VARIABLE PROTOBUF_JAVA_JAR_ABSPATH)
+file(GLOB PROTOBUF_JAVA_JAR_ABSPATH ${FIJI_DIR}/jars/protobuf-java-[0-9]*.jar)
 get_filename_component(PROTOBUF_JAVA_JAR_FILENAME ${PROTOBUF_JAVA_JAR_ABSPATH} NAME)
 string(REGEX REPLACE "[.]jar.*" "" PROTOBUF_JAVA_JAR_BASENAME ${PROTOBUF_JAVA_JAR_FILENAME})
 find_jar(PROTOBUF_JAVA_JAR "${PROTOBUF_JAVA_JAR_BASENAME}" PATHS ${FIJI_DIR}/jars DOC "Path to the google protobuf library protobuf_java-<version>.jar")
-
-set(CMAKE_JAVA_INCLUDE_PATH ${IJ_JAR}:${JHDF5_JAR}:${JSCH_JAR}:${PROTOBUF_JAVA_JAR})
 
 set(Unet_Segmentation_SRCS
   src/de/unifreiburg/unet/JobManager.java
@@ -105,17 +109,20 @@ set(Unet_Segmentation_SRCS
   caffe/Caffe.java)
 
 add_jar(Unet_Segmentation
-  ${Unet_Segmentation_SRCS}
-  caffe/caffe.proto COPYING.txt plugins.config
-  test/TestNetworkAnalyzer.java
-  resources/README.html)
+  SOURCES ${Unet_Segmentation_SRCS}
+          caffe/caffe.proto COPYING.txt plugins.config
+          test/TestNetworkAnalyzer.java
+          resources/README.html
+  INCLUDE_JARS ${IJ_JAR} ${BASE_JAR} ${JHDF5_JAR} ${JSCH_JAR} ${PROTOBUF_JAVA_JAR}
+  VERSION 1.1.0
+)
 
 get_target_property(UNET_SEGMENTATION_JAR_ABSPATH Unet_Segmentation JAR_FILE)
 
 add_custom_command(TARGET Unet_Segmentation
   POST_BUILD
   # workaround to add sources
-  COMMAND jar uMf ${UNET_SEGMENTATION_JAR_ABSPATH} -C ${PROJECT_SOURCE_DIR} src
+  COMMAND ${Java_JAR_EXECUTABLE} uMf ${UNET_SEGMENTATION_JAR_ABSPATH} -C ${PROJECT_SOURCE_DIR} src
   )
 
 add_custom_command(OUTPUT ${PROJECT_SOURCE_DIR}/caffe/Caffe.java
